@@ -93,3 +93,4 @@ OSCheckStopwatch = 0x80092a34;
 OSStopStopwatch = 0x80092968;
 OSResetStopwatch = 0x80092aa4;
 OSGetTick = 0x80093e10;
+MarDirector_updateGameMode = 0x800eaf70;

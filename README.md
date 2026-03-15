@@ -5,3 +5,5 @@
 - [ ] reimplement DOLInsert.exe
     - reverse eng. what that thing does
 - [ ] convenient vscode task for relaunching dolphin
+- [ ] get C++ working
+- [ ] invalid read from bla bla

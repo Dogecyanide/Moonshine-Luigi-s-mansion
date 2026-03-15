@@ -134,7 +134,7 @@ for mod_name in target_mods:
         # TODO: windoze
         action=[
             Copy("temp.bin", "${SOURCES[1]}"),
-            "util\\DOLInsert.exe temp.bin -m ${SOURCES[0]} -dol ${SOURCES[2]} -o $TARGET -c OnUpdate:0x800f9b64:3 -c OnSetup:0x800ece3c:0 -c OnDraw2D:0x80206734:0 -c OnWaterHitsGround:0x8015ebf8:0 -c OnObjectTouchMario:0x801886d8:3 -c OnAllNPCsUpdate:0x80251d50:0 -c OnSmallEnemyHitMario:0x8027f64c:3 -r OnEMarioControl:0x80253ac0 -r IsMario:0x8012cfe0",
+            "util\\DOLInsert.exe temp.bin -m ${SOURCES[0]} -dol ${SOURCES[2]} -o $TARGET -c OnUpdate:0x800f9b64:3 -c OnSetup:0x800ece3c:0 -c OnDraw2D:0x80206734:0 -c OnWaterHitsGround:0x8015ebf8:0 -c OnObjectTouchMario:0x801886d8:3 -c OnAllNPCsUpdate:0x80251d50:0 -c OnSmallEnemyHitMario:0x8027f64c:3 -c OnUpdateGameMode:0x800ec6c4:0 -r OnEMarioControl:0x80253ac0 -r IsMario:0x8012cfe0",
             Delete("temp.bin")
         ]
     )

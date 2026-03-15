@@ -934,6 +934,7 @@ void JUTRect_Set(JUTRect* rect, int x, int y, int w, int h);
 void setTalkBox(Talk2D* tManager, char* textBuffer, JMSMesgEntry* entry);
 
 void MarDirector_SetupObjects(MarDirector* director);
+uint8_t MarDirector_updateGameMode(MarDirector *director);
 void Drama_PrepareUpdate(HitActor* this, int a1, void* drama, void* graphics, int obj);
 
 /*
@@ -989,7 +990,7 @@ static void* gpSystemFont = (void*)0x8040e188;
 static void* gpRomFont = (void*)0x8040e18c;
 
 // SMS
-static void* gpApplication = (void*)0x803e9700;
+static void* gpApplication = (void*)0x803e6000; // JP
 static Talk2D** TalkManager = (Talk2D**)0x8040ddd8;
 static void** gpMarioParticleManager = (void**)0x8040e150;
 static void** gpModelWaterManager = (void**)0x8040e138;
