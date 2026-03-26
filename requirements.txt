@@ -1,0 +1,4 @@
+SCons
+git+https://github.com/JoshuaMKW/dolreader.git
+git+https://github.com/JoshuaMKW/geckocode-libs.git
+pyelftools
