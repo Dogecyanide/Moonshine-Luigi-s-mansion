@@ -191,3 +191,7 @@ _GLIBCXX_NODISCARD inline void *operator new[](size_t blocksize, void *block) _G
 };  // Placement new
 void operator delete(void *block) _GLIBCXX_NOEXCEPT;
 void operator delete[](void *block) _GLIBCXX_NOEXCEPT;
+
+extern JKRHeap *JKRHeap_sSystemHeap;
+extern JKRHeap *JKRHeap_sCurrentHeap;
+extern JKRHeap *JKRHeap_sRootHeap;

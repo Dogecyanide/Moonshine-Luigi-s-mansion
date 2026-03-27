@@ -50,22 +50,30 @@ def to_out_paths(nodes):
 # DOL patching #
 ################
 
-from util.dol_c_kit import Project, Compiler, Assembler, Linker
+from util.dol_c_kit import Project, LDPlusPlus, ABI
 from susamune.patches import *
 
 def patch_dol(env, target, source):
     target = list(map(str, target))
     source = list(map(str, source))
     out_dol_path = target[0]
-    in_dol_path,mod_obj_path = source
+    in_dol_path = source[0]
+    mod_obj_path = source[1]
 
     p = Project()
     p.verbose = True
     p.obj_dir = BUILD_DIR
     p.devkitppc_path = env[DEVKITPPC_PATH] + "/bin/"
     p.linker_flags = env['LINKFLAGS']
-    
+
+    ldpp = LDPlusPlus(ABI.Itanium)
+    for (sym,val) in cpp_syms:
+        ldpp.assign(sym, val)
+    cpp_ld = to_out_path("cpp.ld")
+    ldpp.save(cpp_ld)
+
     p.add_linker_script_file(f"susamune/maps/{env[VERS]}.ld")
+    p.add_linker_script_file(cpp_ld)
     p.add_obj_file("susamune.o") # TODO: hardcoded
 
     for patch in patches:
@@ -159,7 +167,7 @@ def tg_out_dol(in_iso, out_iso):
     out_dol_path = out_iso_path + "/root/sys/main.dol"    
     patched_dol = env.Command(
         target=out_dol_path,
-        source=[in_dol_path, mod_obj],
+        source=[in_dol_path, mod_obj, 'susamune/patches.py'],
         action=patch_dol
     )
     # TODO: maybe the dol should be installed somewhere?

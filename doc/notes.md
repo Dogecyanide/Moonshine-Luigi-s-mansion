@@ -25,6 +25,8 @@ pacman -S \
     mingw-w64-ucrt-x86_64-libavif
 
 
+nevermind, i just told pip not to use any of these dependencies (e.g. "-C zlib=disable")
+
 ## 2026-03-25
  
 dependencies would be just:
