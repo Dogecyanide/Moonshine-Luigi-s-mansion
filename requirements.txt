@@ -2,3 +2,6 @@ SCons
 git+https://github.com/JoshuaMKW/dolreader.git
 git+https://github.com/JoshuaMKW/geckocode-libs.git
 pyelftools
+chardet
+sortedcontainers
+git+https://github.com/JoshuaMKW/pyisotools.git

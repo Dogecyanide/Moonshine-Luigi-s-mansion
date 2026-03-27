@@ -4,3 +4,6 @@ build/
 __pycache__/
 .sconsign.dblite
 *.dol
+*.iso
+
+**.o

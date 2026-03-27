@@ -1,0 +1,49 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Rebuild",
+            "type": "shell",
+            "command": "${workspaceFolder}/venv/bin/scons.exe -Q pre_iso",
+            "problemMatcher": []
+        },
+        {
+            "label": "Launch in Dolphin",
+            "type": "shell",
+            "command": "dolphin.exe -b -e ${workspaceFolder}/build/out_iso/root/sys/main.dol",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+        },
+        {
+            "label": "Launch in Dolphin (with debugger)",
+            "type": "shell",
+            "command": "dolphin.exe -l -d -e ${workspaceFolder}/build/out_iso/root/sys/main.dol",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+        },
+        {
+            "label": "Rebuild & Launch in Dolphin",
+            "type": "shell",
+            "command": "dolphin.exe -b -e ${workspaceFolder}/build/out_iso/root/sys/main.dol",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "dependsOn": ["Rebuild"]
+        },
+        {
+            "label": "Rebuild & Launch in Dolphin (with debugger)",
+            "type": "shell",
+            "command": "dolphin.exe -l -d -e ${workspaceFolder}/build/out_iso/root/sys/main.dol",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "dependsOn": ["Rebuild"]
+        }
+    ]
+}

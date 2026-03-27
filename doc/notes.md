@@ -1,3 +1,30 @@
+## 2026-03-26
+
+to handle the iso stuff, can put build/iso - extracted ISO that does not change
+then build/overlay - all the stuff we output, mirroring the directory structure of the ISO
+the target that builds the ISO either creates another directory or applies these patches on the fly
+actually everything should probably just udpate a build/out_iso directory that way we're not constantly copying the entire iso
+
+
+pacman -S \
+    mingw-w64-x86_64-gcc \
+    mingw-w64-x86_64-python \
+    mingw-w64-x86_64-python-pip \
+    mingw-w64-x86_64-python-setuptools
+
+pacman -S \
+    mingw-w64-ucrt-x86_64-libjpeg-turbo \
+    mingw-w64-ucrt-x86_64-zlib \
+    mingw-w64-ucrt-x86_64-libtiff \
+    mingw-w64-ucrt-x86_64-freetype \
+    mingw-w64-ucrt-x86_64-lcms2 \
+    mingw-w64-ucrt-x86_64-libwebp \
+    mingw-w64-ucrt-x86_64-openjpeg2 \
+    mingw-w64-ucrt-x86_64-libimagequant \
+    mingw-w64-ucrt-x86_64-libraqm \
+    mingw-w64-ucrt-x86_64-libavif
+
+
 ## 2026-03-25
  
 dependencies would be just:
