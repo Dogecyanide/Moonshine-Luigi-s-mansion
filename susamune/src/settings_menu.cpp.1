@@ -1,0 +1,29 @@
+#include "susamune/menu.hpp"
+#include "susamune/widget.hpp"
+
+#define ARRAY_SIZE(x) (sizeof(x)/sizeof(*x));
+
+const char* stageNames[] = {
+    "airstrip",
+    "plaza",
+    "bianco"
+};
+
+ScrollListWidget *miscSettingsPage;
+ScrollListWidget *miscSettings2Page;
+const MenuWidget* settingsPages[] = {
+    miscSettingsPage,
+    miscSettings2Page
+};
+const size_t settingsPagesLen = ARRAY_SIZE(settingsPages);
+
+ScrollListWidget *settingsPagesScroll;
+
+ScrollListWidget *stageSelectPage;
+
+
+void init_menu() {
+    MenuWidget** stageSelectButtons = (MenuWidget**)malloc(sizeof(MenuWidget*) * 3);
+
+}
+

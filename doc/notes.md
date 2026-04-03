@@ -1,3 +1,58 @@
+## 2026-04-03
+
+- Put everything all in one class in menu.cpp, since that seems to be the standard in the rest of the codebase
+- Allocate retained state like all the J2DTextboxes and panes and etc. in the init() function
+     - can use a mix - for example dont need to allocate (# num of stages) * (# num of episodes) number of textboxes for the episodes. Can change them and hide them on the fly.
+     - Descriptors for this data can be stored outside the class in global, const memory
+- external structs should only contain info (e.g. j2dtextbox) and not state
+
+## 2026-04-01
+
+do we really need to make our own gui stuff?
+can we use the TExPane stuff without blo menu?
+decomp has code for the save menu & etc. :
+
+https://github.com/doldecomp/sms/blob/main/src/GC2D/CardSave.cpp#L121
+
+nintendont can emulate memory cards
+tell people to use slot B and use sd card?
+
+## 2026-03-31
+
+ideally, shouldn't bother supporting multiple regions. just base everything on jp 1.0. it will run on all console regions when using nintendont/swiss.
+can also bypass video incompatibility so they work ootb.
+
+## 2026-03-29
+
+
+https://github.com/lark-parser/lark
+
+Use to parse the grammar in the ABI spec
+
+            if ((mController->mButtons.mRapidInput &
+                 (TMarioGamePad::DPAD_DOWN | TMarioGamePad::MAINSTICK_DOWN))) {
+                for (int i = mSettingID + 1; i < mCurrentGroupInfo->mSettingInfos.size(); ++i) {
+                    auto *settingInfo = getSettingInfo(i);
+                    if (settingInfo->mSettingData->isUserEditable()) {
+                        mCurrentSettingInfo = settingInfo;
+                        mSettingID          = i;
+                        break;
+                    }
+                }
+            }
+            if ((mController->mButtons.mRapidInput &
+                 (TMarioGamePad::DPAD_UP | TMarioGamePad::MAINSTICK_UP))) {
+                for (int i = mSettingID - 1; i >= 0; --i) {
+                    auto *settingInfo = getSettingInfo(i);
+                    if (settingInfo->mSettingData->isUserEditable()) {
+                        mCurrentSettingInfo = settingInfo;
+                        mSettingID          = i;
+                        break;
+                    }
+                }
+            }
+
+
 ## 2026-03-26
 
 to handle the iso stuff, can put build/iso - extracted ISO that does not change

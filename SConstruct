@@ -66,14 +66,7 @@ def patch_dol(env, target, source):
     p.devkitppc_path = env[DEVKITPPC_PATH] + "/bin/"
     p.linker_flags = env['LINKFLAGS']
 
-    ldpp = LDPlusPlus(ABI.Itanium)
-    for (sym,val) in cpp_syms:
-        ldpp.assign(sym, val)
-    cpp_ld = to_out_path("cpp.ld")
-    ldpp.save(cpp_ld)
-
     p.add_linker_script_file(f"susamune/maps/{env[VERS]}.ld")
-    p.add_linker_script_file(cpp_ld)
     p.add_obj_file("susamune.o") # TODO: hardcoded
 
     for patch in patches:

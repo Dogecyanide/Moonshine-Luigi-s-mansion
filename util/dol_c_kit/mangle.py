@@ -1062,6 +1062,18 @@ class OperatorFunctionArgs(list):
     def macintosh_mangle(self):
         return "{}".format("".join(iter.macintosh_mangle() for iter in self))
 
+class ExternC:
+    name: str = ""
+
+    def __init__(self,name):
+        self.name = name
+
+    def itanium_mangle(self, _):
+        return self.name
+    
+    def macintosh_mangle(self, _):
+        return self.name
+
 class Expression(list):
     def __init__(self, mutstring = None):
         while mutstring:
@@ -1336,6 +1348,9 @@ class Signature(Expression):
                 name = "NK" + self[1].itanium_mangle_ns(compressibles) + "E"   # This will always be a namespace, unless it is invalid C++.
                 args = self[2].itanium_mangle(compressibles)
                 return "_Z" + name + args
+            # extern "C" (non mangled) 
+            if type(self[2]) == ExternC:
+                return self[2].itanium_mangle(compressibles)
         raise MangleError("Too much stuff!")
     
     def macintosh_mangle(self):
@@ -1528,6 +1543,14 @@ class LDPlusPlus(object):
             self.buffer += "{} = {};\n".format(itanium_mangle(prototype), hex(value))
         elif self.abi == ABI.Macintosh:
             self.buffer += "{} = {};\n".format(macintosh_mangle(prototype), hex(value))
+        else:
+            raise MangleError("Unsupported ABI!")
+
+    def assign_sig(self, sig: Signature, value):
+        if self.abi == ABI.Itanium:
+            self.buffer += "{} = {};\n".format(sig.itanium_mangle(), hex(value))
+        elif self.abi == ABI.Macintosh:
+            self.buffer += "{} = {};\n".format(sig.macintosh_mangle(), hex(value))
         else:
             raise MangleError("Unsupported ABI!")
     

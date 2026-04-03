@@ -26,7 +26,13 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 
 // TODO: this isnt really the init hook we want.. this runs every time a stage loads
 extern "C" void onSetup(TMarDirector* director) {
+    static bool inited = false;
     director->setupObjects();
+    
+    // TODO: is this sufficient to avoid re-calling?
+    // seems this function will run once at the main menu
+    // but we'd also want to destroy stuff at reset
+    if (inited) return; else inited = true;
 
     J2DTextBox* textbox = (J2DTextBox*)g_textbox; 
     new (textbox) J2DTextBox(gpSystemFont->mFont, "test1");

@@ -26,6 +26,26 @@
     - dolphin and nintendont both support normal keyboards as emulation for the ASCII contoller.
     - would be a cute way for people to call each other slurs in game.
 
+## super practice/runs mod
+
+- File A: Runs mode
+- File B: Practice mode
+- File C: online (coming soon) 
+
+Runs mode: 
+There are a couple settings related to the category of runs: (TBD how these will be saved, if it's practical)
+- IGT end/display condition.
+    - This also doubles as the autosplitter end condition, when it is enabled.
+    - autosplitter just sends pings when shines are collected, and when an end condition is reached.
+- Start file
+    - Hacked file, peach file, full, etc.
+
+The game ships with presets for each major category: any%, 120, 20 shine, bingo (?)
+You can configure the default category on startup, otherwise it can just be an option at the screen where you start the run that is remembered.
+
+In runs mode, every practice setting is disabled. Only the timer runs, and it is not shown until the very end.
+
+
 ## ranked thing 
 
 ```
