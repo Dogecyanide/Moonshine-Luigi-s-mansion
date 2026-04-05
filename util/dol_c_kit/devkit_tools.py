@@ -299,29 +299,32 @@ SupportedGeckoCodetypes = [
 ]
 
 class Compiler(Enum):
-    DevkitPPC = 0
+    KuriboClang = 0
     CodeWarrior = 1
 class Assembler(Enum):
-    DevkitPPC = 0
+    KuriboClang = 0
     CodeWarrior = 1
 class Linker(Enum):
-    DevkitPPC = 0
+    KuriboClang = 0
 
 class Project(object):
-    def __init__(self, base_addr=None, verbose=False, compiler=Compiler.DevkitPPC, assembler=Assembler.DevkitPPC, linker=Linker.DevkitPPC):
+    def __init__(self, base_addr=None, verbose=False, compiler=Compiler.KuriboClang, assembler=Assembler.KuriboClang, linker=Linker.KuriboClang, kuribo_compiler_home=None):
         self.base_addr = base_addr
         self.compiler = compiler
         self.assembler = assembler
         self.linker = linker
         self.sda_base = None
         self.sda2_base = None
+        self.kuribo_compiler_home = kuribo_compiler_home
         
         # System member variables
         if platform.system() == "Windows":
-            self.devkitppc_path = "C:/devkitPro/devkitPPC/bin/"
+            # use binaries shipped in the repo
+            self.kuribo_compiler_home = os.path.join(os.path.realpath(__file__), "..", "kuribo_compiler")
             self.codewarrior_path = "C:/Program Files (x86)/Metrowerks/CodeWarrior/PowerPC_EABI_Tools/Command_Line_Tools/"
         else:
-            self.devkitppc_path = "/opt/devkitpro/devkitPPC/bin/"
+            if self.kuribo_compiler_home is None:
+                raise RuntimeError("On Linux, please initialize Project with the path to KURIBO_COMPILER_HOME!")
             self.codewarrior_path = "/"
         
         # Compiling member variables
@@ -334,9 +337,10 @@ class Project(object):
         self.obj_files = []
         self.linker_script_files = []
         
-        if self.compiler == Compiler.DevkitPPC:
-            self.c_flags = ["-w", "-std=c99", "-O1", "-fno-asynchronous-unwind-tables",]
-            self.cpp_flags = ["-w", "-std=c++98", "-O1", "-fno-asynchronous-unwind-tables", "-fno-rtti",]
+        if self.compiler == Compiler.KuriboClang:
+            # unsupported
+            self.c_flags = []
+            self.cpp_flags = []
         elif self.compiler == Compiler.CodeWarrior:
             self.c_flags = ["-proc", "gekko", "-Cpp_exceptions", "off", "-use_lmw_stmw", "on", "-fp", "fmadd", "-schedule", "on",]
             self.cpp_flags = ["-proc", "gekko", "-Cpp_exceptions", "off", "-use_lmw_stmw", "on", "-fp", "fmadd", "-schedule", "on",]
@@ -344,15 +348,16 @@ class Project(object):
             self.c_flags = []
             self.cpp_flags = []
         
-        if self.assembler == Assembler.DevkitPPC:
-            self.asm_flags = ["-w",]
-        elif self.assembler == Assembler.DevkitPPC:
+        if self.assembler == Assembler.KuriboClang:
+            # unsupported
+            self.asm_flags = []
+        elif self.assembler == Assembler.CodeWarrior:
             self.asm_flags = ["-proc", "gekko",]
         else:
             self.asm_flags = []
         
-        if self.linker == Linker.DevkitPPC:
-            self.linker_flags = []
+        if self.linker == Linker.KuriboClang:
+            self.linker_flags = ["-fuse-ld=lld"]
         else:
             self.linker_flags = []   # lmao
         
@@ -493,7 +498,7 @@ class Project(object):
             hook.apply_dol(dol)
             if self.verbose:
                 print(hook.dump_info())
-        
+
         if len(datablob) > 0:
             new_section: Section
             if len(dol.textSections) <= DolFile.MaxTextSections:
@@ -619,8 +624,8 @@ class Project(object):
     # Private stuff
     
     def __compile(self, infile, flags, use_global_flags):
-        if self.compiler == Compiler.DevkitPPC:
-            args = [self.devkitppc_path+"powerpc-eabi-gcc", "-c", self.src_dir+infile, "-o", self.obj_dir+infile+".o", "-I", self.src_dir]
+        if self.compiler == Compiler.KuriboClang:
+            raise NotImplementedError("Compiler not yet supported for KuriboClang!")
         if self.compiler == Compiler.CodeWarrior:
             args = [self.codewarrior_path+"mwcceppc", "-lang", "c", "-c", self.src_dir+infile, "-o", self.obj_dir+infile+".o", "-i", self.src_dir]
         
@@ -636,8 +641,8 @@ class Project(object):
         return True
     
     def __compileplusplus(self, infile, flags, use_global_flags):
-        if self.compiler == Compiler.DevkitPPC:
-            args = [self.devkitppc_path+"powerpc-eabi-g++", "-c", self.src_dir+infile, "-o", self.obj_dir+infile+".o", "-I", self.src_dir]
+        if self.compiler == Compiler.KuriboClang:
+            raise NotImplementedError("Compiler not yet supported for KuriboClang!")
         if self.compiler == Compiler.CodeWarrior:
             args = [self.codewarrior_path+"mwcceppc", "-lang", "c++", "-c", self.src_dir+infile, "-o", self.obj_dir+infile+".o", "-i", self.src_dir]
         print(self.devkitppc_path)
@@ -653,8 +658,8 @@ class Project(object):
         return True
     
     def __assemble(self, infile, flags, use_global_flags):
-        if self.assembler == Assembler.DevkitPPC:
-            args = [self.devkitppc_path+"powerpc-eabi-as", self.src_dir+infile, "-o", self.obj_dir+infile+".o", "-I", self.src_dir]
+        if self.assembler == Assembler.KuriboClang:
+            raise NotImplementedError("Assembler not yet supported for KuriboClang")
         elif self.assembler == Assembler.CodeWarrior:
             args = [self.codewarrior_path+"mwasmeppc", "-c", self.src_dir+infile, "-o", self.obj_dir+infile+".o", "-i", self.src_dir]
         
@@ -673,8 +678,8 @@ class Project(object):
         if self.base_addr == None:
             raise RuntimeError("Base address not set!  New code cannot be linked.")
         
-        if self.linker == Linker.DevkitPPC:
-            args = [self.devkitppc_path+"powerpc-eabi-ld", "-o", self.obj_dir+self.project_name+".o"]
+        if self.linker == Linker.KuriboClang:
+            args = [os.path.join(self.kuribo_compiler_home,"powerpc-eabi-ld"), "-o", self.obj_dir+self.project_name+".o"]
             # The symbol "." represents the location counter.  By setting it this way,
             # we don't need a linker script to set the base address of our new code.
             args.extend(("--defsym", ".="+hex(self.base_addr)))
@@ -700,9 +705,12 @@ class Project(object):
         with open(self.obj_dir+self.project_name+".o", 'rb') as f:
             elf = ELFFile(f)
             with open(self.obj_dir+self.project_name+".bin", "wb") as bin:
+                print(f"self.base_addr = {self.base_addr:08x}")
                 for iter in elf.iter_sections():
                     # Filter out sections without SHF_ALLOC attribute
                     if iter.header["sh_flags"] & 0x2:
+                        print(f"iter.header[\"sh_addr\"] = {iter.header['sh_addr']:08x}")
+                        print(f"delta = {iter.header['sh_addr'] - self.base_addr}")
                         bin.seek(iter.header["sh_addr"] - self.base_addr)
                         bin.write(iter.data())
             

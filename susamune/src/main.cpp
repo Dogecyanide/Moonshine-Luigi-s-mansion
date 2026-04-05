@@ -7,10 +7,11 @@
 #include "JSystem/J2D/J2DOrthoGraph.hxx"
 #include "Dolphin/THP.h"
 
+
 int g_load_menu = 0;
 
-u8* g_textbox[sizeof(J2DTextBox)];
-u8* g_textbox2[sizeof(J2DTextBox)];
+J2DTextBox *g_textbox = nullptr; 
+J2DTextBox *g_textbox2 = nullptr;
 bool g_textbox_init = false;
 
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
@@ -34,26 +35,21 @@ extern "C" void onSetup(TMarDirector* director) {
     // but we'd also want to destroy stuff at reset
     if (inited) return; else inited = true;
 
-    J2DTextBox* textbox = (J2DTextBox*)g_textbox; 
-    new (textbox) J2DTextBox(gpSystemFont->mFont, "test1");
-    textbox->mCharSizeX = 50;
-    textbox->mCharSizeY = 50;
-    textbox->mGradientBottom = {0,255,0,255};
-    textbox->mGradientTop = {0,0,255,255};
-    J2DTextBox* textbox2 = (J2DTextBox*)g_textbox2; 
-    new (textbox2) J2DTextBox(gpSystemFont->mFont, "test2");
-    textbox2->mCharSizeX = 40;
-    textbox2->mCharSizeY = 40;
-    textbox2->mGradientBottom = {255,0,0,255};
-    textbox2->mGradientTop = {255,255,0,255};
-    g_textbox_init = true;
+    g_textbox = new J2DTextBox(gpSystemFont->mFont, "test1");
+    g_textbox->mCharSizeX = 50;
+    g_textbox->mCharSizeY = 50;
+    g_textbox->mGradientBottom = {0,255,0,255};
+    g_textbox->mGradientTop = {0,0,255,255};
+
+    g_textbox2 = new J2DTextBox(gpSystemFont->mFont, "test2");
+    g_textbox2->mCharSizeX = 40;
+    g_textbox2->mCharSizeY = 40;
+    g_textbox2->mGradientBottom = {255,0,0,255};
+    g_textbox2->mGradientTop = {255,255,0,255};
 }
 
 extern "C" s32 onUpdate(JDrama::TDirector* director) {    
-    // TODO: should be just director->direct(); but it's not working...
-    void* vtable_ptr_addr = *((void**)director);
-    void** func_addr = (void**)((char*)vtable_ptr_addr + 100);
-    int state = ((u32 (*)(void*))(*func_addr))(director);
+    int state = director->direct();
 
     if (g_load_menu) {
         g_load_menu = 0;
@@ -78,11 +74,9 @@ extern "C" void afterDraw() {
 
         J2DFillBox(0, 100, 100, 100, {255, 0, 0, 255});
 
-        if (g_textbox_init) {
-            J2DTextBox* textbox = (J2DTextBox*)g_textbox; 
-            J2DTextBox* textbox2 = (J2DTextBox*)g_textbox2; 
-            textbox->draw(50, 100);
-            textbox2->draw(0, 400);
+        if (g_textbox && g_textbox2) {
+            g_textbox->draw(50, 100);
+            g_textbox2->draw(0, 400);
         }
     }
 }

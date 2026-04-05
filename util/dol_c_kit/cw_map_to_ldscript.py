@@ -261,34 +261,33 @@ def parse_map_file(filepath: str) -> list[tuple[str, int]]:
 from util.dol_c_kit.mangle import LDPlusPlus, ABI
 from util.dol_c_kit.mac_demangle import mac_demangle_signature, DemangleError
 
-def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <map_file> <ld_file>")
-        sys.exit(1)
+def main(map_path,ld_path):
     
-    map_path = sys.argv[1]
-    ld_path = sys.argv[2]
-
     symbols = parse_map_file(map_path)
 
-    ldpp = LDPlusPlus(ABI.Itanium)
-    for (sym, val) in symbols:
-        # virtual thunk || weird section artifact from parsing map file (? not sure) 
-        if sym.startswith("@") or sym.startswith("..."):
-            continue 
+    with open("syms.log", 'w') as log_f:
 
-        try:
-            sig = mac_demangle_signature(sym)
-            m = sig.itanium_mangle()
-            if "<" in m or "<" in m or "@" in m:
-                # TODO: somewhere in this pipeline, it is not handling symbols that were mangled 
-                # with "<", ">", and "@" in the output. They appear in the remangled symbol, and this will not parse correctly.
-                # For now, we just skip them. They won't appear in the linker script.
-                continue
-            ldpp.assign_sig(sig, val)
-        except DemangleError:
-            print("Could not demangle symbol: " + sym)
-    ldpp.save(ld_path)
+        ldpp = LDPlusPlus(ABI.Macintosh)
+        for (sym, val) in symbols:
+            # virtual thunk || weird section artifact from parsing map file (? not sure) 
+            if sym.startswith("@") or sym.startswith("..."):
+                continue 
+
+            try:
+                sig = mac_demangle_signature(sym)
+                m = sig.macintosh_mangle()
+                if "<" in m or "<" in m or "@" in m or m == "0":
+                    # TODO: somewhere in this pipeline, it is not handling symbols that were mangled 
+                    # with "<", ">", and "@" in the output. They appear in the remangled symbol, and this will not parse correctly.
+                    # For now, we just skip them. They won't appear in the linker script.
+                    # having issues with "0" also? idk
+                    raise DemangleError
+                ldpp.assign_sig(sig, val)
+                log_f.write(f"{val:08x} = {sym} | {m}  \n")
+            except DemangleError:
+                log_f.write(f"{val:08x} = {sym} | ???  \n")
+                print("Could not demangle symbol: " + sym)
+        ldpp.save(ld_path)
         
 #
 #    filepath = sys.argv[1]
@@ -309,5 +308,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <map_file> <ld_file>")
+        sys.exit(1)
+    
+    map_path = sys.argv[1]
+    ld_path = sys.argv[2]
+
+    main(map_path, ld_path)
 

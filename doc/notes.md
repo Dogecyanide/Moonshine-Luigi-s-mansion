@@ -1,3 +1,11 @@
+## 2026-04-05
+
+use clangd from kuribo clang, in case the system one doesnt integrate well? tbd
+
+Remangling works, but it does not address vtable layout. for this, you really need the compiler to use the same abi at codewarrior. this is what the kuribo clang does.
+all the other solutions like reimplementing the behavior of virtual functions by hand sound like way too much work, so I am going to use the kuribo LLVM instead.
+We can just put the binaries in util/ inside the repository itself and give credit.
+
 ## 2026-04-03
 
 - Put everything all in one class in menu.cpp, since that seems to be the standard in the rest of the codebase

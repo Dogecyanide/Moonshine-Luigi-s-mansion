@@ -5,5 +5,5 @@ __pycache__/
 .sconsign.dblite
 *.dol
 *.iso
-
 **.o
+syms.log

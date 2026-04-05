@@ -1071,7 +1071,7 @@ class ExternC:
     def itanium_mangle(self, _):
         return self.name
     
-    def macintosh_mangle(self, _):
+    def macintosh_mangle(self):
         return self.name
 
 class Expression(list):
@@ -1419,6 +1419,9 @@ class Signature(Expression):
                     name = "{}__{}C".format(self[1].rhand.macintosh_mangle(), self[1].lhand.macintosh_mangle())
                 args = "F{}".format(self[2].macintosh_mangle())
                 return name + args
+            # extern "C" (non mangled) 
+            if type(self[2]) == ExternC:
+                return self[2].macintosh_mangle()
         raise MangleError("Too much stuff!")
 
 

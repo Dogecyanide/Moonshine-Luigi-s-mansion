@@ -9,7 +9,8 @@
 
 ## running todo
 
-- [ ] handle calling C++ names in the map - maybe the dol_c_kit already does this with the name mangling?
-- [ ] complete the map file - have all the data 
+- [ ] Clean up kuribo_compiler files, remove unecessary ones. Add build scripts in the repo to be able to build those tools from scratch. Ideally for multiple platforms.
+- [ ] Clean up the map conversion script so that it only parses instead of attempting to remangle, because that is no longer necessary.
+- [ ] Clean up devkit_tools. Are we kuribo_compiler or devkitppc still? Should we add the compile part back or just strip it out since it's not necessary for the project? Should we remove codewarrior stuff?
 
 
