@@ -1,5 +1,11 @@
 ## 2026-04-05
 
+Changing heaps? What is the right way to initialize stuff and keep state between level changes?
+Probably there is a heap that does not get cleared? We can just store stuff there. Have to find the right place to hook it in. Most likely in the same place as the initial heap initialization where the guy inserted the kuribo hook.
+will resetting run that code again? probably not
+
+moveStage() - what does it do?
+
 use clangd from kuribo clang, in case the system one doesnt integrate well? tbd
 
 Remangling works, but it does not address vtable layout. for this, you really need the compiler to use the same abi at codewarrior. this is what the kuribo clang does.

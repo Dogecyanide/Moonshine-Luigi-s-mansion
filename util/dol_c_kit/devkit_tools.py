@@ -705,12 +705,9 @@ class Project(object):
         with open(self.obj_dir+self.project_name+".o", 'rb') as f:
             elf = ELFFile(f)
             with open(self.obj_dir+self.project_name+".bin", "wb") as bin:
-                print(f"self.base_addr = {self.base_addr:08x}")
                 for iter in elf.iter_sections():
                     # Filter out sections without SHF_ALLOC attribute
                     if iter.header["sh_flags"] & 0x2:
-                        print(f"iter.header[\"sh_addr\"] = {iter.header['sh_addr']:08x}")
-                        print(f"delta = {iter.header['sh_addr'] - self.base_addr}")
                         bin.seek(iter.header["sh_addr"] - self.base_addr)
                         bin.write(iter.data())
             
