@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Dolphin/OS.h"
 #include <Dolphin/types.h>
 
 #include <JSystem/JDrama/JDRActor.hxx>
@@ -86,7 +87,10 @@ public:
     TPerformList *mPerformListShineAnim;   // 0x0048
     u16 mGameState;                        // 0x004C
     u16 _02;                               // 0x004E
-    u32 _03[0x14 / 4];                     // 0x0050
+    u32 _03_1[0x8 / 4];                    // 0x0050
+    int unk58;                             // 0x0058
+    int unk5C;                             // 0x005C
+    u32 _03_2[0x4 / 4];                    // 0x0060
     u8 mCurState;                          // 0x0064
     u8 _04;                                // 0x0065
     u16 _05;                               // 0x0066
@@ -109,11 +113,13 @@ public:
     u32 *mGame6Data;                      // 0x00D4
     u32 *mAramArchive;                    // 0x00D8
     TShineFader *mShineFader;             // 0x00DC
-    u32 _13[0x44 / 4];                    // 0x00E0
+    u32 _13[0x8 / 4];                     // 0x00E0
+    OSStopwatch *mStopwatch;              // 0x00E8
+    int _14;                              // 0x0120
     u8 mNextStateA;                       // 0x0124 ?
-    u32 _14[0x12C / 4];                   // 0x0128
+    u32 _15[0x12C / 4];                   // 0x0128
     TDemoCannon *mCannonObj;              // 0x0254
-    u32 _15;                              // 0x0258
+    u32 _16;                              // 0x0258
     TShine *mCollectedShine;              // 0x025C
     u32 _260;
     u32 _264;

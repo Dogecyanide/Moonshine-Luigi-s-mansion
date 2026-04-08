@@ -118,7 +118,7 @@ void SettingsMenu::processInput(TMarioGamePad* controller) {
 
 void SettingsMenu::changeStageHook() {
     if (mChangeStageReady) {
-        gpApplication.mNextScene.mAreaID = mSelectedArea;
+        gpApplication.mNextScene.mAreaID = mSelectedArea + 0x2; // offset for normal stages
         gpApplication.mNextScene.mEpisodeID = mSelectedEpisode;
         gpApplication.mNextScene.mFlag = 0;
     }

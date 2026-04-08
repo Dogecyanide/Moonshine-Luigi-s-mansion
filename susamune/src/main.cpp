@@ -1,4 +1,5 @@
 #include "Dolphin/GX_types.h"
+#include "Dolphin/OS.h"
 #include "J2D/J2DTextBox.hxx"
 #include "JKernel/JKRHeap.hxx"
 #include "SMS/System/Application.hxx"
@@ -18,6 +19,16 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 
     auto controller = gpApplication.mGamePads[0];
 
+    if (gSettingsMenu && gSettingsMenu->mChangeStageReady) {
+        gSettingsMenu->changeStageHook();
+        gSettingsMenu->mChangeStageReady = false;
+        // QF timer reset flag
+        volatile u8* flag = ((volatile u8*)(0x817f00b3));
+        *flag = 1;
+        director->moveStage();
+        state = 9;
+    }
+
     if ((controller->mButtons.mInput & TMarioGamePad::X) && (controller->mButtons.mInput & TMarioGamePad::Y)) {
         gLoadMenu = 1;
         state = 12; 
@@ -26,9 +37,6 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 }
 
 extern "C" void onFinishAppState(RumbleMgr* rumble) {
-    if (gSettingsMenu) {
-        gSettingsMenu->changeStageHook();
-    }
     rumble->init();
 }
 

@@ -1,3 +1,38 @@
+## 2026-04-07
+
+Code snippet for manual timer reset:
+
+```
+if (gChangingStateSettingsMenu) { 
+        volatile u32* timer_addr = ((volatile u32*)(0x80907A7C));
+        *timer_addr = 0;
+        timer_addr = ((volatile u32*)(0x80907A78));
+        *timer_addr = 0;
+        gChangingStateSettingsMenu = false;
+        
+    }
+```
+Turns out the qf timer has a reset flag internally, setting this to 1 will make it reset in between stage warps.
+
+## 2026-04-06
+
+800f9f54
+
+lwz	r8, -0x6818 (r13)
+lwz	r8, 0x005C (r8)
+
+timer (raw) address: 80907A7C
+
+THIS NUMBER AINT IT!! ^^^ there is some other offset or something...
+
+
+timer update routine seems to start at 800024b0
+timer (string) address: 80435374
+
+ask slippi people about anti cheat mechanisms for ranked?
+
+libKuriboClang.a? What does it do? If we have errors that smell like it belongs to this, check it for what symbols it defines?
+
 ## 2026-04-05
 
 Changing heaps? What is the right way to initialize stuff and keep state between level changes?
