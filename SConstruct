@@ -12,6 +12,8 @@ except Exception as e:
     raise e
 
 from pyisotools.iso import GamecubeISO
+from pyisotools.bnrparser import BNR
+from PIL import Image
 
 #############
 # Constants #
@@ -27,6 +29,12 @@ VERS_TO_ISO = {
     "jp": "GMSJ01",
     "us": "GMSE01",
     "pal": "GMSP01"
+}
+
+VERS_TO_REGION = {
+    "jp": BNR.Regions.JAPAN,
+    "us": BNR.Regions.AMERICA,
+    "pal": BNR.Regions.EUROPE,
 }
 
 #############
@@ -121,7 +129,7 @@ def setup_environment():
         LINKFLAGS= SHARED_FLAGS + ['-fuse-ld=lld','-Werror'],
         
         # Include paths
-        CPPPATH=['#susamune/include', '#susamune/include/JSystem'],
+        CPPPATH=['#susamune/include', '#susamune/include/JSystem', '#susamune/include/net'],
 
         COMPILATIONDB_USE_ABSPATH=True
     )
@@ -182,6 +190,30 @@ def tg_out_dol(in_iso, out_iso):
 
     return env.Alias("dol", [patched_dol,cdb])
 
+def patch_bnr(env,target,source):
+    target = to_path(target[0])
+    source = to_path(source[0])
+    bnr = BNR(Path(source), region=VERS_TO_REGION[env[VERS]])
+    bnr.gameName = "susamune practice mod"
+    bnr.gameDescription = "the best practice mod you will ever use"
+    bnr.gameTitle = "susamune!"
+    bnr.developerName = "2026   J"
+    bnr.developerTitle = "2026   J"
+    bnr.rawImage = Image.open("sms.bmp")
+    bnr.save_bnr(Path(target))
+
+def tg_out_bnr(in_iso,out_iso):
+    in_iso_path,out_iso_path = to_path(in_iso), to_path(out_iso)
+
+    in_bnr = env.Alias(in_iso_path + "/root/files/opening.bnr", in_iso)
+    out_bnr = env.File(Path(out_iso_path + "/root/files/opening.bnr"))
+    patched_bnr = env.Command(
+        target=out_bnr,
+        source=[in_bnr],
+        action=patch_bnr
+    )
+    return env.Alias("bnr", [patched_bnr])
+
 def rebuild_iso(out_iso, pre_iso):
     susamune_iso_name = f"susamune_{env['VERS']}.iso"
     susamune_iso = env.Command(
@@ -223,6 +255,7 @@ else:
 
     in_iso, out_iso = extract_iso()
     d1 = tg_out_dol(in_iso, out_iso)
+    d2 = tg_out_bnr(in_iso, out_iso)
     
-    pre_iso = env.Alias("pre_iso", [d1])
+    pre_iso = env.Alias("pre_iso", [d1, d2])
     rebuild_iso(out_iso, pre_iso)

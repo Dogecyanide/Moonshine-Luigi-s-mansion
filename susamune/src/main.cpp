@@ -29,10 +29,10 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
         state = 9;
     }
 
-    if ((controller->mButtons.mInput & TMarioGamePad::X) && (controller->mButtons.mInput & TMarioGamePad::Y)) {
-        gLoadMenu = 1;
-        state = 12; 
-    }
+    //if ((controller->mButtons.mInput & TMarioGamePad::X) && (controller->mButtons.mInput & TMarioGamePad::Y)) {
+    //    gLoadMenu = 1;
+    //    state = 12; 
+    //}
     return state;
 }
 
@@ -42,32 +42,19 @@ extern "C" void onFinishAppState(RumbleMgr* rumble) {
 
 // TODO: this isnt really the init hook we want.. this runs every time a stage loads
 extern "C" void onSetup(TMarDirector* director) {
-    //static bool inited = false;
+    static bool inited = false;
     director->setupObjects();
     
-    // TODO: is this sufficient to avoid re-calling?
-    // seems this function will run once at the main menu
-    // but we'd also want to destroy stuff at reset
-    // nope. dont do this. everything allocated here will be destroyed
-    // at the next setup call, and it will be reinitialized.
-    // so TODO: hook into destruction code? or we need to find a hook 
-    // where the heap is initialized, but not set to some arena that will 
-    // be cleared. 
-    //if (inited) return; else inited = true;
+    if (inited) return; else inited = true;
 
-    //g_textbox = new J2DTextBox(gpSystemFont->mFont, "test1");
-    //g_textbox->mCharSizeX = 50;
-    //g_textbox->mCharSizeY = 50;
-    //g_textbox->mGradientBottom = {0,255,0,255};
-    //g_textbox->mGradientTop = {0,0,255,255};
-//
-    //g_textbox2 = new J2DTextBox(gpSystemFont->mFont, "test2");
-    //g_textbox2->mCharSizeX = 40;
-    //g_textbox2->mCharSizeY = 40;
-    //g_textbox2->mGradientBottom = {255,0,0,255};
-    //g_textbox2->mGradientTop = {255,255,0,255};
-
+    JKRHeap *oldHeap = JKRHeap::sSystemHeap->becomeCurrentHeap();
     gSettingsMenu = new SettingsMenu();
+    
+    if (oldHeap) {
+        oldHeap->becomeCurrentHeap(); //8041434c
+    } else {
+        JKRHeap::sCurrentHeap = nullptr;
+    }
 }
 
 extern "C" s32 onUpdate(JDrama::TDirector* director) {    

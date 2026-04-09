@@ -1,3 +1,22 @@
+# coarse timeline/plan 2 
+
+enough for me to practice nicely
+* simple hardcoded level select menu 
+* practice rom with different ID, so it stops conflicting with the normal rom
+* vibe coded asl script reading memory addresses. should not be hard to find something that tells when we got a star.
+* integration in the asl script to remove the memory card automatically. maybe even a dolphin fork
+
+cool things to demonstrate (in order)
+* bba tcp/ip basic functionality
+* upload trace files
+    * (uncompressed at first. just upload when a button is pressed) 
+* replay trace 
+* ranked without replay upload? 
+
+NOT DOING:
+* the cool practice mod outlined below
+* run-level igt - will just use realtime
+
 # coarse timeline/plan
 
 1. basic practice mod
@@ -48,6 +67,11 @@ In runs mode, every practice setting is disabled. Only the timer runs, and it is
 
 ## ranked thing 
 
+start simple without ipfs thing just database
+public keys for everyone? ask gpt if there are better
+
+
+
 ```
          IPFS?
            ^
@@ -65,6 +89,26 @@ todo is what the threat model is here and how will people authenticate etc. will
 
 
 # organization 
+
+thoughts on new repo organization:
+
+```
+doc/ - documents 
+tools/ - extra stuff that needs to be built 
+include/ - shared include: dolphin, sms, jsystem
+lib/ - implementation of libraries like the networking one
+maps/ - map/ld files for sms
+mods/ - 
+    - susamune/ - my crappy practice mod
+        - src/, include, etc.
+    - ranked/ - whatever comes of my attempt to do this 
+        - same folder structure as susamune
+    - net_test/ - use as a testing ground for random networking crap
+- util/ - same as current 
+SConstruct - shared build logic for everything
+```
+can use similar MOD= logic we had before. use subfolders for any output though.
+
 
 For now: 
 ```

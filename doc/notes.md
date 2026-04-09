@@ -1,3 +1,28 @@
+## 2026-04-08
+
+big brain binary search
+```
+int searchLevel = 3;
+    int searchPath = 0b011;
+u32 startShine = 0;
+      u32 numShines = 128;
+      for (int l = searchLevel; l > 0; l--) {
+        numShines >>= 1;
+        if (searchPath & 1) {
+          startShine += numShines;
+        }
+        searchPath >>= 1;
+      }
+//u32 shineCap = Min(startShine + numShines, 120);
+      //for (u32 shine = 64; shine < 95; shine++) {
+      //  TFlagManager::smInstance->setShineFlag(shine);
+      //}
+```
+
+
+hardware device that unplugs memory card automatically?
+memcard gc pro - already supports wireless, so just have to see if its possible to tell it to disconnect.
+
 ## 2026-04-07
 
 Code snippet for manual timer reset:
