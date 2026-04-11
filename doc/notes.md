@@ -1,3 +1,26 @@
+## 2026-04-10
+
+it seems that the rapid input can be enabled to actually repeat inputs using the other field in the struct:
+		/* 0x18 */ u32 mRepeat;
+		/* 0x1C */ u32 mRepeatCount;
+		/* 0x20 */ u32 mRepeatStart;
+		/* 0x24 */ u32 mRepeatMask;
+		/* 0x28 */ u32 mRepeatDelay;
+		/* 0x2C */ u32 mRepeatRate;
+
+
+// lines to make get card status always return NO_CARD, unfortunately this doesn't work and just hangs the game
+        80107dc8 42 80 00 20     b          LAB_80107de8
+                             LAB_80107de8                                    XREF[2]:     80107dc8(j), 80107dd0(j)  
+        80107de8 38 60 ff fc     li         this,-0x4
+
+
+number of shines address: 80575278
+
+https://github.com/dolphin-emu/dolphin/blob/c0e0b685f372e49f628cbab43e6bbd687fcbd636/Source/Core/Core/State.cpp#L136
+
+savestate handling
+
 ## 2026-04-08
 
 big brain binary search

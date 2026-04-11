@@ -268,6 +268,8 @@ void SettingsMenu::changeStageHook() {
     gpApplication.mNextScene.mEpisodeID = selectedEpisode;
     gpApplication.mNextScene.mFlag      = 0;
     
+    // give coins
+    TFlagManager::smInstance->setFlag(0x40002, 1);
     // intro FMV disables
     TFlagManager::smInstance->setFlag(0x3000B, 1);
     TFlagManager::smInstance->setFlag(0x3000C, 1);

@@ -14,4 +14,6 @@ patches = [
     # insert NOPs to speed up boot process
     {'jp': 0x800fadf4, 'us': 0x00000000, 'pal': 0x00000000, 'val': 0x60000000, 'type': PatchType.W32},
     {'jp': 0x800fae08, 'us': 0x00000000, 'pal': 0x00000000, 'val': 0x60000000, 'type': PatchType.W32},
+    # {'jp': 0x80107dc8, 'us': 0x00000000, 'pal': 0x00000000, 'val': 0x42800020, 'type': PatchType.W32},
+    # {'jp': 0x80107de8, 'us': 0x00000000, 'pal': 0x00000000, 'val': 0x3860fffc, 'type': PatchType.W32},
 ]

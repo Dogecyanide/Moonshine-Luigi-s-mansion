@@ -19,6 +19,11 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 
     auto controller = gpApplication.mGamePads[0];
 
+    // changing to pause menu state, and Y is held? don't pause
+    if (director->mCurState != state && state == 0x5 && (controller->mButtons.mInput & TMarioGamePad::Y)) {
+        state = director->mCurState;
+    }
+
     if (gSettingsMenu && gSettingsMenu->mChangeStageReady) {
         gSettingsMenu->changeStageHook();
         gSettingsMenu->mChangeStageReady = false;
