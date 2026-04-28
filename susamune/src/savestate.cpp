@@ -2,35 +2,48 @@
 #include "J2D/J2DOrthoGraph.hxx"
 #include "SMS/System/Application.hxx"
 
-#define GC_BASE 0xC0000000
-#define SAVE_BASE 0xD0000000 // Nintendont
-//#define SAVE_BASE 0x70000000 // Dolphin
-#define RAM_SIZE 0x01800000
-
-#define PRE_CODE_SIZE 0x3100
-#define TOTAL_CODE_SIZE 0x36CAA0
-
-//#define DATA2_SIZE 0xD00000
-//#define DATA2_OFFSET 0x032F1000 // space at end of nintendont
-//
-//#define DATA1_SIZE (RAM_SIZE - TOTAL_CODE_SIZE - DATA2_SIZE)
-//#define DATA1_OFFSET (0x02E80000 - DATA1_SIZE) // cram it before the end of nintendont cache
-
-#define DATA1_OFFSET 0x01000000
-#define DATA1_SIZE (RAM_SIZE - TOTAL_CODE_SIZE)
-
 typedef struct {
     u32 gc_ptr;
     u32 save_buf_ptr;
     size_t size;
 } savestate_segment_t;
 
+#define EMULATOR
+
+#define GC_BASE 0xC0000000
+#define RAM_SIZE 0x01800000
+#define PRE_CODE_SIZE 0x3100
+#define TOTAL_CODE_SIZE 0x36CAA0 // only the base game; our extra code is still copied
+
+#ifdef EMULATOR 
+#define SAVE_BASE 0x70000000 // Dolphin
+
+// These offsets are based on regions I thought were free in nintendont, but it turns out they are not. It works (was working) on emulator nonetheless.
+#define DATA2_SIZE 0xD00000
+#define DATA2_OFFSET 0x032F1000 // space at end of nintendont
+
+#define DATA1_SIZE (RAM_SIZE - TOTAL_CODE_SIZE - DATA2_SIZE)
+#define DATA1_OFFSET (0x02E80000 - DATA1_SIZE) // cram it before the end of nintendont cache
+
 static const savestate_segment_t sSavestateSegments[] = {
-    //{ .gc_ptr = 0, .save_buf_ptr = DATA1_OFFSET, .size = PRE_CODE_SIZE },
-    //{ .gc_ptr = PRE_CODE_SIZE + TOTAL_CODE_SIZE, .save_buf_ptr = DATA1_OFFSET + PRE_CODE_SIZE, .size = DATA1_SIZE - PRE_CODE_SIZE },
+    { .gc_ptr = 0, .save_buf_ptr = DATA1_OFFSET, .size = PRE_CODE_SIZE },
+    { .gc_ptr = PRE_CODE_SIZE + TOTAL_CODE_SIZE, .save_buf_ptr = DATA1_OFFSET + PRE_CODE_SIZE, .size = DATA1_SIZE - PRE_CODE_SIZE }
+};
+static const int sNumSavestateSegments = (sizeof(sSavestateSegments) / sizeof(*sSavestateSegments));
+#else
+// None of this actually works on console, just experimenting with stuff
+
+#define SAVE_BASE 0xD0000000 // Nintendont
+
+#define DATA1_OFFSET 0x01000000
+#define DATA1_SIZE (RAM_SIZE - TOTAL_CODE_SIZE)
+
+static const savestate_segment_t sSavestateSegments[] = {
     { .gc_ptr = 0, .save_buf_ptr = DATA1_OFFSET, .size = DATA1_OFFSET }
 };
 static const int sNumSavestateSegments = (sizeof(sSavestateSegments) / sizeof(*sSavestateSegments));
+#endif 
+
 
 // stupid thing to display memory state, more or less
 //static u8 memoryData[49*34] = {0};
@@ -74,6 +87,7 @@ void memcpy_word(void* dst, const void* src, size_t words) {
     }
 }
 
+// CURRENTLY BROKEN EVEN ON EMULATOR
 void SavestateManager::updateHook(TMarioGamePad* controller) {
     u32 ri = controller->mButtons.mRapidInput;
 
