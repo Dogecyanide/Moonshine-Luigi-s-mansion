@@ -40,6 +40,7 @@ private:
         NUM_TABS
     } mTab;
 
+    J2DTextBox *mInfoText;    
     J2DTextBox* mTabTexts[NUM_TABS];
 
     J2DTextBox* mEpisodeTexts[NUM_STAGES];
@@ -54,6 +55,7 @@ public:
     void processInput(TMarioGamePad* controller);
     void draw(J2DOrthoGraph* ortho);
     void changeStageHook();
+    void setInfo(u32 x);
 };
 
 #endif // _SUSAMUNE_SETTINGS_MENU_HXX
