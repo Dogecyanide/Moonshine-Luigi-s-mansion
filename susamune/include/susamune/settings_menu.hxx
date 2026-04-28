@@ -40,7 +40,6 @@ private:
         NUM_TABS
     } mTab;
 
-    J2DTextBox *mInfoText;    
     J2DTextBox* mTabTexts[NUM_TABS];
 
     J2DTextBox* mEpisodeTexts[NUM_STAGES];

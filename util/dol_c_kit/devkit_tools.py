@@ -336,6 +336,8 @@ class Project(object):
         self.asm_files = []
         self.obj_files = []
         self.linker_script_files = []
+
+        self.code_pad = -1 
         
         if self.compiler == Compiler.KuriboClang:
             # unsupported
@@ -455,7 +457,7 @@ class Project(object):
         if self.__build_project() == True:
             with open(self.obj_dir+self.project_name+".bin", "rb") as f:
                 datablob += f.read()
-                while (len(datablob) % 4) != 0:
+                while (len(datablob) % 4) != 0 or (len(datablob) < self.code_pad):
                     datablob += b'\x00'
         
         for gecko_code in self.gecko_codetable:

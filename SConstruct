@@ -72,6 +72,7 @@ def patch_dol(env, target, source):
     p.verbose = True
     p.obj_dir = BUILD_DIR
     p.kuribo_compiler_home = env[KURIBO_COMPILER_HOME]
+    p.code_pad = 32 * 1024 # Pad code size to 32K so we can swap DOL without re-creating ISO
     #p.linker_flags = env['LINKFLAGS']
 
     p.add_linker_script_file(f"susamune/maps/{env[VERS]}.ld")

@@ -39,9 +39,6 @@ SettingsMenu::SettingsMenu() {
   mSelectedEpisode      = 0;
   mSelectedPreset       = 0;
   mTab                  = PRESETS;
-  mInfoText             = new J2DTextBox(gpSystemFont->mFont, "00000000");
-  mInfoText->mCharSizeX = 20;
-  mInfoText->mCharSizeY = 20;
 
   for (u32 tab = 0; tab < NUM_TABS; tab++) {
     J2DTextBox *tabText = new J2DTextBox(gpSystemFont->mFont, sTabNames[tab]);
@@ -84,10 +81,6 @@ void SettingsMenu::draw(J2DOrthoGraph *ortho) {
 
   J2DFillBox(frameOutset, frameOutset, (640 - frameOutset * 2), (448 - frameOutset * 2),
              {64, 64, 64, 220});
-
-  mInfoText->mGradientBottom = {255, 0, 128, 255};
-  mInfoText->mGradientTop    = {255, 0, 128, 255};
-  mInfoText->draw(200, 200);
   
   int row_x = frameOutset + frameInset;
   int row_y = frameOutset + frameInset + textSizeY;
@@ -287,10 +280,5 @@ void SettingsMenu::changeStageHook() {
 }
 
 void SettingsMenu::setInfo(u32 x) {
-  char *mInfo = mInfoText->getStringPtr();
-  for (int i = 7; i >= 0; i--, x >>= 4) {
-    int xb   = x & 0xF;
-    char c   = (char)(((xb <= 9) ? 0x30 : 0x37) + xb);
-    mInfo[i] = c;
-  }
+  
 }
