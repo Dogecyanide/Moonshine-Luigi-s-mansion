@@ -1,18 +1,22 @@
 #include "Dolphin/GX_types.h"
 #include "Dolphin/OS.h"
+#include "Dolphin/mem.h"
 #include "J2D/J2DTextBox.hxx"
 #include "JKernel/JKRHeap.hxx"
+#include "JUtility/JUTGamePad.hxx"
 #include "SMS/System/Application.hxx"
 #include "JSystem/J2D/J2DPane.hxx"
 #include "JSystem/J2D/J2DPicture.hxx"
 #include "JSystem/J2D/J2DOrthoGraph.hxx"
 #include "Dolphin/THP.h"
 #include "susamune/settings_menu.hxx"
+#include "susamune/savestate.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
 
 int gLoadMenu = 0;
 
 SettingsMenu* gSettingsMenu = nullptr;
+SavestateManager* gSavestateMgr = nullptr;
 
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     u8 state = director->updateGameMode();
@@ -34,6 +38,7 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
         state = 9;
     }
 
+    // to load the developer stage warp menu
     //if ((controller->mButtons.mInput & TMarioGamePad::X) && (controller->mButtons.mInput & TMarioGamePad::Y)) {
     //    gLoadMenu = 1;
     //    state = 12; 
@@ -54,6 +59,7 @@ extern "C" void onSetup(TMarDirector* director) {
 
     JKRHeap *oldHeap = JKRHeap::sSystemHeap->becomeCurrentHeap();
     gSettingsMenu = new SettingsMenu();
+    gSavestateMgr = new SavestateManager();
     
     if (oldHeap) {
         oldHeap->becomeCurrentHeap(); //8041434c
@@ -62,12 +68,16 @@ extern "C" void onSetup(TMarDirector* director) {
     }
 }
 
+
 extern "C" s32 onUpdate(JDrama::TDirector* director) {    
     int state = director->direct();
 
-    if (gSettingsMenu) {
-        gSettingsMenu->processInput(gpApplication.mGamePads[0]);
+    if (gSavestateMgr) {
+        gSavestateMgr->updateHook(gpApplication.mGamePads[0]);
     }
+    // if (gSettingsMenu) {
+    //     gSettingsMenu->processInput(gpApplication.mGamePads[0]);
+    // }
 
     if (gLoadMenu) {
         gLoadMenu = 0;
@@ -88,9 +98,11 @@ extern "C" void afterDraw() {
             Mtx44 mtx;
             C_MTXOrtho(mtx, 0, 480,0, 640, -1, 1);
             GXSetProjection(mtx, GX_ORTHOGRAPHIC);
-        }
-
+        }        
+        
         if (gSettingsMenu)
             gSettingsMenu->draw(&ortho);
+        if (gSavestateMgr)
+            gSavestateMgr->draw(&ortho);
     }
 }

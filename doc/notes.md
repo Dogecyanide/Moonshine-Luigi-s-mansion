@@ -1,3 +1,128 @@
+## 2026-04-27
+
+Do integrity check of written to area in nintendont
+
+-> Added a checksum. It does not stay the same in  the region  we are writing to. So presumably something is using it still.
+-> However, if we are just looking at the region 0x10000000 - 0x20000000, nothing appears to change (although the checksum does not start at 0), and we are also able to write to it without problems. We may be able to use this 16MB to handle savestates via copying just the arena.
+
+### autosplitter with memory card 
+
+The idea is to pick up memory card activity from the game as split indicators. 
+However, the first problem is that we want the card to be removed for the duration of the run. As far as I can tell, the system does not even try to put anything over the EXI
+if the card (sense pin) is not detected. So there is probably nothing we can observe.
+One potential solution is to have the card _error_ instead of be marked as not detected. This is possible by having the card report an unsupported sector size in the EXI ID. It is checked here in the SMS code:
+
+```cpp
+s32 TCardManager::probe_()
+{
+	s32 sectorSize;
+	s32 result = CARDProbeEx(mChannel, nullptr, &sectorSize);
+
+	// unsupported sector size
+	if (result == CARD_RESULT_READY && sectorSize != 0x2000)
+		result = -256;
+
+	return result;
+}
+```
+in the CardSave menu this -256 result prompts the game to display the error message, which can also be skipped through like the no card detected menu.  
+In the FlipperMCE we can make the card report a different sector size by modifying GC_MC_SECTOR_SIZE at this line: https://github.com/FlipperMCE/firmware/blob/3e5b948a82862b36844ca2fca08548ebf0bb422c/src/gc/card_emu/gc_memory_card.c#L201
+On Dolphin, we can report a different sector size by changing the code in [EXI_DeviceMemoryCard.cpp](https://github.com/dolphin-emu/dolphin/blob/ab6b30afe2cdde8ba6eea9a33ea64ce700d933a1/Source/Core/Core/HW/EXI/EXI_DeviceMemoryCard.cpp#L399):
+
+```cpp
+case Command::NintendoID:
+      //
+      // Nintendo card:
+      // 00 | 80 00 00 00 10 00 00 00
+      // "bigben" card:
+      // 00 | ff 00 00 05 10 00 00 00 00 00 00 00 00 00 00
+      // we do it the Nintendo way.
+      if (m_position == 1)
+        byte = 0x80;  // dummy cycle
+      else if (m_position == 5)
+      {
+        byte = 0x80;
+      }
+      else if (m_position == 4)
+      {
+        byte = gStuff ? 0x08 : 0x00;
+      }
+      else
+      {
+        byte = 0x00;
+        //byte = static_cast<u8>(m_memory_card->GetCardId() >> (24 - (((m_position - 2) & 3) * 8)));
+      }
+```
+
+The problem with this solution is, at least on emulator, doing this instead of removing the card loses a couple frames. Maybe on console it comes out to the same speed, TBD.
+So for now it seems like the autosplitter thing wont work. It's anyway not clear how you would detect the console being reset through the memory card either. 
+
+## 2026-04-15
+
+```cpp
+static void drawHeapUsage(JKRHeap *heap, f32 &maxUsage, JUtility::TColor color, u16 y) {
+    const auto heapSize = getHeapSize(heap);
+
+    const f32 currentUsage = static_cast<f32>((heapSize - heap->getTotalFreeSize())) / heapSize;
+    if (currentUsage > maxUsage)
+        maxUsage = currentUsage;
+
+    {
+        s16 adjust = getScreenRatioAdjustX();
+        drawMonitorBar(currentUsage, maxUsage, color, (gBaseMonitorX - adjust) + 2, y,
+                       (gMonitorWidth + adjust) - 6, 4);
+    }
+}
+```
+
+## 2026-04-14
+
+seems like the dolphin memory at 0x70000000 is a lie? Or at least it doesn't support byte level instructions? 
+Only when we using uncached memory, dolphin crashes inside our memcpy routine, BEFORE we've even touched the stack.
+It starts writing the wrong data at 0x80000000 (0xc0000000). I don't know where the data comes from, but it only writes a single byte into each word.
+It doesn't look like each byte from a word is being split into words, there doesn't seem to be a rhyme or reason.
+I wonder if Dolphin doesn't fully emulate the uncached memory, and only supports writing through the cache flush instructions instead. we can try that or see if full word instructions work.
+
+
+Other state to be worried about:
+- L1 scratchpad state (if enabled)
+- DMA scratchpad 
+
+Apparently L2 is _not_ a problem, even though its address space is mapped. It is not configurable as a scratchpad.
+Coherence with the graphics processor? Maybe just use uncached for now.
+
+## 2026-04-13
+
+if we can just save space in the game's ram, that will be enough to combine the practice and ranked rom. practice mode can set aside nintendonts ram for savestate, ranked can set it aside for tcpip/anything else it needs (traces?).
+
+are we ever going to have problems using the same boot.bin and etc. while replacing main.dol? aren't there certain offsets in boot.bin that are tied to main.dol that we have to worry about?
+
+delfino plaza crashes when the heap is raised to 0x80644020. 0x80544020 works. Have not tested what the exact limit is, but this seems like a bad path to go on, because I won't know which level in the game is going to crash...
+
+Note: Once our code gets big enough, we might bump into the stack and heap. The stack grows downward from 0x80424008, while the heap
+is configured by default to start from 0x18 off that (0x80424020). Currently, our code ends at 0x80414D80 so there is a ways to go.
+
+void save_state() {
+asm("
+load fixed address for savestate location into temp. register
+save context into location
+setup args for memcpy
+call memcpy
+restore link register from savestate
+return
+");
+}
+
+void load_state() {
+asm("
+load fixed address for savestate location into temp. register
+setup args for memcpy
+call memcpy
+restore context (incl. link register)
+return
+")
+}
+
 ## 2026-04-10
 
 it seems that the rapid input can be enabled to actually repeat inputs using the other field in the struct:

@@ -9,6 +9,8 @@
 
 ## running todo
 
+- [ ] fix failing build on systems with visual studio installed - scons REALLY wants to use msvc by default
+- [ ] see if we can validate nintendont ram
 - [ ] settings menu pauses the game
 - [ ] Clean up kuribo_compiler files, remove unecessary ones. Add build scripts in the repo to be able to build those tools from scratch. Ideally for multiple platforms.
 - [ ] Clean up the map conversion script so that it only parses instead of attempting to remangle, because that is no longer necessary.

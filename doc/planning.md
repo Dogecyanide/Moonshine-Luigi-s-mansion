@@ -4,7 +4,9 @@ enough for me to practice nicely
 * simple hardcoded level select menu 
 * practice rom with different ID, so it stops conflicting with the normal rom
 * vibe coded asl script reading memory addresses. should not be hard to find something that tells when we got a star.
+    -> working POC but i did not finish
 * integration in the asl script to remove the memory card automatically. maybe even a dolphin fork
+    -> this did not work
 
 cool things to demonstrate (in order)
 * bba tcp/ip basic functionality

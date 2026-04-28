@@ -54,6 +54,7 @@ public:
     void processInput(TMarioGamePad* controller);
     void draw(J2DOrthoGraph* ortho);
     void changeStageHook();
+    void setInfo(u32 x);
 };
 
 #endif // _SUSAMUNE_SETTINGS_MENU_HXX
