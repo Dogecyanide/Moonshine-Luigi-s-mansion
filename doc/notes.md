@@ -1,3 +1,9 @@
+## 2026-04-29
+
+https://github.com/project-slippi/Nintendont/blob/slippi/SLIPPI.md
+
+Has better networking and native support for replays etc.
+
 ## 2026-04-27
 
 Do integrity check of written to area in nintendont

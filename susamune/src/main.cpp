@@ -75,9 +75,9 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     if (gSavestateMgr) {
         gSavestateMgr->updateHook(gpApplication.mGamePads[0]);
     }
-    // if (gSettingsMenu) {
-    //     gSettingsMenu->processInput(gpApplication.mGamePads[0]);
-    // }
+    if (gSettingsMenu) {
+        gSettingsMenu->processInput(gpApplication.mGamePads[0]);
+    }
 
     if (gLoadMenu) {
         gLoadMenu = 0;
