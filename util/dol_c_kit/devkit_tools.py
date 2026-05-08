@@ -133,7 +133,9 @@ class WordHook(Hook):
             self.good = True
     
     def write_geckocommand(self, f):
-        raise NotImplementedError
+        print("WARNING: gecko code handling not implemented for write word32 hook")
+        pass
+        #raise NotImplementedError
 
     def dump_info(self):
         return repr("{:s} {:08X} {:s} {:08X}".format(

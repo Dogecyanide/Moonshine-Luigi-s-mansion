@@ -7,6 +7,14 @@
 - https://github.com/BitPatty/super-mario-sunshine-c-kit/tree/master
 
 
+## savestates bugs 
+
+- Timer in piantissimo levels etc. does not save and restore
+- Crash when loading during death 
+- Crash when loading on blue save screen after collecting shine
+- Crash during shine spawn? Inconsistent
+- looks like it skips a frame?/
+
 ## running todo
 
 - [ ] Switch to newer nintendont - will have to integrate networking stuff back in (or maybe not?)

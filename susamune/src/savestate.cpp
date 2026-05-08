@@ -58,16 +58,19 @@
 #include "susamune/savestate.hxx"
 #include "susamune/config.hxx"
 
+#include "Dolphin/CARD.h"
 #include "Dolphin/OS.h"
 #include "J2D/J2DOrthoGraph.hxx"
 #include "J2D/J2DTextBox.hxx"
 #include "JKernel/JKRHeap.hxx"
 #include "JUtility/JUTGamePad.hxx"
+#include "SMS/GC2D/SmplFader.hxx"
 #include "SMS/MSound/MSound.hxx"
 #include "SMS/Manager/FlagManager.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
 #include "SMS/Player/MarioGamePad.hxx"
 #include "SMS/System/Application.hxx"
+#include "SMS/System/CardManager.hxx"
 
 
 // ---------------------------------------------------------------------
@@ -81,7 +84,7 @@ static const u32 kSnapshotBase = 0x70000000u;
 // Wii: on Nintendont, when memcard emu is disabled, this area is right 
 // after the 3MB DI cache. It is free until 0x92F00000 which is where
 // the Nintendont kernel itself is loaded.
-static const u32 kSnapshotBase = 0x91400000;
+static const u32 kSnapshotBase = 0x91F00000;
 #endif
 
 // How much MEM2 we promise not to step outside of. The actual snapshot is
@@ -150,6 +153,11 @@ const PointedAlloc kPointedAllocs[] = {
     { 0x803e6024u, sizeof(TMarioGamePad), "Pad1"         },
     { 0x803e6028u, sizeof(TMarioGamePad), "Pad2"         },
     { 0x803e602cu, sizeof(TMarioGamePad), "Pad3"         },
+    // gpApplication.mFader -- the screen fader's animation state lives on
+    // the root heap. Without this the fader gets stuck mid-fade when you
+    // load from inside a transition (shine-get fadeout, save card screen).
+    // Address = &gpApplication + offsetof(TApplication, mFader) = 0x803e6034.
+    { 0x803e6034u, sizeof(TSmplFader),    "Fader"        },
 };
 const int kNumPointedAllocs = sizeof(kPointedAllocs) / sizeof(kPointedAllocs[0]);
 
@@ -393,6 +401,25 @@ bool SavestateManager::loadState() {
      || h->episode_id != gpApplication.mCurrentScene.mEpisodeID) {
         setStatus("E:scene");
         return false;
+    }
+
+    // gpCardManager has its own worker thread, mutex, and cond var on the
+    // root heap. Snapshotting/restoring it would trash kernel-side thread
+    // bookkeeping, so we don't -- but we also can't safely tear down the
+    // rest of the world while the card thread is mid-transaction (this is
+    // why loading from the blue save screen used to crash). Spin here with
+    // interrupts enabled until the card thread reports idle. CARD_ERROR_BUSY
+    // is -1; any other value (including ready / error codes) means the
+    // worker is parked waiting for its next command.
+    if (gpCardManager) {
+        int spins = 0;
+        while (gpCardManager->getLastStatus() == CARD_ERROR_BUSY) {
+            if (++spins > 600) { // ~10 s @ 60 Hz of yielding
+                setStatus("E:cardbsy");
+                return false;
+            }
+            OSYieldThread();
+        }
     }
 
     // Same reasoning as save().

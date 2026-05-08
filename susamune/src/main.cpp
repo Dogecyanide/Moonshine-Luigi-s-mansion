@@ -11,6 +11,7 @@
 #include "Dolphin/THP.h"
 #include "susamune/settings_menu.hxx"
 #include "susamune/savestate.hxx"
+#include "susamune/config.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
 
 int gLoadMenu = 0;
@@ -21,6 +22,7 @@ SavestateManager* gSavestateMgr = nullptr;
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     u8 state = director->updateGameMode();
 
+#ifndef SUSAMUNE_SAVESTATES_ONLY
     auto controller = gpApplication.mGamePads[0];
 
     // changing to pause menu state, and Y is held? don't pause
@@ -37,6 +39,7 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
         director->moveStage();
         state = 9;
     }
+#endif
 
     // to load the developer stage warp menu
     //if ((controller->mButtons.mInput & TMarioGamePad::X) && (controller->mButtons.mInput & TMarioGamePad::Y)) {
@@ -46,9 +49,9 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     return state;
 }
 
-extern "C" void onFinishAppState(RumbleMgr* rumble) {
-    rumble->init();
-}
+// extern "C" void onFinishAppState(RumbleMgr* rumble) {
+//     rumble->init();
+// }
 
 // TODO: this isnt really the init hook we want.. this runs every time a stage loads
 extern "C" void onSetup(TMarDirector* director) {
@@ -58,7 +61,9 @@ extern "C" void onSetup(TMarDirector* director) {
     if (inited) return; else inited = true;
 
     JKRHeap *oldHeap = JKRHeap::sSystemHeap->becomeCurrentHeap();
+#ifndef SUSAMUNE_SAVESTATES_ONLY
     gSettingsMenu = new SettingsMenu();
+#endif
     gSavestateMgr = new SavestateManager();
     
     if (oldHeap) {
@@ -75,9 +80,11 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     if (gSavestateMgr) {
         gSavestateMgr->updateHook(gpApplication.mGamePads[0]);
     }
+#ifndef SUSAMUNE_SAVESTATES_ONLY
     if (gSettingsMenu) {
         gSettingsMenu->processInput(gpApplication.mGamePads[0]);
     }
+#endif
 
     if (gLoadMenu) {
         gLoadMenu = 0;
@@ -100,8 +107,10 @@ extern "C" void afterDraw() {
             GXSetProjection(mtx, GX_ORTHOGRAPHIC);
         }        
         
+#ifndef SUSAMUNE_SAVESTATES_ONLY
         if (gSettingsMenu)
             gSettingsMenu->draw(&ortho);
+#endif
         if (gSavestateMgr)
             gSavestateMgr->draw(&ortho);
     }

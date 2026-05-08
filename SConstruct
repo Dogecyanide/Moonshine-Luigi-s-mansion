@@ -61,10 +61,10 @@ def to_out_paths(nodes):
 from util.dol_c_kit import Project, LDPlusPlus, ABI
 from susamune.patches import *
 
-def patch_dol(env, target, source):
+def patch_dol(env, target, source, gecko=False):
     target = list(map(str, target))
     source = list(map(str, source))
-    out_dol_path = target[0]
+    out_path = target[0]
     in_dol_path = source[0]
     mod_obj_path = source[1]
 
@@ -88,7 +88,11 @@ def patch_dol(env, target, source):
         else:
             pass
         
-    p.build_dol(in_dol_path, out_dol_path)
+    if (gecko):
+        p.base_addr = 0x80414020
+        p.build_gecko(out_path)
+    else:
+        p.build_dol(in_dol_path, out_path)
 
 ###############
 # Environment #
@@ -170,13 +174,16 @@ def extract_iso():
 
     return in_iso, out_iso
 
-def tg_out_dol(in_iso, out_iso): 
-    in_iso_path,out_iso_path = to_path(in_iso), to_path(out_iso)
+def tg_mod_obj(): 
     source_files = Glob('susamune/src/*.c') + Glob('susamune/src/*.cpp')
     mod_objs = env.Object(source=source_files)
 
-    obj_link_env = env.Clone(LINKFLAGS = env['LINKFLAGS'] + ['-r'], PROGSUFFIX='.o')
-    mod_obj = obj_link_env.Program(target=to_out_path("susamune.o"), source=mod_objs) # TODO not using BUILD_DIR
+    extra_cflags = ['-DSUSAMUNE_SAVESTATES_ONLY'] if ("gecko" in COMMAND_LINE_TARGETS) else []
+    obj_link_env = env.Clone(LINKFLAGS = env['LINKFLAGS'] + ['-r'], CXXFLAGS = env['CXXFLAGS'] + extra_cflags, PROGSUFFIX='.o')
+    return obj_link_env.Program(target=to_out_path("susamune.o"), source=mod_objs) # TODO not using BUILD_DIR
+
+def tg_out_dol(in_iso,out_iso,mod_obj):
+    in_iso_path,out_iso_path = to_path(in_iso), to_path(out_iso)
 
     in_dol = env.Alias(in_iso_path + "/root/sys/main.dol", in_iso) # weird hack because the iso extraction generates files scons doesnt know about
     out_dol = env.File(Path(out_iso_path + "/root/sys/main.dol"))
@@ -190,6 +197,17 @@ def tg_out_dol(in_iso, out_iso):
     #env.Install(f'dist/{mod_name}/', patched_dol)
 
     return env.Alias("dol", [patched_dol,cdb])
+
+def tg_out_gecko(in_iso,mod_obj):
+    in_iso_path = to_path(in_iso)
+    in_dol = env.Alias(in_iso_path + "/root/sys/main.dol", in_iso) # weird hack because the iso extraction generates files scons doesnt know about
+    out_gecko = env.File("#/savestates.txt")
+    gecko = env.Command(
+        target=out_gecko,
+        source=[in_dol,mod_obj, 'susamune/patches.py'],
+        action=lambda env,target,source: patch_dol(env,target,source,gecko=True)
+    )
+    return env.Alias("gecko", [gecko])
 
 def patch_bnr(env,target,source):
     target = to_path(target[0])
@@ -255,8 +273,10 @@ else:
     regen_map()
 
     in_iso, out_iso = extract_iso()
-    d1 = tg_out_dol(in_iso, out_iso)
-    d2 = tg_out_bnr(in_iso, out_iso)
+    mod_obj = tg_mod_obj()
+    gecko = tg_out_gecko(in_iso, mod_obj)
+    d1 = tg_out_dol(in_iso, out_iso, mod_obj)
+    #d2 = tg_out_bnr(in_iso, out_iso)
     
-    pre_iso = env.Alias("pre_iso", [d1, d2])
+    pre_iso = env.Alias("pre_iso", [d1])
     rebuild_iso(out_iso, pre_iso)
