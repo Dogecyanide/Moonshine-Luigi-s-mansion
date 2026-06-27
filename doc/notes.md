@@ -1,3 +1,49 @@
+## 2026-06-27
+
+TODO: 
+- fix the crashing warps
+- figure out how much heap memory we have
+- the ui thing below
+
+tabs:
+- Lists
+- MRU
+- Stage select
+- Teleporter
+
+Note: All list views can be scrolled.
+Note: All displays should share the same text buffer (to minimize memory allocations.)
+
+Lists:
+
+By default, shows the _Selected_ list of warps.  A list works exactly like the hardcoded 20 shines list. Select a warp to teleport to it. You can also delete a warp from a list.
+
+You can press a button and open the list selection menu. There will be some default lists like the 20 shines list that's currently hardcoded.
+
+In this menu, you can also create a new list. Idk how the text entry menu will work. Maybe it will just name the lists by number.
+
+You can also press a button to delete a list.
+
+You can also press a button to save the lists to the memory card (or I was also thinking an SD card because that might be easier to do in Nintendont; it would work even with the memcard unplugged).
+
+MRU:
+
+A deduplicated in-order list of every warp you've done since booting the game (stores up to a configurable limit).
+
+Stage select:
+
+Shows a screen similar to the one that already exists which warps you to each episode of every stage. You can press one button to warp immediately, and press another to add to the current list. 
+
+Teleporter:
+
+Lets you dial in a custom warp with every possible setting. You can set the stage id (should hopefully have names for the recognized ones), the episode, etc.
+And then also ALL the flags that you want the warp to set to. All of the flags will default to unset except for the ones that we currently set by default.
+TBD an efficient data structure to handle this because it will of course be very sparse. Probably a linked list or something. But we know exactly what indices things should be at. 
+
+The flags should have names of what they do according to the google sheets.
+
+A warp's info (stage, episode, flags) should be encapsulated in a single "warp" data structure that is written to the memory card, forms the lists, etc.
+
 ## 2026-04-29
 
 https://github.com/project-slippi/Nintendont/blob/slippi/SLIPPI.md
