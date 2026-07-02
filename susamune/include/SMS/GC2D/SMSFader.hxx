@@ -64,4 +64,6 @@ public:
     bool _1C;
     EFadeStatus mFadeStatus;
     WipeRequest mQueuedWipeRequest;
+    u32 _30;  // current wipe type (init 0x0E); draw()/drawFadeinout() branch on this
+    f32 _34;  // wipe progress counter (init 0.0f)
 };

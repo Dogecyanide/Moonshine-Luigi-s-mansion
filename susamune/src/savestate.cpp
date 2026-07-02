@@ -81,7 +81,7 @@
 // Dolphin: a region in the emulator's "free" space.
 static const u32 kSnapshotBase = 0x70000000u;
 #else
-// Wii: on Nintendont, when memcard emu is disabled, this area is right 
+// Wii: on Nintendont, when memcard emu is disabled, this area is right
 // after the 3MB DI cache. It is free until 0x92F00000 which is where
 // the Nintendont kernel itself is loaded.
 static const u32 kSnapshotBase = 0x91F00000;
@@ -164,7 +164,7 @@ const int kNumPointedAllocs = sizeof(kPointedAllocs) / sizeof(kPointedAllocs[0])
 // One header lives at the very start of the snapshot buffer; the saved
 // bytes follow at kHeaderSize.
 const u32 kSnapshotMagic   = 0x53555341u; // 'SUSA'
-const u32 kSnapshotVersion = 2u;          // bumped: format now allows >4 regions
+const u32 kSnapshotVersion = 3u;          // bumped: TSMSFader now captures full 0x38 bytes
 const u32 kHeaderSize      = 0x100u;
 // One slot per static range, one per pointed alloc, plus one for the heap.
 const int kMaxRegions      = kNumStaticRanges + kNumPointedAllocs + 1;
@@ -460,7 +460,7 @@ void SavestateManager::updateHook(TMarioGamePad *controller) {
 
 void SavestateManager::draw(J2DOrthoGraph *ortho) {
     (void)ortho;
-#if SUSAMUNE_SAVESTATE_DBG 
+#if SUSAMUNE_SAVESTATE_DBG
     if (mInfoText) {
         mInfoText->draw(20, 60);
     }

@@ -1,6 +1,6 @@
-# susamune — context for Claude sessions
+# susamune — context for agent sessions
 
-A speedrun-practice mod for **Super Mario Sunshine (JP, GMSJ01)** that injects code into `main.dol`. Target platform is **Wii via Nintendont**, but Dolphin is the primary development environment. The companion repo `../sms` is the in-progress decompilation of the game and the source of truth for any game-side type layouts; refer to it freely when sizing a struct or tracing a code path.
+A speedrun-practice mod for **Super Mario Sunshine (JP, GMSJ01)** that injects code into `main.dol`. Target platform is **Wii via Nintendont**, but Dolphin is the primary development environment. The companion repo `../../src/sms` is the in-progress decompilation of the game and the source of truth for any game-side type layouts; refer to it freely when sizing a struct or tracing a code path.
 
 The hook points live in `susamune/src/main.cpp` — `onUpdate` runs each frame in place of `mDirector->direct()`, `afterDraw` runs at the end of rendering, `onSetup` runs once per stage load. Build with `scons`; patches are wired up in `susamune/patches.py` and the linker script is regenerated from `susamune/maps/jp.map` into `susamune/maps/jp.ld`.
 
@@ -34,7 +34,7 @@ Three buckets:
    | TTimeRec | `0x8040a2f8` (`TTimeRec::_instance`) | 0x820 (the 0xDFC0 in `TTimeRec::start` is a config arg, not the size) | Input/profiler recorder |
    | SMSRumbleMgr | `0x8040a248` | `sizeof(RumbleMgr)` = 0x30 | Rumble channels' active state |
    | Pad0..Pad3 | `0x803e6020 + 4*i` (`gpApplication.mGamePads[i]`) | `sizeof(TMarioGamePad)` = 0xF0 | Fixes controller-stuck-disabled bug after loading from dialog |
-   | Fader | `0x803e6034` (`gpApplication.mFader`) | `sizeof(TSmplFader)` = 0x30 | Fixes crash when loading during shine-spawn / shine-get / blue save screen fade transitions |
+   | Fader | `0x803e6034` (`gpApplication.mFader`) | `sizeof(TSmplFader)` = 0x38 | Fixes crash when loading during shine-spawn / shine-get / blue save screen fade transitions. The `TSMSFader` header previously omitted two fields (`_30` at 0x30 = current wipe type, `_34` at 0x34 = wipe progress float), so `sizeof` evaluated to 0x30 instead of the real 0x38. The wipe-type field at 0x30 controls which rendering path `draw()`/`drawFadeinout()` take and is passed to `Hx_GetWipeType`; the global wipe-system state (`hx`/`hx_buffer` in BSS) IS snapshotted, so a stale `_30` left it out of sync with the restored global state and crashed on the next `draw()`. |
 
 ### What we deliberately do NOT snapshot
 
@@ -93,4 +93,4 @@ Test on Dolphin first (set `SUSAMUNE_EMULATOR 1` in `susamune/config.hxx`). When
 
 ## Decomp cross-reference
 
-For any game-side type whose layout you need precisely, the canonical source is `../sms` (the SMS decomp). The susamune headers under `susamune/include/` are reverse-engineered approximations that are good enough to compile against, but if a field offset matters (e.g. the offset of `mGamePads` in `TApplication`, or the exact size of `TFlagManager`), confirm against the decomp.
+For any game-side type whose layout you need precisely, the canonical source is `../../src/sms` (the SMS decomp). The susamune headers under `susamune/include/` are reverse-engineered approximations that are good enough to compile against, but if a field offset matters (e.g. the offset of `mGamePads` in `TApplication`, or the exact size of `TFlagManager`), confirm against the decomp.

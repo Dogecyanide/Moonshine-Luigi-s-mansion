@@ -233,15 +233,23 @@ def tg_out_bnr(in_iso,out_iso):
     )
     return env.Alias("bnr", [patched_bnr])
 
+def patch_bin():
+    boot_bin = Path(to_path(out_iso) + "/root/sys/boot.bin")
+    with open(boot_bin, "rb") as f:
+        data = bytearray(f.read())
+    data[0x05] = 0x32
+    with open(boot_bin, "wb") as f:
+        f.write(data)
+
 def rebuild_iso(out_iso, pre_iso):
     susamune_iso_name = f"susamune_{env['VERS']}.iso"
     susamune_iso = env.Command(
         target=f"#{susamune_iso_name}",
         source=[out_iso,pre_iso],
         action=
-            [lambda env,target,source: \
-                GamecubeISO.build_root(Path(to_path(out_iso) + "/root"), susamune_iso_name),
-                Move("$TARGET", to_path(out_iso) + "/root/" + susamune_iso_name)
+            [(lambda env,target,source: patch_bin()),
+             (lambda env,target,source: GamecubeISO.build_root(Path(to_path(out_iso) + "/root"), susamune_iso_name)),
+             Move("$TARGET", to_path(out_iso) + "/root/" + susamune_iso_name)
             ]
     )
 
