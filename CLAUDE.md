@@ -1,4 +1,4 @@
-# susamune — context for agent sessions
+# susamune — context for Claude Code sessions
 
 A speedrun-practice mod for **Super Mario Sunshine (JP, GMSJ01)** that injects code into `main.dol`. Target platform is **Wii via Nintendont**, but Dolphin is the primary development environment. The companion repo `../../src/sms` is the in-progress decompilation of the game and the source of truth for any game-side type layouts; refer to it freely when sizing a struct or tracing a code path.
 

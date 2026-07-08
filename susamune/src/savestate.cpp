@@ -71,6 +71,7 @@
 #include "SMS/Player/MarioGamePad.hxx"
 #include "SMS/System/Application.hxx"
 #include "SMS/System/CardManager.hxx"
+#include "SMS/System/MarDirector.hxx"
 
 
 // ---------------------------------------------------------------------
@@ -164,7 +165,7 @@ const int kNumPointedAllocs = sizeof(kPointedAllocs) / sizeof(kPointedAllocs[0])
 // One header lives at the very start of the snapshot buffer; the saved
 // bytes follow at kHeaderSize.
 const u32 kSnapshotMagic   = 0x53555341u; // 'SUSA'
-const u32 kSnapshotVersion = 3u;          // bumped: TSMSFader now captures full 0x38 bytes
+const u32 kSnapshotVersion = 4u;          // bumped: save_time added for mission-timer correction
 const u32 kHeaderSize      = 0x100u;
 // One slot per static range, one per pointed alloc, plus one for the heap.
 const int kMaxRegions      = kNumStaticRanges + kNumPointedAllocs + 1;
@@ -184,6 +185,11 @@ struct SavestateHeader {
     u8  episode_id;
     u16 _pad0;
     u32 region_count;
+    // OSGetTime() at save. TMarDirector::mStopwatch (the Piantissimo-chase /
+    // blooper-race mission countdown) stores an absolute console-uptime
+    // timestamp in mLast; a byte-for-byte restore of that field is not
+    // enough; see the mission-timer correction in loadState().
+    OSTime save_time;
     RegionEntry regions[kMaxRegions];
 };
 
@@ -301,6 +307,7 @@ bool SavestateManager::saveState() {
     h->episode_id   = gpApplication.mCurrentScene.mEpisodeID;
     h->_pad0        = 0;
     h->region_count = 0;
+    h->save_time    = OSGetTime();
 
     u32 offset = 0;
     for (int i = 0; i < kNumStaticRanges; i++) {
@@ -437,6 +444,21 @@ bool SavestateManager::loadState() {
         // through cache so we need to make sure CPU sees the new bytes.
         DCFlushRange(reinterpret_cast<void *>(r.addr), r.size);
         // No instruction-cache invalidation: we never restore .text.
+    }
+
+    // TMarDirector::mStopwatch (the Piantissimo-chase / blooper-race mission
+    // countdown, restored above as part of the heap region) stores an
+    // absolute OSGetTime() timestamp in mLast rather than an elapsed
+    // duration -- OSCheckStopwatch() computes `total + (now - mLast)`. A
+    // byte-for-byte restore puts back the OLD mLast, so on the very next
+    // check the timer would read as if it had kept running in real time
+    // across the save/load gap instead of rewinding. Shift mLast forward by
+    // exactly that real-time gap so OSCheckStopwatch() reproduces the same
+    // value it had at save time.
+    if (gpMarDirector) {
+        OSTime delta                = OSGetTime() - h->save_time;
+        gpMarDirector->mStopwatch.mLast += delta;
+        DCFlushRange(&gpMarDirector->mStopwatch, sizeof(OSStopwatch));
     }
 
     OSRestoreInterrupts(ints);

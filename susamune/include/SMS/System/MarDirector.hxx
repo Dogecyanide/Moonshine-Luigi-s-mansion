@@ -114,7 +114,11 @@ public:
     u32 *mAramArchive;                    // 0x00D8
     TShineFader *mShineFader;             // 0x00DC
     u32 _13[0x8 / 4];                     // 0x00E0
-    OSStopwatch *mStopwatch;              // 0x00E8
+    // Inline (not a pointer) -- matches decomp's `OSStopwatch unkE8`. Used by
+    // getRestTime()/startTimer() to drive the Piantissimo-chase/blooper-race
+    // countdown; mLast holds an absolute OSGetTime() timestamp, see
+    // savestate.cpp's save_time correction.
+    OSStopwatch mStopwatch;               // 0x00E8
     int _14;                              // 0x0120
     u8 mNextStateA;                       // 0x0124 ?
     u32 _15[0x12C / 4];                   // 0x0128
