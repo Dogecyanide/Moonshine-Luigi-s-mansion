@@ -1,0 +1,32 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default (Dolphin)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default"
+    },
+    {
+      "name": "iso",
+      "configurePreset": "default",
+      "targets": ["iso"]
+    },
+    {
+      "name": "gecko",
+      "configurePreset": "default",
+      "targets": ["gecko"]
+    }
+  ]
+}

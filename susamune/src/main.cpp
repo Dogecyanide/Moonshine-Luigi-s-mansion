@@ -11,7 +11,6 @@
 #include "Dolphin/THP.h"
 #include "susamune/settings_menu.hxx"
 #include "susamune/savestate.hxx"
-#include "susamune/config.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
 
 int gLoadMenu = 0;

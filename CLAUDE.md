@@ -2,7 +2,7 @@
 
 A speedrun-practice mod for **Super Mario Sunshine (JP, GMSJ01)** that injects code into `main.dol`. Target platform is **Wii via Nintendont**, but Dolphin is the primary development environment. The companion repo `../../src/sms` is the in-progress decompilation of the game and the source of truth for any game-side type layouts; refer to it freely when sizing a struct or tracing a code path.
 
-The hook points live in `susamune/src/main.cpp` — `onUpdate` runs each frame in place of `mDirector->direct()`, `afterDraw` runs at the end of rendering, `onSetup` runs once per stage load. Build with `scons`; patches are wired up in `susamune/patches.py` and the linker script is regenerated from `susamune/maps/jp.map` into `susamune/maps/jp.ld`.
+The hook points live in `susamune/src/main.cpp` — `onUpdate` runs each frame in place of `mDirector->direct()`, `afterDraw` runs at the end of rendering, `onSetup` runs once per stage load. Build with CMake + Ninja (see "Build & test loop" below); patches are wired up in `susamune/patches.py` and the linker script is regenerated from `susamune/maps/jp.map` into `susamune/maps/jp.ld`.
 
 ## Savestate feature (savestate.cpp / savestate.hxx)
 
@@ -54,7 +54,7 @@ Three buckets:
 
 ### Where the snapshot buffer lives
 
-In MEM2. Configured via `kSnapshotBase` near the top of `savestate.cpp`, gated on a `SUSAMUNE_EMULATOR` define from `susamune/config.hxx`:
+In MEM2. Configured via `kSnapshotBase` near the top of `savestate.cpp`, gated on the `SUSAMUNE_EMULATOR` define set by the CMake `SUSAMUNE_EMULATOR` option:
 
 - **Dolphin**: `0x70000000` — emulator's "free" space.
 - **Wii (Nintendont)**: `0x91F00000` — right after Nintendont's 3 MB DI cache; free until `0x92F00000` where the Nintendont kernel itself loads. **This is version-dependent**; tune per Nintendont build if you see weird behavior after the first save.
@@ -82,14 +82,20 @@ Buffer is sized at 16 MB reserved (`kSnapshotReservedSize`). Layout: 256-byte he
 
 ## Build & test loop
 
+First-time setup: `python setup_venv.py` (creates `venv/` with the Python packages the build scripts need). Then:
+
 ```
-scons dol     # build patched main.dol
-scons iso     # rebuild susamune_jp.iso
+cmake --preset default              # configure (Ninja, build/ dir)
+cmake --build build                 # build the patched build/main.dol (default target)
+cmake --build build --target iso    # also rebuild build/susamune_jp.iso
+cmake --build build --target gecko  # emit build/savestates.txt (Dolphin cheat form; NOTE CURRENTLY BROKEN, DOESNT SEEM TO WORK)
 ```
 
-Configured in `SConstruct`. The build uses Kuribo's clang fork (`KURIBO_COMPILER_HOME`) with `-Werror`, c++17, no exceptions/RTTI/standard library. Source files are auto-globbed from `susamune/src/*.cpp`. The linker script is auto-regenerated from `susamune/maps/jp.map` whenever the map changes.
+`cmake -B build -G Ninja` works too; the preset just bakes in Ninja and the build dir. The Visual Studio generator is rejected. CMake drives the whole pipeline: it compiles/partial-links the mod into `build/susamune.o`, then runs the Python patch scripts in `scripts/` (launched from `venv/`) to extract the source ISO, inject the object, and reassemble the disc.
 
-Test on Dolphin first (set `SUSAMUNE_EMULATOR 1` in `susamune/config.hxx`). When porting to Nintendont, flip the define and double-check the `kSnapshotBase` address against the current Nintendont build's MEM2 layout.
+The build uses Kuribo's clang fork (`KURIBO_COMPILER_HOME`, defaulting to `util/kuribo_compiler`) with `-Werror`, c++17, no exceptions/RTTI/standard library. Source files are auto-globbed from `susamune/src/*.cpp`. The source ISO defaults to `GMSJ01.iso` in the repo root; override with `-DSMS_ISO=<path>`. The linker script is regenerated on demand with `cmake --build build --target regen_ld` after `susamune/maps/jp.map` changes.
+
+Build options (toggle interactively in `ccmake`/`cmake-gui`, or with `-D<name>=<value>`): `SUSAMUNE_EMULATOR` (ON = Dolphin, OFF = Wii/Nintendont), `SUSAMUNE_SAVESTATE_DBG`, `SUSAMUNE_SAVESTATES_ONLY`, and `VERS` (jp/us/pal). Test on Dolphin first (`SUSAMUNE_EMULATOR` ON, the default). When porting to Nintendont, set it OFF and double-check the `kSnapshotBase` address against the current Nintendont build's MEM2 layout.
 
 ## Decomp cross-reference
 

@@ -56,7 +56,6 @@
 // =====================================================================
 
 #include "susamune/savestate.hxx"
-#include "susamune/config.hxx"
 
 #include "Dolphin/CARD.h"
 #include "Dolphin/OS.h"
