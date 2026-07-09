@@ -6,6 +6,9 @@
     - used heavily as reference
 - https://github.com/BitPatty/super-mario-sunshine-c-kit/tree/master
 
+## Installation
+
+TODO: but noting here that you need to put "Texture Cache Accuracy = Safe" in dolphin 
 
 ## savestates bugs 
 
@@ -18,7 +21,7 @@
 - Delfino Piranha Plant #1 (bianco hills) crash: invalid read from 0x61f9f244, pc = 0x800bc614
 - FLUDD sounds break when loading after shine spawn. might not be fixable reasonably.
 
-## running todo
+## TODO
 
 - [ ] Switch to newer nintendont - will have to integrate networking stuff back in (or maybe not?)
 - [ ] Patch on the fly with changes to nintendont rather than needing the ISO at build time

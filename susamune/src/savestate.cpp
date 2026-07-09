@@ -217,18 +217,6 @@ void wordCopy(void *dst, const void *src, size_t bytes) {
     }
 }
 
-void writeStatus(char *dst, const char *src, size_t cap) {
-    size_t i = 0;
-    while (src[i] && i + 1 < cap) {
-        dst[i] = src[i];
-        i++;
-    }
-    while (i + 1 < cap) {
-        dst[i++] = ' ';
-    }
-    dst[cap - 1] = '\0';
-}
-
 } // namespace
 
 
@@ -236,12 +224,8 @@ void writeStatus(char *dst, const char *src, size_t cap) {
 // SavestateManager
 // ---------------------------------------------------------------------
 
-// Writable buffer the J2DTextBox points at -- avoids writing through
-// mStrPtr into a .rodata string literal.
-static char sStatusBuf[16] = "ready          ";
-
 SavestateManager::SavestateManager() {
-    mInfoText                    = new J2DTextBox(gpSystemFont->mFont, sStatusBuf);
+    mInfoText                    = new J2DTextBox(gpSystemFont->mFont, "ready");
     mInfoText->mCharSizeX        = 18;
     mInfoText->mCharSizeY        = 18;
     mInfoText->mGradientBottom   = { 255, 200, 0, 255 };
@@ -253,7 +237,9 @@ SavestateManager::SavestateManager() {
 }
 
 void SavestateManager::setStatus(const char *msg) {
-    writeStatus(sStatusBuf, msg, sizeof(sStatusBuf));
+    if (mInfoText) {
+        mInfoText->setString(msg);
+    }
 }
 
 bool SavestateManager::saveState() {
@@ -291,6 +277,15 @@ bool SavestateManager::saveState() {
     if (gpMSound) {
         gpMSound->stopAllSound();
     }
+
+    // NOTE (disabled): draining the GP here (GXDrawDone) would guarantee the
+    // frame's async GXCopyTex writes -- e.g. the pollution "goop" texture
+    // copied back to mPollutionMap -- have landed in RAM before we read it,
+    // at the cost of a one-frame stall. Not needed in practice: on console
+    // the buffer is at worst one frame stale, and on Dolphin correctness
+    // depends on Texture Cache Accuracy = Safe, not on this. Re-enable if a
+    // console test shows a torn/stale goop snapshot. (#include "Dolphin/GX.h")
+    // GXDrawDone();
 
     // We are called from inside onUpdate, which runs on the main thread
     // between director->direct() and rendering. That is already the most
@@ -434,6 +429,17 @@ bool SavestateManager::loadState() {
         gpMSound->stopAllSound();
     }
 
+    // NOTE (disabled): draining the GP here (GXDrawDone), then invalidating
+    // the texture cache after the restore (GXInvalidateTexAll), was an
+    // attempt to stop an in-flight goop EFB copy from clobbering the restore
+    // and to force the GPU to re-read our restored bytes. The real cause of
+    // goop not restoring was Dolphin serving a stale cached copy of the
+    // pollution texture -- fixed by Texture Cache Accuracy = Safe -- not GP
+    // timing, and on console the game already invalidates every frame. Left
+    // out to avoid the one-frame stall; re-enable for a console test if
+    // needed. (#include "Dolphin/GX.h")
+    // GXDrawDone();
+
     bool ints = OSDisableInterrupts();
 
     for (u32 i = 0; i < h->region_count; i++) {
@@ -445,6 +451,8 @@ bool SavestateManager::loadState() {
         DCFlushRange(reinterpret_cast<void *>(r.addr), r.size);
         // No instruction-cache invalidation: we never restore .text.
     }
+
+    // (see note above) GXInvalidateTexAll();
 
     // TMarDirector::mStopwatch (the Piantissimo-chase / blooper-race mission
     // countdown, restored above as part of the heap region) stores an
