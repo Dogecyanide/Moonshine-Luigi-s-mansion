@@ -8,8 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from util.dol_c_kit import Project
 from susamune.patches import patches, PatchType
 
-# Base address for the standalone Gecko code blob (Dolphin cheat form).
-GECKO_BASE_ADDR = 0x80414020
+# Base address to link code against. Set explicitly to avoid issues with autodetection in devkit_tools.
+# TODO: other game versions, this is only for JP
+BASE_ADDR = 0x80414020
 # Pad injected code so the DOL can be swapped in-place without rebuilding the ISO.
 CODE_PAD = 32 * 1024
 
@@ -51,8 +52,8 @@ def main():
         elif patch["type"] == PatchType.W32:
             p.hook_word(patch[args.vers], patch["val"])
 
+    p.base_addr = BASE_ADDR
     if args.gecko:
-        p.base_addr = GECKO_BASE_ADDR
         p.build_gecko(str(out))
     else:
         if in_dol is None:
