@@ -2,9 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from util.dol_c_kit.cw_map_to_ldscript import main as map_to_ld
+from dol_c_kit.cw_map_to_ldscript import main as map_to_ld
 
 
 def main():

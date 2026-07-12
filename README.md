@@ -25,7 +25,9 @@ TODO: but noting here that you need to put "Texture Cache Accuracy = Safe" in do
 - [ ] Add customized nintendont loader that loads the mod as a patch to a real disc or ISO. Removes the need to have an ISO at build time for console users.
 - [ ] Add nintendont toolchains to repo for reproducible compilations.
 - [ ] Integrate nintendont compilation with the cmake and create easy presets for console and emulator. 
+- [ ] Remove nintendont dependency on make.
 - [ ] Add a CI.
 - [ ] Emulator autodetect.
+- [ ] dont require different channels for different reason. just need to load project.bin from
 - [ ] Input tracing feature. Needs planning.
 - [ ] Switch everything to a single Clang compiler (based on the kuribo tree) that does PowerPC and ARM to simplify dependencies.

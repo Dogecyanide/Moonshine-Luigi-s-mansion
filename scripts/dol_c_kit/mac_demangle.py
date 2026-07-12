@@ -40,7 +40,7 @@ Usage::
 from __future__ import annotations
 
 
-from util.dol_c_kit.mangle import (
+from dol_c_kit.mangle import (
     # Builtin types
     BuiltinVoid, BuiltinBool, BuiltinChar, BuiltinShort, BuiltinInt,
     BuiltinFloat, BuiltinDouble, BuiltinEllipses,
@@ -248,7 +248,7 @@ def _parse_template_params(blob: str) -> list:
     if current:
         parts.append(current)
 
-    from util.dol_c_kit.mac_demangle import _parse_type_from_string  # avoid circular at module level
+    from dol_c_kit.mac_demangle import _parse_type_from_string  # avoid circular at module level
     return [_parse_type_from_string(p) for p in parts]
 
 

@@ -313,6 +313,15 @@ static void app_loadgameconfig(u8 *tempgameconf, u32 tempgameconfsize)
 				parsebuffer[parsebufpos] = 0;
 				//if (!autobootcheck)
 				{
+
+					//if (strncasecmp("dolpatch", parsebuffer,strlen(parsebuffer)) == 0 && strlen(parsebuffer) == 8)
+					//{
+					//	ret = sscanf((char *)tempgameconf + i, "( %x ", (unsigned int *)&codeaddr);
+					//	if (ret == 1)
+					//	{
+					//		
+					//	}
+					//}
 					if (strncasecmp("poke", parsebuffer, strlen(parsebuffer)) == 0 && strlen(parsebuffer) == 4)
 					{
 						ret = sscanf((char *)tempgameconf + i, "( %x , %x", (unsigned int *)&codeaddr, (unsigned int *)&codeval);

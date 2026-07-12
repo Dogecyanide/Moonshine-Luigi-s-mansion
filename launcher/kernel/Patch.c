@@ -3953,6 +3953,10 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 				dbgprintf("Patch:Patched SpongeBob SquarePants CFTKK NTSC-U\r\n");
 			}
 		}
+		else if ( TITLE_ID == 0x474D53 ) // Super Mario Sunshine
+		{ 
+			memcpy((void*)(0x80414020), (void*)project, project_size);
+		}   
 		else if( TITLE_ID == 0x47414C ) // Super Smash Bros Melee
 		{
 			//fix for video mode breaking

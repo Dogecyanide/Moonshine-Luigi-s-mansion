@@ -93,7 +93,7 @@ cmake --build build --target gecko  # emit build/savestates.txt (Dolphin cheat f
 
 `cmake -B build -G Ninja` works too; the preset just bakes in Ninja and the build dir. The Visual Studio generator is rejected. CMake drives the whole pipeline: it compiles/partial-links the mod into `build/susamune.o`, then runs the Python patch scripts in `scripts/` (launched from `venv/`) to extract the source ISO, inject the object, and reassemble the disc.
 
-The build uses Kuribo's clang fork (`KURIBO_COMPILER_HOME`, defaulting to `util/kuribo_compiler`) with `-Werror`, c++17, no exceptions/RTTI/standard library. Source files are auto-globbed from `susamune/src/*.cpp`. The source ISO defaults to `GMSJ01.iso` in the repo root; override with `-DSMS_ISO=<path>`. The linker script is regenerated on demand with `cmake --build build --target regen_ld` after `susamune/maps/jp.map` changes.
+The build uses Kuribo's clang fork (`KURIBO_COMPILER_HOME`, defaulting to `toolchain/`) with `-Werror`, c++17, no exceptions/RTTI/standard library. Source files are auto-globbed from `susamune/src/*.cpp`. The source ISO defaults to `GMSJ01.iso` in the repo root; override with `-DSMS_ISO=<path>`. The linker script is regenerated on demand with `cmake --build build --target regen_ld` after `susamune/maps/jp.map` changes.
 
 Build options (toggle interactively in `ccmake`/`cmake-gui`, or with `-D<name>=<value>`): `SUSAMUNE_EMULATOR` (ON = Dolphin, OFF = Wii/Nintendont), `SUSAMUNE_SAVESTATE_DBG`, `SUSAMUNE_SAVESTATES_ONLY`, and `VERS` (jp/us/pal). Test on Dolphin first (`SUSAMUNE_EMULATOR` ON, the default). When porting to Nintendont, set it OFF and double-check the `kSnapshotBase` address against the current Nintendont build's MEM2 layout.
 

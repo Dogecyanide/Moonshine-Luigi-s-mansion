@@ -14,7 +14,7 @@ if(NOT DEFINED KURIBO_COMPILER_HOME)
     if(DEFINED ENV{KURIBO_COMPILER_HOME})
         set(KURIBO_COMPILER_HOME "$ENV{KURIBO_COMPILER_HOME}")
     else()
-        set(KURIBO_COMPILER_HOME "${CMAKE_CURRENT_SOURCE_DIR}/util/kuribo_compiler")
+        set(KURIBO_COMPILER_HOME "${CMAKE_CURRENT_SOURCE_DIR}/toolchain")
     endif()
 endif()
 set(KURIBO_COMPILER_HOME "${KURIBO_COMPILER_HOME}" CACHE PATH "Kuribo clang toolchain directory")
@@ -64,14 +64,14 @@ else()
 endif()
 set(SMS_ISO "${_sms_iso_default}" CACHE FILEPATH "Source game ISO to patch")
 
-set(LD_SCRIPT "${CMAKE_SOURCE_DIR}/susamune/maps/${VERS}.ld")
-set(MAP_FILE "${CMAKE_SOURCE_DIR}/susamune/maps/${VERS}.map")
+set(LD_SCRIPT "${CMAKE_SOURCE_DIR}/maps/${VERS}.ld")
+set(MAP_FILE "${CMAKE_SOURCE_DIR}/maps/${VERS}.map")
 
 # --- Mod object ------------------------------------------------------------
 # Compile the sources and partial-link (-r) them into a single relocatable
 # object that the DOL patcher later injects.
 
-file(GLOB MOD_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/susamune/src/*.cpp")
+file(GLOB MOD_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
 
 set(SHARED_FLAGS
     --target=powerpc-gecko-ibm-kuribo-eabi
@@ -95,9 +95,8 @@ set_target_properties(susamune_obj PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 target_include_directories(susamune_obj PRIVATE
-    "${CMAKE_SOURCE_DIR}/susamune/include"
-    "${CMAKE_SOURCE_DIR}/susamune/include/JSystem"
-    "${CMAKE_SOURCE_DIR}/susamune/include/net")
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/include/JSystem")
 
 target_compile_options(susamune_obj PRIVATE
     ${SHARED_FLAGS}
@@ -144,7 +143,7 @@ add_custom_command(
         --in-dol "${IN_ISO_DIR}/root/sys/main.dol"
         --out "${PATCHED_DOL}"
     DEPENDS susamune_obj "${IN_ISO_STAMP}" "${LD_SCRIPT}"
-            "${CMAKE_SOURCE_DIR}/susamune/patches.py"
+            "${CMAKE_SOURCE_DIR}/scripts/patches.py"
             "${CMAKE_SOURCE_DIR}/scripts/patch_dol.py"
     COMMENT "Patching main.dol"
     VERBATIM)
@@ -161,7 +160,7 @@ add_custom_command(
         --vers "${VERS}"
         --out "${GECKO_TXT}"
     DEPENDS susamune_obj "${LD_SCRIPT}"
-            "${CMAKE_SOURCE_DIR}/susamune/patches.py"
+            "${CMAKE_SOURCE_DIR}/scripts/patches.py"
             "${CMAKE_SOURCE_DIR}/scripts/patch_dol.py"
     COMMENT "Generating Gecko code list"
     VERBATIM)

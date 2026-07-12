@@ -3,10 +3,8 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from util.dol_c_kit import Project
-from susamune.patches import patches, PatchType
+from dol_c_kit import Project
+from patches import patches, PatchType
 
 # Base address to link code against. Set explicitly to avoid issues with autodetection in devkit_tools.
 # TODO: other game versions, this is only for JP

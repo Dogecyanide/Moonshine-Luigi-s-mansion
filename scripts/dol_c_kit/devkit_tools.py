@@ -2,7 +2,7 @@ import subprocess
 import os
 import platform
 from enum import Enum
-from util.dol_c_kit import assemble_branch, write_branch, mask_field, hi, lo, hia
+from dol_c_kit import assemble_branch, write_branch, mask_field, hi, lo, hia
 
 from dolreader.dol import DolFile, write_uint32
 from dolreader.section import Section, TextSection, DataSection
@@ -322,7 +322,7 @@ class Project(object):
         # System member variables
         if platform.system() == "Windows":
             # use binaries shipped in the repo
-            self.kuribo_compiler_home = os.path.join(os.path.realpath(__file__), "..", "kuribo_compiler")
+            self.kuribo_compiler_home = os.path.realpath(__file__) + "/../../toolchain")
             self.codewarrior_path = "C:/Program Files (x86)/Metrowerks/CodeWarrior/PowerPC_EABI_Tools/Command_Line_Tools/"
         else:
             if self.kuribo_compiler_home is None:

@@ -258,8 +258,8 @@ def parse_map_file(filepath: str) -> list[tuple[str, int]]:
 
     return result
 
-from util.dol_c_kit.mangle import LDPlusPlus, ABI
-from util.dol_c_kit.mac_demangle import mac_demangle_signature, DemangleError
+from dol_c_kit.mangle import LDPlusPlus, ABI
+from dol_c_kit.mac_demangle import mac_demangle_signature, DemangleError
 
 def main(map_path,ld_path):
     
