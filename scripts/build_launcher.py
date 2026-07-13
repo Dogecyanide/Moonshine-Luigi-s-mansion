@@ -16,6 +16,8 @@ NEED_TOOLCHAIN_UNZIP = ((not os.path.exists(BUITLIN_TOOLCHAIN_DIR)) and
 
 def main():
     ap = argparse.ArgumentParser(description="Build custom nintendont launcher.")
+    ap.add_argument("--mod-bin", required=True, help="mod binary (susamune.bin)")
+    ap.add_argument("--out-zip", required=True, help="output zip")
     args = ap.parse_args()
 
     if NEED_TOOLCHAIN_UNZIP:
@@ -25,9 +27,13 @@ def main():
     print(f"DEVKITPPC: {DEVKITPPC}")
     print(f"DEVKITARM: {DEVKITARM}")
 
-    # TODO: generate header file from patches.py
+    # TODO: generate patch C code from patches.py, to run in nintendont Patch.c
+    # Will probably need to call stuff from link_mod to facilitate this, since we need to know the address
+    # of the susamune functions we want to insert calls to.
 
     subprocess.run(["make", "-C", LAUNCHER_DIR], env = {"DEVKITPPC": str(DEVKITPPC), "DEVKITARM": str(DEVKITARM)})
+
+    # TODO: create the zip
     
 if __name__ == "__main__":
     main()

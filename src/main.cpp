@@ -21,7 +21,7 @@ SavestateManager* gSavestateMgr = nullptr;
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     u8 state = director->updateGameMode();
 
-#ifndef SUSAMUNE_SAVESTATES_ONLY
+#if ENABLE_WARP_MENU
     auto controller = gpApplication.mGamePads[0];
 
     // changing to pause menu state, and Y is held? don't pause
@@ -52,7 +52,7 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 //     rumble->init();
 // }
 
-// TODO: this isnt really the init hook we want.. this runs every time a stage loads
+// TODO: maybe this isnt really the init hook we want.. this runs every time a stage loads
 extern "C" void onSetup(TMarDirector* director) {
     static bool inited = false;
     director->setupObjects();
@@ -60,13 +60,13 @@ extern "C" void onSetup(TMarDirector* director) {
     if (inited) return; else inited = true;
 
     JKRHeap *oldHeap = JKRHeap::sSystemHeap->becomeCurrentHeap();
-#ifndef SUSAMUNE_SAVESTATES_ONLY
+#if ENABLE_WARP_MENU
     gSettingsMenu = new SettingsMenu();
 #endif
     gSavestateMgr = new SavestateManager();
     
     if (oldHeap) {
-        oldHeap->becomeCurrentHeap(); //8041434c
+        oldHeap->becomeCurrentHeap();
     } else {
         JKRHeap::sCurrentHeap = nullptr;
     }
@@ -79,7 +79,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     if (gSavestateMgr) {
         gSavestateMgr->updateHook(gpApplication.mGamePads[0]);
     }
-#ifndef SUSAMUNE_SAVESTATES_ONLY
+#if ENABLE_WARP_MENU
     if (gSettingsMenu) {
         gSettingsMenu->processInput(gpApplication.mGamePads[0]);
     }
@@ -106,7 +106,7 @@ extern "C" void afterDraw() {
             GXSetProjection(mtx, GX_ORTHOGRAPHIC);
         }        
         
-#ifndef SUSAMUNE_SAVESTATES_ONLY
+#if ENABLE_WARP_MENU
         if (gSettingsMenu)
             gSettingsMenu->draw(&ortho);
 #endif

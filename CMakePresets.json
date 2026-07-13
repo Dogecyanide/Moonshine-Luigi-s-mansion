@@ -7,26 +7,50 @@
   },
   "configurePresets": [
     {
-      "name": "default",
-      "displayName": "Default (Dolphin)",
+      "name": "savestates_console",
+      "displayName": "Savestates only (Console)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build"
+    },
+    {
+      "name": "savestates_emu",
+      "displayName": "Savestates only (Dolphin)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "IS_EMULATOR": "ON"
+      }
+    },
+    {
+      "name": "all_console",
+      "displayName": "All features (Console)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "ENABLE_WARP_MENU": "ON"
+      }
+    },
+    {
+      "name": "all_emu",
+      "displayName": "All features (Emulator)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "IS_EMULATOR": "ON",
+        "ENABLE_WARP_MENU": "ON"
+      }
     }
   ],
   "buildPresets": [
     {
-      "name": "default",
-      "configurePreset": "default"
+      "name": "console",
+      "configurePreset": "savestates_console",
+      "targets": ["dol"]
     },
     {
-      "name": "iso",
-      "configurePreset": "default",
+      "name": "emu_iso",
+      "configurePreset": "savestates_emu",
       "targets": ["iso"]
-    },
-    {
-      "name": "gecko",
-      "configurePreset": "default",
-      "targets": ["gecko"]
     }
   ]
 }

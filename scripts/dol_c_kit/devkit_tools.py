@@ -322,7 +322,7 @@ class Project(object):
         # System member variables
         if platform.system() == "Windows":
             # use binaries shipped in the repo
-            self.kuribo_compiler_home = os.path.realpath(__file__) + "/../../toolchain")
+            self.kuribo_compiler_home = os.path.realpath(__file__) + "/../../toolchain"
             self.codewarrior_path = "C:/Program Files (x86)/Metrowerks/CodeWarrior/PowerPC_EABI_Tools/Command_Line_Tools/"
         else:
             if self.kuribo_compiler_home is None:
@@ -456,7 +456,7 @@ class Project(object):
         
         datablob = bytearray()
 
-        if self.__build_project() == True:
+        if self.build_project() == True:
             with open(self.obj_dir+self.project_name+".bin", "rb") as f:
                 datablob += f.read()
                 while (len(datablob) % 4) != 0 or (len(datablob) < self.code_pad):
@@ -523,7 +523,7 @@ class Project(object):
         with open(gecko_path, "w") as f:
             datablob = bytearray()
             
-            if self.__build_project() == True:
+            if self.build_project() == True:
                 with open(self.obj_dir+self.project_name+".bin", "rb") as bin:
                     datablob += bin.read()
             
@@ -728,7 +728,7 @@ class Project(object):
             self.symbols["_SDA2_BASE_"] = {'st_name': 0, 'st_value': self.sda2_base, 'st_size': 0, 'st_info': {'bind': 'STB_LOCAL', 'type': 'STT_OBJECT'}, 'st_other': {'visibility': 'STV_DEFAULT'}, 'st_shndx': 'SHN_ABS'}
         return True
     
-    def __build_project(self):
+    def build_project(self):
         os.makedirs("./" + self.src_dir, exist_ok=True)
         os.makedirs("./" + self.obj_dir, exist_ok=True)
         is_built = False

@@ -48,9 +48,10 @@ endif()
 set(VERS "jp" CACHE STRING "Game version to build against")
 set_property(CACHE VERS PROPERTY STRINGS jp us pal)
 
-option(SUSAMUNE_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" ON)
-option(SUSAMUNE_SAVESTATE_DBG "Enable savestate debug output" OFF)
-option(SUSAMUNE_SAVESTATES_ONLY "Build the savestate-only variant" OFF)
+option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
+option(ENABLE_SAVESTATE_DBG "Enable savestate debug output" OFF)
+option(ENABLE_WARP_MENU "Enable warp menu" OFF)
+option(UPDATE_ISO_METADATA "Update ISO metadata (game code 01 -> 02, change picture, name, etc.)" OFF)
 
 set(ISO_CODE_jp GMSJ01)
 set(ISO_CODE_us GMSE01)
@@ -90,7 +91,7 @@ set(SHARED_FLAGS
 
 add_executable(susamune_obj ${MOD_SOURCES})
 set_target_properties(susamune_obj PROPERTIES
-    OUTPUT_NAME susamune
+    OUTPUT_NAME susamune_pre
     SUFFIX .o
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
@@ -108,9 +109,9 @@ target_compile_options(susamune_obj PRIVATE
     -Wno-incompatible-library-redeclaration)
 
 target_compile_definitions(susamune_obj PRIVATE
-    SUSAMUNE_EMULATOR=$<BOOL:${SUSAMUNE_EMULATOR}>
-    SUSAMUNE_SAVESTATE_DBG=$<BOOL:${SUSAMUNE_SAVESTATE_DBG}>
-    $<$<BOOL:${SUSAMUNE_SAVESTATES_ONLY}>:SUSAMUNE_SAVESTATES_ONLY>)
+    IS_EMULATOR=$<BOOL:${IS_EMULATOR}>
+    ENABLE_SAVESTATE_DBG=$<BOOL:${ENABLE_SAVESTATE_DBG}>
+    $<$<BOOL:${ENABLE_WARP_MENU}>:ENABLE_WARP_MENU>)
 
 target_link_options(susamune_obj PRIVATE ${SHARED_FLAGS} -fuse-ld=lld -Werror -r)
 
@@ -121,9 +122,11 @@ set(MOD_OBJ "$<TARGET_FILE:susamune_obj>")
 set(IN_ISO_DIR "${CMAKE_BINARY_DIR}/in_iso")
 set(OUT_ISO_DIR "${CMAKE_BINARY_DIR}/out_iso")
 set(IN_ISO_STAMP "${CMAKE_BINARY_DIR}/in_iso.stamp")
+set(MOD_BIN "${CMAKE_BINARY_DIR}/susamune.bin")
 set(PATCHED_DOL "${CMAKE_BINARY_DIR}/main.dol")
-set(GECKO_TXT "${CMAKE_BINARY_DIR}/savestates.txt")
+set(GECKO_TXT "${CMAKE_BINARY_DIR}/susamune.txt")
 set(FINAL_ISO "${CMAKE_BINARY_DIR}/susamune_${VERS}.iso")
+set(LAUNCHER_ZIP "${CMAKE_BINARY_DIR}/susamune_launcher.zip")
 
 add_custom_command(
     OUTPUT "${IN_ISO_STAMP}"
@@ -134,34 +137,53 @@ add_custom_command(
     VERBATIM)
 
 add_custom_command(
+    OUTPUT "${MOD_BIN}"
+    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
+        --obj "${MOD_OBJ}"
+        --linker-script "${LD_SCRIPT}"
+        --kuribo-home "${KURIBO_COMPILER_HOME}"
+        --vers "${VERS}"
+        --out "${PATCHED_DOL}"
+        bin
+    DEPENDS susamune_obj "${LD_SCRIPT}"
+            "${CMAKE_SOURCE_DIR}/scripts/patches.py"
+            "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
+    COMMENT "Generating linked binary"
+    VERBATIM)
+add_custom_target(bin ALL DEPENDS "${MOD_BIN}")
+
+# FIXME: This should also copy to OUT_ISO_DIR/root/sys/main.dol. Otherwise, the vscode tasks (run in dolphin) for development
+# will break, because the dol won't be up to date unless we also build the iso target. 
+add_custom_command(
     OUTPUT "${PATCHED_DOL}"
-    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/patch_dol.py"
+    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
         --obj "${MOD_OBJ}"
         --linker-script "${LD_SCRIPT}"
         --kuribo-home "${KURIBO_COMPILER_HOME}"
         --vers "${VERS}"
         --in-dol "${IN_ISO_DIR}/root/sys/main.dol"
         --out "${PATCHED_DOL}"
+        patch_dol
     DEPENDS susamune_obj "${IN_ISO_STAMP}" "${LD_SCRIPT}"
             "${CMAKE_SOURCE_DIR}/scripts/patches.py"
-            "${CMAKE_SOURCE_DIR}/scripts/patch_dol.py"
+            "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
     COMMENT "Patching main.dol"
     VERBATIM)
-add_custom_target(dol ALL DEPENDS "${PATCHED_DOL}")
+add_custom_target(dol DEPENDS "${PATCHED_DOL}")
 
 # NOTE: gecko code target is currently broken, it doesn't seem to work in-game. But it is left here anyway.
 add_custom_command(
     OUTPUT "${GECKO_TXT}"
-    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/patch_dol.py"
-        --gecko
+    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
         --obj "${MOD_OBJ}"
         --linker-script "${LD_SCRIPT}"
         --kuribo-home "${KURIBO_COMPILER_HOME}"
         --vers "${VERS}"
         --out "${GECKO_TXT}"
+        gecko
     DEPENDS susamune_obj "${LD_SCRIPT}"
             "${CMAKE_SOURCE_DIR}/scripts/patches.py"
-            "${CMAKE_SOURCE_DIR}/scripts/patch_dol.py"
+            "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
     COMMENT "Generating Gecko code list"
     VERBATIM)
 add_custom_target(gecko DEPENDS "${GECKO_TXT}")
@@ -169,6 +191,7 @@ add_custom_target(gecko DEPENDS "${GECKO_TXT}")
 add_custom_command(
     OUTPUT "${FINAL_ISO}"
     COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/build_iso.py"
+        --update-metadata "${UPDATE_ISO_METADATA}"
         --in-iso "${IN_ISO_DIR}"
         --out-iso "${OUT_ISO_DIR}"
         --dol "${PATCHED_DOL}"
@@ -178,6 +201,17 @@ add_custom_command(
     COMMENT "Building ${FINAL_ISO}"
     VERBATIM)
 add_custom_target(iso DEPENDS "${FINAL_ISO}")
+
+add_custom_command(
+    OUTPUT "${LAUNCHER_ZIP}" "PHONY" # idk how else to make it always rebuild this, because it is dictated by the make 
+    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/build_launcher.py"
+        --mod-bin "${MOD_BIN}"
+        --out-zip "${LAUNCHER_ZIP}"
+    DEPENDS ${MOD_BIN} 
+            "${CMAKE_SOURCE_DIR}/scripts/build_launcher.py"
+    COMMENT "Patching main.dol"
+    VERBATIM)
+add_custom_target(launcher DEPENDS "${LAUNCHER_ZIP}")
 
 # Regenerate the checked-in linker script from the CodeWarrior map. Run on
 # demand (`cmake --build build --target regen_ld`) after the map changes.

@@ -812,6 +812,23 @@ void SetFilePatches(void)
 		f_close( &CodeFD );
 	}
 #endif
+
+	// TODO: really scuffed
+	snprintf(cheatPath, sizeof(cheatPath), "%s:%s", GetRootDevice(), "/apps/susamune_launcher/patch.txt");
+	if( f_open_char( &CodeFD, cheatPath, FA_READ|FA_OPEN_EXISTING ) == FR_OK )
+	{
+		if( CodeFD.obj.objsize > 8 * 1024 )
+		{
+			dbgprintf("Patch:File is too large, can't be larger than 8 KB!\r\n");
+		}
+		else
+		{
+			void *patchbuf = (void*)0x933F1000;
+			UINT read;
+			f_read(&CodeFD, patchbuf, CodeFD.obj.objsize, &read);
+		}
+		f_close( &CodeFD );
+	}
 }
 
 void SMC_ROM(void)

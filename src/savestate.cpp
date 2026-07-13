@@ -77,7 +77,7 @@
 // Build configuration
 // ---------------------------------------------------------------------
 
-#if SUSAMUNE_EMULATOR
+#if IS_EMULATOR
 // Dolphin: a region in the emulator's "free" space.
 static const u32 kSnapshotBase = 0x70000000u;
 #else
@@ -489,7 +489,7 @@ void SavestateManager::updateHook(TMarioGamePad *controller) {
 
 void SavestateManager::draw(J2DOrthoGraph *ortho) {
     (void)ortho;
-#if SUSAMUNE_SAVESTATE_DBG
+#if ENABLE_SAVESTATE_DBG
     if (mInfoText) {
         mInfoText->draw(20, 60);
     }

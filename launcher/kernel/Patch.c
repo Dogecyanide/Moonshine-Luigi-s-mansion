@@ -108,6 +108,8 @@ extern bool AGB_Loaded;
 extern u32 AGBTimer;
 u32 useGenesis = 0;
 
+u8* dolPatchBuf = (u8*) 0x133F1000;
+
 // SHA-1 hashes of known DSP modules.
 static const unsigned char DSPHashes[][20] =
 {
@@ -3955,7 +3957,9 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 		}
 		else if ( TITLE_ID == 0x474D53 ) // Super Mario Sunshine
 		{ 
-			memcpy((void*)(0x80414020), (void*)project, project_size);
+			// TODO: generate the hook patch lines from patches.py. 
+			// Need to know the addresses of the symbols though.
+			// Also, needs to be conditional on the version of the game.
 		}   
 		else if( TITLE_ID == 0x47414C ) // Super Smash Bros Melee
 		{
