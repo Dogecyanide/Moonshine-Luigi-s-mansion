@@ -36,7 +36,9 @@ DEFAULT:
 #If arg 1 is 0 no writing will occur
 #If arg 3 starts with 0 second line is unused
 #If both lines are 0, the opening.bnr title will be used.
-#Both arg 2 and 3 have a limit of 21 characters
+#Both arg 2 and 3 have a limit of 21 characters.
+#Spaces are used to terminate the string, so use a space BEFORE the comma,
+#underscores are used to replace spaces.
 #writePlaylog(1, Sonic_Heroes , 0 )
 
 #Allows using special characters, can use 0x20 for spaces

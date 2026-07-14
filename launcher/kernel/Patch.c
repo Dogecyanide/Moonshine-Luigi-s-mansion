@@ -37,6 +37,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "codehandler.h"
 #include "codehandleronly.h"
 #include "ff_utf8.h"
+#include "susamune_inject.h"
 
 //#define DEBUG_DSP  // Very slow!! Replace with raw dumps?
 
@@ -4055,6 +4056,31 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 		UseReadLimit = 0;
 }
 
+// Inject the susamune mod into the freshly-loaded game image: copy its code
+// into the region reserved at the top of the game's stack, then apply the
+// resolved hook writes (branches into the mod plus the stack-pointer shrink).
+// All game addresses are MEM1-cached (0x80xxxxxx); mask to physical for the
+// kernel's direct RAM access.
+void PatchSusamune(void)
+{
+#ifdef SUSAMUNE_GAME_ID
+	if (GAME_ID != SUSAMUNE_GAME_ID)
+		return;
+
+	u32 base = SUSAMUNE_CODE_BASE & 0x7FFFFFFF;
+	memcpy((void*)base, susamune_code, SUSAMUNE_CODE_SIZE);
+	sync_after_write((void*)base, SUSAMUNE_CODE_SIZE);
+
+	u32 i;
+	for (i = 0; i < SUSAMUNE_WRITE_COUNT; ++i)
+	{
+		u32 addr = susamune_writes[i].addr & 0x7FFFFFFF;
+		write32(addr, susamune_writes[i].val);
+		sync_after_write((void*)addr, 4);
+	}
+#endif
+}
+
 void PatchInit()
 {
 	memcpy((void*)PATCH_OFFSET_ENTRY, FakeEntryLoad, FakeEntryLoad_size);
@@ -4103,6 +4129,7 @@ void PatchGame()
 	PatchState = PATCH_STATE_PATCH;
 	u32 FullLength = (DOLMaxOff - DOLMinOff + 31) & (~31);
 	DoPatches( (void*)DOLMinOff, FullLength, 0 );
+	PatchSusamune();
 	// Some games need special timings
 	EXISetTimings(TITLE_ID, GAME_ID & 0xFF);
 #if 1

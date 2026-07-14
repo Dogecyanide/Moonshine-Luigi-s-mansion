@@ -12,7 +12,7 @@ const char *sMainStageNames[] = {
   "Pinna Park", "Sirena Beach",  "Sirena Hotel?", "Pianta Village", "Noki Bay",
 };
 
-const char *sTabNames[] = {"Stages", "Presets"};
+const char *sTabNames[] = {"Stages", "20 Shines"};
 
 const WarpDescriptor sPresetDescriptors[] = {
   {"Delfino - Bianco Plant",      0x1,  0x0, 0x1, -1},

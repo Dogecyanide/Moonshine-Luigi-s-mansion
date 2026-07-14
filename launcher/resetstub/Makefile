@@ -33,11 +33,11 @@ all: $(TARGET)
 
 %.o: %.s
 	@echo " ASSEMBLE    $<"
-	@$(CC) $(CFLAGS) $(DEFINES) $(ASFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) $(DEFINES) $(ASFLAGS) -x assembler-with-cpp -c $< -o $@
 
 %.o: %.S
 	@echo " ASSEMBLE    $<"
-	@$(CC) $(CFLAGS) $(DEFINES) $(ASFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) $(DEFINES) $(ASFLAGS) -x assembler-with-cpp -c $< -o $@
 
 %.o: %.c
 	@echo " COMPILE     $<"

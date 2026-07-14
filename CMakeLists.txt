@@ -122,7 +122,7 @@ set(MOD_OBJ "$<TARGET_FILE:susamune_obj>")
 set(IN_ISO_DIR "${CMAKE_BINARY_DIR}/in_iso")
 set(OUT_ISO_DIR "${CMAKE_BINARY_DIR}/out_iso")
 set(IN_ISO_STAMP "${CMAKE_BINARY_DIR}/in_iso.stamp")
-set(MOD_BIN "${CMAKE_BINARY_DIR}/susamune.bin")
+set(MANIFEST "${CMAKE_BINARY_DIR}/susamune_manifest.json")
 set(PATCHED_DOL "${CMAKE_BINARY_DIR}/main.dol")
 set(GECKO_TXT "${CMAKE_BINARY_DIR}/susamune.txt")
 set(FINAL_ISO "${CMAKE_BINARY_DIR}/susamune_${VERS}.iso")
@@ -137,20 +137,20 @@ add_custom_command(
     VERBATIM)
 
 add_custom_command(
-    OUTPUT "${MOD_BIN}"
+    OUTPUT "${MANIFEST}"
     COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
         --obj "${MOD_OBJ}"
         --linker-script "${LD_SCRIPT}"
         --kuribo-home "${KURIBO_COMPILER_HOME}"
         --vers "${VERS}"
-        --out "${PATCHED_DOL}"
-        bin
+        --out "${MANIFEST}"
+        launcher
     DEPENDS susamune_obj "${LD_SCRIPT}"
             "${CMAKE_SOURCE_DIR}/scripts/patches.py"
             "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
-    COMMENT "Generating linked binary"
+    COMMENT "Generating mod manifest"
     VERBATIM)
-add_custom_target(bin ALL DEPENDS "${MOD_BIN}")
+add_custom_target(manifest ALL DEPENDS "${MANIFEST}")
 
 # FIXME: This should also copy to OUT_ISO_DIR/root/sys/main.dol. Otherwise, the vscode tasks (run in dolphin) for development
 # will break, because the dol won't be up to date unless we also build the iso target. 
@@ -202,16 +202,14 @@ add_custom_command(
     VERBATIM)
 add_custom_target(iso DEPENDS "${FINAL_ISO}")
 
-add_custom_command(
-    OUTPUT "${LAUNCHER_ZIP}" "PHONY" # idk how else to make it always rebuild this, because it is dictated by the make 
+add_custom_target(launcher
     COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/build_launcher.py"
-        --mod-bin "${MOD_BIN}"
+        --manifest "${MANIFEST}"
         --out-zip "${LAUNCHER_ZIP}"
-    DEPENDS ${MOD_BIN} 
+    DEPENDS "${MANIFEST}"
             "${CMAKE_SOURCE_DIR}/scripts/build_launcher.py"
-    COMMENT "Patching main.dol"
+    COMMENT "Building Nintendont launcher"
     VERBATIM)
-add_custom_target(launcher DEPENDS "${LAUNCHER_ZIP}")
 
 # Regenerate the checked-in linker script from the CodeWarrior map. Run on
 # demand (`cmake --build build --target regen_ld`) after the map changes.

@@ -18,6 +18,16 @@ int gLoadMenu = 0;
 SettingsMenu* gSettingsMenu = nullptr;
 SavestateManager* gSavestateMgr = nullptr;
 
+// Replaces the game's OSGetArenaLo. The mod is linked into the bottom of the
+// heap arena, [__OSArenaLo, __OSArenaLo + kArenaReserve); reporting the raised
+// floor here keeps the root heap from allocating over it. The top of the arena
+// is avoided because the apploader keeps the FST there. kArenaReserve must
+// match mod_region_size in scripts/patches.py.
+extern "C" void* getArenaLo() {
+    const u32 kArenaReserve = 0x8000;
+    return (void*)(*(volatile u32*)0x80408d08 + kArenaReserve);  // __OSArenaLo
+}
+
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     u8 state = director->updateGameMode();
 

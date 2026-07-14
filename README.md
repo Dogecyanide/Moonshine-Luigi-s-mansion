@@ -15,10 +15,10 @@ TODO: but noting here that you need to put "Texture Cache Accuracy = Safe" in do
 - ~~Crash when loading on blue save screen after collecting shine~~
 - ~~Timer in piantissimo levels etc. does not save and restore~~
 - ~~Goop on the ground of the level is not saved and restored.~~ Not a real bug, just a misconfigured Dolphin emulator setting.
-- Crash during shine spawn? Inconsistent. Pianta 3 still breaks on console only.
-- Crash when loading during death 
-- Delfino Piranha Plant #1 (bianco hills) crash: invalid read from 0x61f9f244, pc = 0x800bc614
-- FLUDD sounds break when loading after shine spawn. Might not be fixable reasonably.
+- ~~Crash during shine spawn?~~ Inconsistent. Pianta 3 still breaks on console only.
+- ~~Crash when loading during death~~ 
+- Delfino Piranha Plant #1 (bianco hills) crash: invalid read from 0x61f9f244, pc = 0x800bc614. Only on emulator for some reason?
+- FLUDD sounds break when loading after shine spawn. Might not be fixable reasonably. Sort of inevitable since we don't completely save/restore audio state. Can also just reload the level.
 
 ## TODO
 

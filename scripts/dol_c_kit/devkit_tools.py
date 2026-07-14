@@ -26,7 +26,13 @@ class Hook(object):
     
     def write_geckocommand(self, f):
         self.good = True
-        
+
+    def emit_writes(self):
+        # List of (address, word) memory writes that realise this hook, for a
+        # runtime loader (e.g. Nintendont) that pokes game RAM directly instead
+        # of rewriting a DOL. Hooks with no direct representation return nothing.
+        return []
+
     def dump_info(self):
         return repr("{:s} {:08X}".format(
                     "{:13s}".format("[Hook]       "), self.addr))[+1:-1]
@@ -60,7 +66,20 @@ class BranchHook(Hook):
             gecko_command = WriteBranch(self.data, self.addr, isLink = self.lk_bit)
             f.write(gecko_command.as_text() + "\n")
             self.good = True
-    
+
+    def emit_writes(self):
+        if not self.data:
+            return []
+        writes = []
+        addr = self.addr
+        for _ in range(self.nop_count):
+            writes.append((addr, 0x60000000))
+            addr += 4
+        branch = int.from_bytes(assemble_branch(addr, self.data, LK=self.lk_bit), "big")
+        writes.append((addr, branch))
+        self.good = True
+        return writes
+
     def dump_info(self):
         return repr("{:s} {:08X} {:s} {:s}".format(
                     "[Branchlink] " if self.lk_bit else "[Branch]     ", self.addr + self.nop_count * 4, "-->" if self.good else "-X>", self.sym_name))[+1:-1]
@@ -84,7 +103,13 @@ class PointerHook(Hook):
             gecko_command = Write32(self.data, self.addr)
             f.write(gecko_command.as_text() + "\n")
             self.good = True
-        
+
+    def emit_writes(self):
+        if not self.data:
+            return []
+        self.good = True
+        return [(self.addr, self.data)]
+
     def dump_info(self):
         return repr("{:s} {:08X} {:s} {:s}".format(
                     "[Pointer]    ", self.addr, "-->" if self.good else "-X>", self.sym_name))[+1:-1]
@@ -136,6 +161,10 @@ class WordHook(Hook):
         print("WARNING: gecko code handling not implemented for write word32 hook")
         pass
         #raise NotImplementedError
+
+    def emit_writes(self):
+        self.good = True
+        return [(self.addr, self.val)]
 
     def dump_info(self):
         return repr("{:s} {:08X} {:s} {:08X}".format(
@@ -549,6 +578,40 @@ class Project(object):
                 if self.verbose:
                     print(hook.dump_info())
     
+    def build_launcher_manifest(self, manifest_path, meta=None, max_size=None):
+        # Emit the mod as a self-contained JSON manifest for a runtime loader:
+        # the base address, the code blob, and the concrete (addr, word) writes
+        # that realise every hook. Nintendont copies the blob to base_addr and
+        # applies the writes to game RAM before the game runs.
+        import json
+        datablob = bytearray()
+        if self.build_project() == True:
+            with open(self.obj_dir+self.project_name+".bin", "rb") as f:
+                datablob += f.read()
+        while (len(datablob) % 4) != 0:
+            datablob += b'\x00'
+
+        if max_size is not None and len(datablob) > max_size:
+            raise RuntimeError("mod is {} bytes but only {} are reserved".format(len(datablob), max_size))
+
+        writes = []
+        for hook in self.hooks:
+            hook.resolve(self.symbols)
+            writes.extend(hook.emit_writes())
+            if self.verbose:
+                print(hook.dump_info())
+
+        manifest = {
+            "base_addr": self.base_addr,
+            "size": len(datablob),
+            "code": datablob.hex(),
+            "writes": [[addr & 0xFFFFFFFF, val & 0xFFFFFFFF] for addr, val in writes],
+        }
+        if meta:
+            manifest.update(meta)
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+
     def save_map(self, map_path):
         with open(map_path, "w") as map:
             try:

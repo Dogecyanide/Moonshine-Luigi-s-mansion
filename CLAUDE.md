@@ -85,13 +85,17 @@ Buffer is sized at 16 MB reserved (`kSnapshotReservedSize`). Layout: 256-byte he
 First-time setup: `python setup_venv.py` (creates `venv/` with the Python packages the build scripts need). Then:
 
 ```
-cmake --preset default              # configure (Ninja, build/ dir)
-cmake --build build                 # build the patched build/main.dol (default target)
-cmake --build build --target iso    # also rebuild build/susamune_jp.iso
-cmake --build build --target gecko  # emit build/savestates.txt (Dolphin cheat form; NOTE CURRENTLY BROKEN, DOESNT SEEM TO WORK)
+cmake --preset default                  # configure (Ninja, build/ dir)
+cmake --build build                     # build build/susamune_manifest.json (default target)
+cmake --build build --target dol        # patch a main.dol from the source ISO
+cmake --build build --target iso        # rebuild build/susamune_jp.iso
+cmake --build build --target launcher   # build the Nintendont HBC app zip
+cmake --build build --target gecko      # emit build/susamune.txt (Dolphin cheat form)
 ```
 
-`cmake -B build -G Ninja` works too; the preset just bakes in Ninja and the build dir. The Visual Studio generator is rejected. CMake drives the whole pipeline: it compiles/partial-links the mod into `build/susamune.o`, then runs the Python patch scripts in `scripts/` (launched from `venv/`) to extract the source ISO, inject the object, and reassemble the disc.
+`cmake -B build -G Ninja` works too; the preset just bakes in Ninja and the build dir. The Visual Studio generator is rejected.
+
+The default `manifest` target compiles/partial-links the mod into `build/susamune_pre.o` and runs `scripts/link_mod.py launcher` to emit `build/susamune_manifest.json`: the mod's base address, code blob, and the concrete `(addr, word)` writes that realise every hook (`patches.py`) plus the stack-pointer shrink that reserves the mod's region. The `launcher` target feeds that manifest to `scripts/build_launcher.py`, which generates `launcher/kernel/susamune_inject.h` and builds the custom Nintendont that copies the blob into MEM1 and applies the writes on GMSJ01 boot — no patched ISO/DOL needed. `dol`/`gecko` apply the same manifest of hooks to the source ISO for Dolphin development.
 
 The build uses Kuribo's clang fork (`KURIBO_COMPILER_HOME`, defaulting to `toolchain/`) with `-Werror`, c++17, no exceptions/RTTI/standard library. Source files are auto-globbed from `susamune/src/*.cpp`. The source ISO defaults to `GMSJ01.iso` in the repo root; override with `-DSMS_ISO=<path>`. The linker script is regenerated on demand with `cmake --build build --target regen_ld` after `susamune/maps/jp.map` changes.
 

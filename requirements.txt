@@ -4,3 +4,4 @@ pyelftools
 chardet
 sortedcontainers
 git+https://github.com/JoshuaMKW/pyisotools.git
+jinja2
