@@ -1,33 +1,88 @@
-# A mod for Super Mario Sunshine
+# A romhack for Super Mario Sunshine practice
 
-## credits
+It adds emulator-like savestates to console (Wii through Nintendont) and is compatible with many existing speedrun gecko codes. Vibe coded software, use at your own risk.
 
-- https://github.com/DotKuribo/BetterSunshineEngine/
-    - used heavily as reference
-- https://github.com/BitPatty/super-mario-sunshine-c-kit/tree/master
+It exploits the fact that the Wii has a considerable amount of RAM free when running a Gamecube game through Nintendont, to snapshot more or less the entire state of the game. This lets you save and restore basically anywhere, any time within the same stage/area (including during a cutscene, shine get or death animation, etc.).
+
+## Usage + Caveats
+
+D-pad left to save, d-pad right to load. If you have the position/red coin/timer/etc. savestate gecko codes on it will technically run both but these savestates will take precedence. 
+
+* Currently only JP 1.0 is supported
+* You can only save and load from within the same area (the buttons do nothing if there is no savestate or if it belongs to a different area). It uses a pretty strict definition as to what is a different area, for example airstrip before and after collecting FLUDD are different areas. Going to another stage doesn't get rid of your savestate. 
+* Loading from a savestate breaks the music and may mess with the audio in other ways, but generally speaking the sound effects still work. In some cases, FLUDD sounds break, like when loading after collecting a shine. Reloading the level should restore the music and sound effects though.
+* Saving and loading during stage intro cutscenes works but seems a bit flaky, especially when using a real disc.
 
 ## Installation
 
-TODO: but noting here that you need to put "Texture Cache Accuracy = Safe" in dolphin 
+### Console (wii)
 
-## Known savestate bugs 
+Download the latest `susamune-launcher` zip from the Releases page. Extract to your `apps/` folder on your SD card, so that you have the folder structure: `apps:/susamune-launcher/{boot.dol,meta.xml,icon.png}`.  By default, the launcher is configured to load from a real disc. If you want to load your game from SD card or USB instead, follow the instructions in the comments in `meta.xml` to change the boot path to your ISO. 
 
-- ~~Crash when loading on blue save screen after collecting shine~~
-- ~~Timer in piantissimo levels etc. does not save and restore~~
-- ~~Goop on the ground of the level is not saved and restored.~~ Not a real bug, just a misconfigured Dolphin emulator setting.
-- ~~Crash during shine spawn?~~ Inconsistent. Pianta 3 still breaks on console only.
-- ~~Crash when loading during death~~ 
-- Delfino Piranha Plant #1 (bianco hills) crash: invalid read from 0x61f9f244, pc = 0x800bc614. Only on emulator for some reason?
-- FLUDD sounds break when loading after shine spawn. Might not be fixable reasonably. Sort of inevitable since we don't completely save/restore audio state. Can also just reload the level.
+To launch your game, simply go to the homebrew channel and run the susamune launcher app that should appear. Your gecko codes should work out of the box if you are already using Nintendont for practice. For example, for JP version, it expects codes in `codes/GMSJ01.gct` on your SD card.
 
-## TODO
+### Emulator
 
-- [ ] Add customized nintendont loader that loads the mod as a patch to a real disc or ISO. Removes the need to have an ISO at build time for console users.
-- [ ] Add nintendont toolchains to repo for reproducible compilations.
-- [ ] Integrate nintendont compilation with the cmake and create easy presets for console and emulator. 
-- [ ] Remove nintendont dependency on make.
-- [ ] Add a CI.
-- [ ] Emulator autodetect.
-- [ ] dont require different channels for different reason. just need to load project.bin from
-- [ ] Input tracing feature. Needs planning.
-- [ ] Switch everything to a single Clang compiler (based on the kuribo tree) that does PowerPC and ARM to simplify dependencies.
+Unfortunately, for emulator you currently have to build the patched ISO yourself. Only windows is supported for building. You will need CMake and Python in PATH. You will also need to place the game ISO at the repo root, with the name "GMSJ01.iso".
+
+In the root of the repo, first install the virtualenv with:
+
+```
+python setup_venv.py
+```
+
+Then configure with:
+
+```
+cmake --preset savestates_emu
+```
+
+Then build with:
+
+```
+cmake --build preset emu_iso
+```
+
+The iso should appear in `build/susamune_jp.iso`. 
+
+> [!IMPORTANT]
+> Saving and loading the goop is broken in Dolphin unless 'Texture Cache Accuracy' it set to Safe. You can find this option in the 'Hacks' tab of 'Graphics' in the game's config:
+> ![dolphin texture cache setting](doc/texture_cache_setting.png)
+> It says it degrades performance although on my machine it seems to run fine still. YMMV.
+
+In case you would like to maintain a different set of gecko codes for this practice rom and the standard ROM, or different in-game settings (for example if you would like to keep texture cache accuracy on fast for the standard ROM), you can instead configure with:
+
+```
+cmake --preset savestates_emu -DUPDATE_ISO_METADATA=ON
+```
+
+and build as before. This will produce an iso with game code GMSJ02 instead of GMSJ01, which will have a different settings file in Dolphin that can have its own cheats and etc.
+
+## Credits
+
+- https://github.com/DotKuribo/BetterSunshineEngine/
+    - Used heavily as reference. Clang fork with CodeWarrior ABI support used to compile mod (toolchain/)
+- https://github.com/DotKuribo/SunshineHeaderInterface
+    - THANK YOU FOR WRITING THIS
+- https://github.com/SuperrSonic/Better-Nintendont
+    - Nintendont fork used as base for the launcher in this repo
+- https://github.com/doldecomp/sms
+    - Used for Claude to know how everything works
+
+## FAQ (Frequently Anticipated Questions) 
+
+### Does it support Gamecube?
+
+No.
+
+### Why isn't this a Gecko code?
+
+Because:
+
+* On console, it relies on a specific memory layout of Nintendont to facilitate the savestates feature. Depending on your settings, version of Nintendont, or if you are using a fork, the savestate buffer might overlap with other things like the disc cache or emulated memory card, and you will get crashes. I am therefore distributing a fork of nintendont that has these things locked down.
+* It's not very optimized in terms of code size, and using dol_c_kit I get a code that is a larger than a lot of loaders will accept AFAIK (660 lines). This number seems quite bloated so I think it's just a compilation problem. Theoretically it should be easy to fashion into a gecko code. 
+* I might add other features in the future that might exceed the limits of what is reasaonble in a gecko code so I would like to not rely on them.
+
+### What regions/versions are supported?
+
+Currently only JP 1.0 (GMSJ01). But it has the tooling to build for PAL & US, it just needs all the memory addresses patched.

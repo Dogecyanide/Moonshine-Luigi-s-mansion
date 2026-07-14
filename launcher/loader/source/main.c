@@ -1521,16 +1521,21 @@ int main(int argc, char **argv)
  				free(decode_buffer);
  			}
  		}
-		else if(strncmp("sd:/", argv[1], 4) == 0 || strncmp("usb:/", argv[1], 5) == 0) {
+		else if(strncmp("sd:/", argv[1], 4) == 0 || strncmp("usb:/", argv[1], 5) == 0 || strncmp("di:", argv[1], 3) == 0) {
 			// build the config
 			ncfg->Magicbytes = 0x01070CF6;
 			ncfg->Version = NIN_CFG_VERSION;
-			
+
 		//	(void)"/games/Animal Crossing [GAFE01]/game.iso";
-			
+
 			if(argv[1][0] == 'u') {
 				ncfg->Config |= NIN_CFG_USB;
 				snprintf(ncfg->GamePath, sizeof(ncfg->GamePath), "%s", &argv[1][4]);
+			} else if(argv[1][0] == 'd') {
+				// Boot from the real GameCube disc drive. The kernel keys off
+				// GamePath == "di" to init RealDI; storage (cheats/config) stays
+				// on the device the launcher was run from.
+				snprintf(ncfg->GamePath, sizeof(ncfg->GamePath), "di");
 			} else
 				snprintf(ncfg->GamePath, sizeof(ncfg->GamePath), "%s", &argv[1][3]);
 			
@@ -2052,6 +2057,16 @@ int main(int argc, char **argv)
 				break;
 		}
 	}
+
+#ifndef ENABLE_MEMCARD_EMU
+	// Memory card emulation is disabled at build time: clear the flag before it
+	// is used or handed to the kernel, so neither the card file below nor any
+	// emulation code path (all gated on NIN_CFG_MEMCARDEMU) runs. The game falls
+	// back to real EXI/SRAM, i.e. no memory card present. Define
+	// ENABLE_MEMCARD_EMU to restore the stock behaviour.
+	ncfg->Config &= ~(NIN_CFG_MEMCARDEMU | NIN_CFG_MC_MULTI);
+	ncfg->MemCardBlocks = 0;
+#endif
 
 	if(ncfg->Config & NIN_CFG_MEMCARDEMU)
 	{

@@ -33,11 +33,15 @@ static const char di_path[] __attribute__((aligned(32))) = "/dev/di";
 static s32 di_fd = -1;
 u32 RealDiscCMD = 0, RealDiscError = 0;
 
-//No ISO Cache so lets take alot of memory
-static u8 *const DISC_FRONT_CACHE = (u8*)0x12000000;
-static u8 *const DISC_DRIVE_BUFFER = (u8*)0x12000800;
-static const u32 DISC_DRIVE_BUFFER_LENGTH = 0x7FF000;
-static u8 *const DISC_TMP_CACHE = (u8*)0x127FF800;
+//Disc mode never uses the ISO cache, so reuse its region (ISO.c CACHE_START /
+//CACHE_SIZE: 3 MiB at 0x11000000) for disc buffering. ISO and disc modes are
+//mutually exclusive, so sharing is safe, and it keeps RealDI out of 0x12000000+
+//where the savestate mod reserves MEM2. Reads larger than the buffer are split
+//by the DI read loop, so the smaller buffer only costs extra iterations.
+static u8 *const DISC_FRONT_CACHE = (u8*)0x11000000;
+static u8 *const DISC_DRIVE_BUFFER = (u8*)0x11000800;
+static const u32 DISC_DRIVE_BUFFER_LENGTH = 0x2FF000;
+static u8 *const DISC_TMP_CACHE = (u8*)0x112FF800;
 
 static s32 realdiqueue = -1;
 static vu32 realdi_msgrecv = 0;

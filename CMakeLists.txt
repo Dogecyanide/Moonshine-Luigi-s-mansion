@@ -194,6 +194,7 @@ add_custom_command(
         --update-metadata "${UPDATE_ISO_METADATA}"
         --in-iso "${IN_ISO_DIR}"
         --out-iso "${OUT_ISO_DIR}"
+        --vers "${VERS}"
         --dol "${PATCHED_DOL}"
         --output "${FINAL_ISO}"
     DEPENDS "${PATCHED_DOL}" "${IN_ISO_STAMP}"

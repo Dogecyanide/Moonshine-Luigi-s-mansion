@@ -11,6 +11,7 @@ def main():
     ap.add_argument("--update-metadata", default="OFF", choices=["ON","OFF"], help="patch ISO metadata (game ID, BMD, etc.)")
     ap.add_argument("--in-iso", required=True, help="Pristine extracted root (from extract_iso.py)")
     ap.add_argument("--out-iso", required=True, help="Working directory for the patched root")
+    ap.add_argument("--vers", default="jp", choices=["jp", "us", "pal"])
     ap.add_argument("--dol", required=True, help="Patched main.dol to install")
     ap.add_argument("--output", required=True, help="Path of the ISO to write")
     args = ap.parse_args()
@@ -24,7 +25,7 @@ def main():
 
     shutil.copyfile(args.dol, out_root / "sys" / "main.dol")
 
-    if args.update-metadata == "ON":
+    if args.update_metadata == "ON":
         # Region byte: mark the disc as the modded build.
         boot_bin = out_root / "sys" / "boot.bin"
         data = bytearray(boot_bin.read_bytes())
@@ -36,7 +37,13 @@ def main():
 
         sms_bmp = Path(__file__).resolve().parent.parent / "icon.bmp"
 
-        bnr = BNR(in_root / "files" / "opening.bnr", region=VERS_TO_REGION[env[VERS]])
+        VERS_TO_REGION = {
+            "jp": BNR.Regions.JAPAN,
+            "us": BNR.Regions.AMERICA,
+            "pal": BNR.Regions.EUROPE,
+        }
+
+        bnr = BNR(in_root / "files" / "opening.bnr", region=VERS_TO_REGION[args.vers])
         bnr.gameName = "susamune practice mod"
         bnr.gameDescription = "adds practice feature(s) to sunshine"
         bnr.gameTitle = "susamune!"

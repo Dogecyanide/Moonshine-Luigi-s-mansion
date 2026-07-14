@@ -9,8 +9,13 @@
     FOR {{ region }} ONLY!!! </long_description>
 <ahb_access/>
 <arguments>
-<arg>sd:/games/{{ disc_name }}.iso</arg>
-<arg>--cheats</arg> <!-- NOTE: ORDER IS IMPORTANT HERE !!!! --> 
+<arg>di:</arg> <!-- Load from real disc -->
+<!-- If you want to load from SD instead, comment above, uncomment below and provide a path e.g. -->
+<!-- <arg>sd:/games/{{ disc_name }}.iso</arg> -->
+<!-- or USB  -->
+<!-- <arg>usb:/games/{{ disc_name }}.iso</arg> -->
+<!-- NOTE: ORDER OF THE FOLLOWING ARGUMENTS IS IMPORTANT HERE !! Don't change! --> 
+<arg>--cheats</arg> 
 <arg>--noIPL</arg>
 </arguments>
 </app>

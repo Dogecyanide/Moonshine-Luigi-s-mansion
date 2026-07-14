@@ -45,7 +45,7 @@
     {
       "name": "console",
       "configurePreset": "savestates_console",
-      "targets": ["dol"]
+      "targets": ["launcher"]
     },
     {
       "name": "emu_iso",
