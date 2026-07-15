@@ -20,7 +20,7 @@
 //    parts of BSS that hold mutable game state -- the TFlagManager
 //    singleton pointer, gpMarDirector, gpMSound, the libc rand() state,
 //    every game module's static counters/caches. The boundaries below were
-//    derived from maps/jp.map: the first game-side modules are
+//    derived from the selected maps/<version>.map: the first game-side modules are
 //    MarioUtil.a/DrawUtil.cpp in .bss/.sbss and MoveBG.a/MapObjGeneral.cpp
 //    in .sdata. Everything below those addresses is JSystem / JAudio /
 //    runtime / OS / DVD / VI / PAD / CARD / GX / SI / EXI / THP / debugger
@@ -32,8 +32,7 @@
 // .data    : almost entirely vtables and static const tables. Read-only at
 //            runtime, so no need to copy it back.
 // stack    : we are running on it.
-// system   : everything below 0x803f1c50 in .bss, below 0x8040a208 in .sbss,
-//            below 0x80409008 in .sdata. See above.
+// system   : everything before the selected game-side range in each section.
 // audio    : MSound has internal queues that reference DSP-side state. We
 //            stopAllSound() before save AND before restore so the audio
 //            engine never sees inconsistent state.
@@ -56,6 +55,7 @@
 // =====================================================================
 
 #include "susamune/savestate.hxx"
+#include "susamune/addresses.hxx"
 
 #include "Dolphin/CARD.h"
 #include "Dolphin/OS.h"
@@ -94,11 +94,11 @@ static const u32 kSnapshotReservedSize = 0x01000000u; // 16 MiB
 
 // ---------------------------------------------------------------------
 // Static memory regions to snapshot (game-side BSS / sdata / sbss).
-// Boundaries are ranges from maps/jp.map; first game-side modules are:
-//   .bss  : MarioUtil.a/DrawUtil.cpp at 0x803f1c50
-//   .sdata: MoveBG.a/MapObjGeneral.cpp at 0x80409008
-//   .sbss : MarioUtil.a/DrawUtil.cpp at 0x8040a208
-// Each range ends at the section end given by the linker.
+// Boundaries come from maps/<version>.map. The first game modules are
+// MarioUtil.a/DrawUtil.cpp in BSS/SBSS and MoveBG.a/MapObjGeneral.cpp in
+// SDATA; every range stops before the JSystem/runtime portion of that linker
+// section. Section ends are unsafe: they include live renderer, DSP, heap,
+// and OS state that must not be restored.
 //
 // gpApplication itself sits at the very top of .bss (main.o) and holds
 // pointers and scene-id fields TApplication touches every frame, so we
@@ -114,18 +114,18 @@ struct StaticRange {
 };
 
 const StaticRange kStaticRanges[] = {
-    { 0x803e6000u, 0x803e604cu, "gpApp"      }, // gpApplication (TApplication, 0x4c)
-    { 0x803f1c50u, 0x80408ac0u, "bss-game"   }, // MarioUtil .. _e_bss
-    { 0x80409008u, 0x804097acu, "sdata-game" }, // MoveBG    .. _e_sdata
-    { 0x8040a208u, 0x8040b45cu, "sbss-game"  }, // MarioUtil .. _e_sbss
+    { SUSAMUNE_ADDR_APPLICATION, SUSAMUNE_ADDR_APPLICATION + sizeof(TApplication), "gpApp" },
+    { SUSAMUNE_ADDR_GAME_BSS_START, SUSAMUNE_ADDR_GAME_BSS_END, "bss-game" },
+    { SUSAMUNE_ADDR_GAME_SDATA_START, SUSAMUNE_ADDR_GAME_SDATA_END, "sdata-game" },
+    { SUSAMUNE_ADDR_GAME_SBSS_START, SUSAMUNE_ADDR_GAME_SBSS_END, "sbss-game" },
     // MSL rand.c `next` -- the seed for libc rand()/srand(), which is what
     // every gameplay RNG funnels through (MarioUtil MsRandF/MsRandI, so King
     // Boo's fruit pulls, Gooper Blooper / manta patterns, enemy timers, etc).
-    // It sits at 0x80408cf0 in .sdata, BELOW the sdata-game boundary at
-    // 0x80409008, so it was excluded before -- which is why the RNG stream
+    // It sits below the selected game-sdata boundary, so it was excluded
+    // before -- which is why the RNG stream
     // kept advancing across a load instead of rewinding. It's a plain 4-byte
     // counter with no hardware/kernel linkage, so restoring it is safe.
-    { 0x80408cf0u, 0x80408cf4u, "rand-seed"  }, // MSL rand.c `next`
+    { SUSAMUNE_ADDR_LIBC_RAND_SEED, SUSAMUNE_ADDR_LIBC_RAND_SEED + sizeof(u32), "rand-seed" },
 };
 const int kNumStaticRanges = sizeof(kStaticRanges) / sizeof(kStaticRanges[0]);
 
@@ -144,35 +144,35 @@ struct PointedAlloc {
 const PointedAlloc kPointedAllocs[] = {
     // TFlagManager::smInstance -- coin counts, shines, episode flags,
     // life count, etc. Without this, coin pickups are forgotten on load.
-    { 0x8040a290u, sizeof(TFlagManager),  "TFlagManager" },
+    { SUSAMUNE_ADDR_FLAG_MANAGER_INSTANCE, sizeof(TFlagManager),  "TFlagManager" },
     // TTimeRec::_instance -- the input/profiler recorder. Object size is
     // 0x820 bytes; the constructor argument 0xDFC0 is unrelated to it.
-    { 0x8040a2f8u, 0x820u,                "TTimeRec"     },
+    { SUSAMUNE_ADDR_TIME_REC_INSTANCE,     0x820u,                "TTimeRec"     },
     // SMSRumbleMgr -- rumble channels' active state.
-    { 0x8040a248u, sizeof(RumbleMgr),     "RumbleMgr"    },
+    { SUSAMUNE_ADDR_RUMBLE_MANAGER,        sizeof(RumbleMgr),     "RumbleMgr"    },
     // gpApplication.mGamePads[0..3] -- the four TMarioGamePad objects on
     // the root heap. The pointers themselves live inside the gpApplication
     // static range, but the per-pad button-meaning state machine
     // (mMeaning, mFrameMeaning, mState.mDisable, mState.mIsTalking, ...)
     // mutates every frame. Without restoring it, reloading while a dialog
     // had disabled the pad leaves the meaning bits stuck.
-    // Address = &gpApplication + offsetof(TApplication, mGamePads[i]) = 0x803e6020 + 4*i.
-    { 0x803e6020u, sizeof(TMarioGamePad), "Pad0"         },
-    { 0x803e6024u, sizeof(TMarioGamePad), "Pad1"         },
-    { 0x803e6028u, sizeof(TMarioGamePad), "Pad2"         },
-    { 0x803e602cu, sizeof(TMarioGamePad), "Pad3"         },
+    // Address = &gpApplication + offsetof(TApplication, mGamePads[i]).
+    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(0), sizeof(TMarioGamePad), "Pad0" },
+    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(1), sizeof(TMarioGamePad), "Pad1" },
+    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(2), sizeof(TMarioGamePad), "Pad2" },
+    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(3), sizeof(TMarioGamePad), "Pad3" },
     // gpApplication.mFader -- the screen fader's animation state lives on
     // the root heap. Without this the fader gets stuck mid-fade when you
     // load from inside a transition (shine-get fadeout, save card screen).
-    // Address = &gpApplication + offsetof(TApplication, mFader) = 0x803e6034.
-    { 0x803e6034u, sizeof(TSmplFader),    "Fader"        },
+    // Address = &gpApplication + offsetof(TApplication, mFader).
+    { SUSAMUNE_ADDR_APPLICATION_FADER, sizeof(TSmplFader), "Fader" },
 };
 const int kNumPointedAllocs = sizeof(kPointedAllocs) / sizeof(kPointedAllocs[0]);
 
 // One header lives at the very start of the snapshot buffer; the saved
 // bytes follow at kHeaderSize.
 const u32 kSnapshotMagic   = 0x53555341u; // 'SUSA'
-const u32 kSnapshotVersion = 5u;          // bumped: rand-seed range added to snapshot layout
+const u32 kSnapshotVersion = 7u;          // bumped: exclude system-owned static storage
 const u32 kHeaderSize      = 0x100u;
 // One slot per static range, one per pointed alloc, plus one for the heap.
 const int kMaxRegions      = kNumStaticRanges + kNumPointedAllocs + 1;
@@ -186,6 +186,7 @@ struct RegionEntry {
 struct SavestateHeader {
     u32 magic;
     u32 version;
+    u32 game_version;
     u32 heap_addr;        // value of gpApplication.mCurrentHeap at save time
     u32 heap_size;        // bytes between heap and heap->mEnd
     u8  area_id;
@@ -199,6 +200,8 @@ struct SavestateHeader {
     OSTime save_time;
     RegionEntry regions[kMaxRegions];
 };
+static_assert(sizeof(SavestateHeader) <= kHeaderSize,
+              "savestate header no longer fits in its reserved space");
 
 inline SavestateHeader *headerPtr() {
     return reinterpret_cast<SavestateHeader *>(kSnapshotBase);
@@ -370,6 +373,7 @@ bool SavestateManager::saveState() {
     SavestateHeader *h = headerPtr();
     h->magic        = 0; // committed at end as a torn-write guard
     h->version      = kSnapshotVersion;
+    h->game_version = SUSAMUNE_GAME_VERSION;
     h->heap_addr    = heapStart;
     h->heap_size    = heapSize;
     h->area_id      = gpApplication.mCurrentScene.mAreaID;
@@ -458,6 +462,10 @@ bool SavestateManager::loadState() {
         setStatus("E:version");
         return false;
     }
+    if (h->game_version != SUSAMUNE_GAME_VERSION) {
+        setStatus("E:region");
+        return false;
+    }
 
     JKRHeap *heap = gpApplication.mCurrentHeap;
     if (!heap) {
@@ -532,9 +540,11 @@ bool SavestateManager::loadState() {
         const RegionEntry &r = h->regions[i];
         wordCopy(reinterpret_cast<void *>(r.addr), bufferPtr() + r.buf_offset,
                  r.size);
-        // BSS / heap will be read back through cache, but we just wrote
-        // through cache so we need to make sure CPU sees the new bytes.
-        DCFlushRange(reinterpret_cast<void *>(r.addr), r.size);
+        // wordCopy() has already placed the restored bytes in D-cache, so the
+        // CPU can use them immediately. Store them for GX/DMA visibility, but
+        // do not flush-and-invalidate the whole stage heap: doing so makes the
+        // next frame fault every restored line back in from RAM.
+        DCStoreRange(reinterpret_cast<void *>(r.addr), r.size);
         // No instruction-cache invalidation: we never restore .text.
     }
 
@@ -552,7 +562,7 @@ bool SavestateManager::loadState() {
     if (gpMarDirector) {
         OSTime delta                = OSGetTime() - h->save_time;
         gpMarDirector->mStopwatch.mLast += delta;
-        DCFlushRange(&gpMarDirector->mStopwatch, sizeof(OSStopwatch));
+        DCStoreRange(&gpMarDirector->mStopwatch, sizeof(OSStopwatch));
     }
 
     unmuteAudioDma(dma);

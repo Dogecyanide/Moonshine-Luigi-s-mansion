@@ -11,6 +11,7 @@
 #include "Dolphin/THP.h"
 #include "susamune/settings_menu.hxx"
 #include "susamune/savestate.hxx"
+#include "susamune/addresses.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
 
 int gLoadMenu = 0;
@@ -25,7 +26,7 @@ SavestateManager* gSavestateMgr = nullptr;
 // match mod_region_size in scripts/patches.py.
 extern "C" void* getArenaLo() {
     const u32 kArenaReserve = 0x8000;
-    return (void*)(*(volatile u32*)0x80408d08 + kArenaReserve);  // __OSArenaLo
+    return (void*)(*(volatile u32*)SUSAMUNE_ADDR_OS_ARENA_LO + kArenaReserve);
 }
 
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
@@ -43,8 +44,10 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
         gSettingsMenu->changeStageHook();
         gSettingsMenu->mChangeStageReady = false;
         // QF timer reset flag
-        volatile u8* flag = ((volatile u8*)(0x817f00b3));
-        *flag = 1;
+        if (SUSAMUNE_ADDR_QF_TIMER_RESET != 0) {
+            volatile u8* flag = reinterpret_cast<volatile u8*>(SUSAMUNE_ADDR_QF_TIMER_RESET);
+            *flag = 1;
+        }
         director->moveStage();
         state = 9;
     }

@@ -1,6 +1,6 @@
 # susamune — context for agentic sessions
 
-A speedrun-practice mod for **Super Mario Sunshine (JP, GMSJ01)**. The mod's code is injected into the game at runtime — the primary distribution is a **custom Nintendont** (Homebrew Channel app) that patches GMSJ01 in memory on boot, so end users need only a real disc (or their own ISO on SD) and **no patched ISO/DOL**. Dolphin remains the primary *development* environment (via a patched `main.dol`). The companion repo `../../src/sms` is the in-progress decompilation of the game and the source of truth for any game-side type layouts; refer to it freely when sizing a struct or tracing a code path.
+A speedrun-practice mod for **Super Mario Sunshine** (JP GMSJ01, US GMSE01, and PAL GMSP01). The mod's code is injected into the game at runtime — the primary distribution is a **custom Nintendont** (Homebrew Channel app) that patches the selected disc revision in memory on boot, so end users need only a real disc (or their own ISO on SD) and **no patched ISO/DOL**. Dolphin remains the primary *development* environment (via a patched `main.dol`). The companion repo `../../src/sms` is the in-progress decompilation of the game and the source of truth for any game-side type layouts; refer to it freely when sizing a struct or tracing a code path.
 
 ## Repository layout
 
@@ -40,13 +40,13 @@ Three buckets:
 
 2. **The "game half" of `.bss` / `.sdata` / `.sbss`.** Pointers from heap-resident objects into BSS (TFlagManager singleton ptr, gpMarDirector, gpMSound, the libc rand seed, every game module's static counters) need to survive a load, so we restore the chunks of BSS that hold mutable game state.
 
-   Boundaries (derived from `maps/jp.map`):
-   - `.bss   [0x803e6000, 0x803e604c)` — `gpApplication` only (TApplication struct)
-   - `.bss   [0x803f1c50, 0x80408ac0)` — first game module is `MarioUtil/DrawUtil.cpp`
-   - `.sdata [0x80409008, 0x804097ac)` — first game module is `MoveBG/MapObjGeneral.cpp`
-   - `.sbss  [0x8040a208, 0x8040b45c)` — first game module is `MarioUtil/DrawUtil.cpp`
+   Boundaries are derived separately from each `maps/<vers>.map` and live in `include/susamune/addresses.hxx`:
+   - `gpApplication` only (TApplication struct)
+   - game `.bss` — from `MarioUtil/DrawUtil.cpp` to the first JSystem global
+   - game `.sdata` — from `MoveBG/MapObjGeneral.cpp` to the first JSystem global
+   - game `.sbss` — from `MarioUtil/DrawUtil.cpp` to the first JSystem global
 
-   Everything *below* those addresses is JKR / JAudio / runtime / OS / DVD / VI / PAD / CARD / GX / SI / EXI / THP / debugger state which we deliberately leave alone. Restoring OS thread queues, DVD command queues, audio DSP mailboxes, etc. crashes the console.
+   The linker sections are not game-only: JKR / JAudio / runtime / OS / DVD / VI / PAD / CARD / GX / SI / EXI / THP / debugger state appears both before and after the game subranges depending on the retail build. We deliberately leave that state alone. Restoring OS thread queues, DVD command queues, renderer state, or audio DSP mailboxes crashes or corrupts the console.
 
 3. **Tracked root-heap allocations** (the `kPointedAllocs` table). The `JKRSolidHeap` snapshot does NOT cover the root heap — there's a swath of allocations made in `TApplication::initialize()` (TFlagManager, gamepads, fader, rumble manager, ...) that live on the root heap before the JKRSolidHeap starts. The pointers to them are in BSS and get preserved by bucket 2 above, but the pointed-to bytes need a separate snapshot. For each one we follow the pointer at save time and capture the target as another region.
 
@@ -64,14 +64,14 @@ Three buckets:
 
 - **`.data`** — almost entirely vtables and static const tables, read-only at runtime.
 - **stack** — we're running on it.
-- **System BSS below the game-half boundaries** — JSystem / JAudio / OS / DVD / VI / PAD / CARD / GX / SI / EXI / THP / TRK. Hardware-tied or kernel-tied state.
+- **System storage outside the game-only ranges** — JSystem / JAudio / OS / DVD / VI / PAD / CARD / GX / SI / EXI / THP / TRK. Hardware-tied or kernel-tied state.
 - **Audio** — `gpMSound`'s playing-sounds list references DSP-side state we can't snapshot. We call `gpMSound->stopAllSound()` before BOTH save and restore, so the audio engine never sees inconsistent state. Music re-triggers naturally on the next stage event.
 - **`gpCardManager`** — has its own worker thread + mutex + cond var on the root heap. Byte-copying those would trash kernel-side bookkeeping. Instead, `loadState` spins (yielding) on `gpCardManager->getLastStatus() == CARD_ERROR_BUSY` until the card thread is idle before restoring anything. (Note the launcher disables memory-card *emulation* by default — see below — but the game still runs the same CARD code paths against real/absent EXI.)
 
 ### Invariants enforced before load
 
 - Snapshot magic matches (`'SUSA' = 0x53555341`)
-- Snapshot version matches (`kSnapshotVersion`, currently 4; bump when the layout breaks)
+- Snapshot version matches (`kSnapshotVersion`, currently 7; bump when the layout breaks)
 - `gpApplication.mCurrentHeap` is at the same address as save time (heap moved → all pointers stale)
 - Heap size matches
 - Area + episode IDs match — same-scenario only. Cross-scenario would have to deal with `freeAll()` between directors.
@@ -108,18 +108,18 @@ Buffer is sized at 16 MB reserved (`kSnapshotReservedSize`). Layout: 256-byte he
 
 ## Launcher (custom Nintendont) — `launcher/`
 
-`launcher/` is a Nintendont fork: an **ARM kernel** (`launcher/kernel`, built with devkitARM) plus a **PPC loader/GUI** (`launcher/loader`, built with devkitPPC + libogc). Packaged as the HBC app `susamune_launcher/{boot.dol, icon.png, meta.xml}`.
+`launcher/` is a Nintendont fork: an **ARM kernel** (`launcher/kernel`, built with devkitARM) plus a **PPC loader/GUI** (`launcher/loader`, built with devkitPPC + libogc). Packaged as the HBC app `susamune_launcher_<vers>/{boot.dol, icon.png, meta.xml}`.
 
 Key modifications from stock Nintendont:
 
 - **Mod injection** — `scripts/build_launcher.py` generates `launcher/kernel/susamune_inject.h` (the mod blob + the `(addr, word)` write list from the manifest, guarded by `SUSAMUNE_GAME_ID`). `launcher/kernel/Patch.c`'s `PatchSusamune()` (called from `PatchGame` after `DoPatches`) checks the running game id equals `SUSAMUNE_GAME_ID`, memcpy's the blob into MEM1 at `base & 0x7FFFFFFF`, applies each write, and flushes. The checked-in `susamune_inject.h` is a no-op placeholder until a build regenerates it.
-- **Gecko-code relocation** — the mod raises the arena floor by `mod_region_size` (`0x8000`), shifting every bottom-anchored heap allocation up by that much, which breaks Gecko practice codes that write to *hardcoded heap addresses*. `PatchSusamuneGeckoCodes()` (Patch.c, called right after the `.gct` is copied to `cheats_start`) scans the loaded cheat list for the known signature of the SMS "fast text" code (`dpad.txt` — it stamps Shift-JIS `!!!` into a buffer at `0x808D8A7E`) and bumps its two hardcoded addresses by `SUSAMUNE_ARENA_RESERVE` (exported into `susamune_inject.h` from the manifest's `region_reserve`, which is `mod_region_size`). The signature is 24 bytes (three code lines) so false matches are implausible. Add more `(signature → relocate)` entries here if other absolute-heap-address codes need it; the general alternative is a top-of-arena reservation (keeps bottom-anchored data at stock addresses, no per-code signatures).
+- **Gecko-code relocation** — the mod raises the arena floor by `mod_region_size` (`0x8000`), shifting every bottom-anchored heap allocation up by that much, which breaks Gecko practice codes that write to *hardcoded heap addresses*. `PatchSusamuneGeckoCodes()` (Patch.c, called right after the `.gct` is copied to `cheats_start`) recognizes the full regional DPad Functions code tails (`dpad.txt`, `dpad_us.txt`, and `dpad_pal.txt`) and bumps only their message-buffer writes by `SUSAMUNE_ARENA_RESERVE` (exported into `susamune_inject.h` from the manifest's `region_reserve`, which is `mod_region_size`). The long, region-specific signatures make false matches implausible. Add more `(signature → relocate)` entries here if other absolute-heap-address codes need it; the general alternative is a top-of-arena reservation (keeps bottom-anchored data at stock addresses, no per-code signatures).
 - **Real-disc (RealDI) boot** — pass a `di` game path (the loader accepts a `di:` arg / a `d…` argv). The RealDI disc buffer was relocated into the ISO-cache region (`0x11000000`, shrunk to 3 MB) so it no longer collides with the savestate mod's MEM2 window at `0x91F00000`.
 - **Memory-card emulation disabled by default** — `launcher/loader/source/main.c` clears `NIN_CFG_MEMCARDEMU | NIN_CFG_MC_MULTI` and zeroes `MemCardBlocks` under `#ifndef ENABLE_MEMCARD_EMU`, *before* the card-file init and the kernel handoff. This skips the loader's card-file creation and the kernel's `GCNCard_Load` (both flag-gated), so no card file is created and no emulation code runs; the game falls back to real-EXI/SRAM (reports no memory card). Define `ENABLE_MEMCARD_EMU` to restore stock behavior.
 
 ### Windows build detour (temporary)
 
-The vendored Nintendont Makefiles assume a POSIX shell + devkitPro. `scripts/build_launcher.py` bridges this on Windows: it locates Git Bash's `sh`, unpacks the bundled `launcher/nintendont_devkitpro_win32.zip` toolchain (a Git LFS file) if `DEVKITPPC`/`DEVKITARM` aren't in the environment, mirrors the missing `libwinpthread` DLL next to `cc1`, installs Python shims for the absent `bin2s`/`elf2dol` tools (`scripts/bin2s.py`, `scripts/elf2dol.py`), renders `meta.xml` from `launcher/meta.xml.j2` (jinja2 + git hash), and zips `susamune_launcher/{boot.dol, icon.png, meta.xml}`. **This whole detour is meant to be temporary** — the intent is to port the launcher build to CMake and delete the make/Git-Bash/DLL/shim machinery. Until then, expect `make`-driven output during the `launcher` target.
+The vendored Nintendont Makefiles assume a POSIX shell + devkitPro. `scripts/build_launcher.py` bridges this on Windows: it locates Git Bash's `sh`, unpacks the bundled `launcher/nintendont_devkitpro_win32.zip` toolchain (a Git LFS file) if `DEVKITPPC`/`DEVKITARM` aren't in the environment, mirrors the missing `libwinpthread` DLL next to `cc1`, installs Python shims for the absent `bin2s`/`elf2dol` tools (`scripts/bin2s.py`, `scripts/elf2dol.py`), renders `meta.xml` from `launcher/meta.xml.j2` (jinja2 + git hash), and zips `susamune_launcher_<vers>/{boot.dol, icon.png, meta.xml}`. **This whole detour is meant to be temporary** — the intent is to port the launcher build to CMake and delete the make/Git-Bash/DLL/shim machinery. Until then, expect `make`-driven output during the `launcher` target.
 
 ## Build & test loop
 
@@ -130,7 +130,7 @@ cmake --preset default                  # configure (Ninja, build/ dir)
 cmake --build build                     # build build/susamune_manifest.json (default `manifest` target)
 cmake --build build --target dol        # patch a main.dol from the source ISO (Dolphin dev)
 cmake --build build --target iso        # rebuild build/susamune_<vers>.iso
-cmake --build build --target launcher   # build the Nintendont HBC app zip (build/susamune_launcher.zip)
+cmake --build build --target launcher   # build the Nintendont HBC app zip (build/susamune_launcher_<vers>.zip)
 cmake --build build --target gecko      # emit build/susamune.txt (Dolphin cheat form; currently broken in-game)
 ```
 
@@ -150,7 +150,7 @@ Build options (toggle in `ccmake`/`cmake-gui`, or with `-D<name>=<value>`):
 - `ENABLE_SAVESTATE_DBG` (default OFF) — savestate debug output.
 - `ENABLE_WARP_MENU` (default OFF) — wire up `settings_menu.cpp`'s warp menu.
 - `UPDATE_ISO_METADATA` (default OFF) — for the `iso` target, bump the game code (01→02), swap banner/name, etc.
-- `VERS` (jp/us/pal, default jp) — game version; only `jp` is currently filled in (`us`/`pal` addresses are `None` in `patches.py`).
+- `VERS` (jp/us/pal, default jp) — game version. This selects the map/linker script, patch addresses, game ID, and the C++ MEM1 layout definitions.
 
 ## Decomp cross-reference
 

@@ -6,17 +6,22 @@ class PatchType(Enum):
     W32 = 3
 
 patches = [
-    {'jp': 0x800ec6c4, 'us': None, 'pal': None, 'sym': 'onUpdateGameMode', 'type': PatchType.BL},
-    {'jp': 0x800f9b64, 'us': None, 'pal': None, 'sym': 'onUpdate', 'type': PatchType.BL, 'nop_count': 3},
-    {'jp': 0x800ece3c, 'us': None, 'pal': None, 'sym': 'onSetup', 'type': PatchType.BL},
-    {'jp': 0x800f9d10, 'us': None, 'pal': None, 'sym': 'afterDraw', 'type': PatchType.BL},
-#   {'jp': 0x800fa110, 'us': None, 'pal': None, 'sym': 'onFinishAppState', 'type': PatchType.BL},
+    # changeState__12TMarDirectorFv + 0x2c0: updateGameMode() call.
+    {'jp': 0x800ec6c4, 'us': 0x80299140, 'pal': 0x80290fd8, 'sym': 'onUpdateGameMode', 'type': PatchType.BL},
+    # gameLoop__12TApplicationFv + 0x210: director->direct() call.
+    {'jp': 0x800f9b64, 'us': 0x802a6160, 'pal': 0x8029e070, 'sym': 'onUpdate', 'type': PatchType.BL, 'nop_count': 3},
+    # direct__12TMarDirectorFv + 0x80: setupObjects() call.
+    {'jp': 0x800ece3c, 'us': 0x802998b8, 'pal': 0x80291750, 'sym': 'onSetup', 'type': PatchType.BL},
+    # gameLoop__12TApplicationFv + 0x3bc: THPPlayerDrawDone() call.
+    {'jp': 0x800f9d10, 'us': 0x802a630c, 'pal': 0x8029e21c, 'sym': 'afterDraw', 'type': PatchType.BL},
+#   {'jp': 0x800fa110, 'us': ..., 'pal': ..., 'sym': 'onFinishAppState', 'type': PatchType.BL},
     # insert NOPs to speed up boot process
-    {'jp': 0x800fadf4, 'us': None, 'pal': None, 'val': 0x60000000, 'type': PatchType.W32},
-    {'jp': 0x800fae08, 'us': None, 'pal': None, 'val': 0x60000000, 'type': PatchType.W32},
+    # initialize__12TApplicationFv + 0x2c / +0x40.
+    {'jp': 0x800fadf4, 'us': 0x802a73f0, 'pal': 0x8029f46c, 'val': 0x60000000, 'type': PatchType.W32},
+    {'jp': 0x800fae08, 'us': 0x802a7404, 'pal': 0x8029f480, 'val': 0x60000000, 'type': PatchType.W32},
     # Report a raised arena floor so the root heap starts above the mod's
     # region (see getArenaLo in src/main.cpp). Replaces OSGetArenaLo's body.
-    {'jp': 0x8008dcbc, 'us': None, 'pal': None, 'sym': 'getArenaLo', 'type': PatchType.B},
+    {'jp': 0x8008dcbc, 'us': 0x8034339c, 'pal': 0x8033b51c, 'sym': 'getArenaLo', 'type': PatchType.B},
 ]
 
 # The mod is linked into a region carved from the BOTTOM of the game's heap
@@ -25,7 +30,11 @@ patches = [
 # __ArenaLo + mod_region_size) free for the mod's code + data. The top of the
 # arena is deliberately left alone: the apploader stores the FST there. The
 # game's stack is untouched.
-arena_lo = {'jp': 0x80426020, 'us': None, 'pal': None}  # __ArenaLo, from maps/<vers>.map
+arena_lo = {
+    'jp': 0x80426020,
+    'us': 0x80429800,
+    'pal': 0x80420d60,
+}  # __ArenaLo, from maps/<vers>.map
 
 # Size of the carved region. Comes out of the ~19 MiB heap, so it can be
 # generous; the mod must fit within it. MUST match kArenaReserve in main.cpp.
@@ -36,7 +45,11 @@ base_addr = {v: a for v, a in arena_lo.items()}
 
 # Full disc game id (bytes 0..3 of the disc header), used by the launcher to
 # apply the injection only to the intended game.
-game_id = {'jp': 0x474D534A, 'us': None, 'pal': None}  # "GMSJ"
+game_id = {
+    'jp': 0x474D534A,   # "GMSJ"
+    'us': 0x474D5345,   # "GMSE"
+    'pal': 0x474D5350,  # "GMSP"
+}
 
 # Metadata for the launcher's meta.xml (region label + disc image name).
 region = {'jp': 'JP', 'us': 'US', 'pal': 'PAL'}
