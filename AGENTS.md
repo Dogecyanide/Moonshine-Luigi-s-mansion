@@ -42,11 +42,14 @@ Three buckets:
 
    Boundaries (derived from `maps/jp.map`):
    - `.bss   [0x803e6000, 0x803e604c)` — `gpApplication` only (TApplication struct)
-   - `.bss   [0x803f1c50, 0x80408ac0)` — first game module is `MarioUtil/DrawUtil.cpp`
+   - `.bss   [0x803f1c50, 0x80408ac0)` — first game module is `MarioUtil/DrawUtil.cpp` — **but with the SMS audio modules carved out** (see below); realised as three sub-ranges `bss-game-1/2/3` in `kStaticRanges`
    - `.sdata [0x80409008, 0x804097ac)` — first game module is `MoveBG/MapObjGeneral.cpp`
    - `.sbss  [0x8040a208, 0x8040b45c)` — first game module is `MarioUtil/DrawUtil.cpp`
+   - `.sdata [0x80408cf0, 0x80408cf4)` — MSL `rand.c` `next`, the libc RNG seed (below the sdata-game boundary; pulled in as a one-off so King Boo fruit pulls / manta patterns / enemy RNG rewind on load)
 
    Everything *below* those addresses is JKR / JAudio / runtime / OS / DVD / VI / PAD / CARD / GX / SI / EXI / THP / debugger state which we deliberately leave alone. Restoring OS thread queues, DVD command queues, audio DSP mailboxes, etc. crashes the console.
+
+   **Audio-module carve-out.** Two chunks *inside* the game-bss range are excluded because they hold live JAudio handles/track pointers: `System.a/MSoundMainSide.cpp` `[0x803f2c38, 0x803f2cf0)` and the whole `MSound.a` cluster `[0x803f44d0, 0x803f57a0)` (`MAnmSound` … `MSModBgm`). We `stopAllSound()` on both save and load (resetting JAudio), so restoring an *old* copy of those handles would point them at track state that has since been freed/reused → dangling deref; leaving the audio BSS untouched keeps it consistent with the post-`stopAllSound` JAudio state. (This was originally an attempt to fix the Pianta-talk shine-get hang below — it did **not** fix it — but it's kept as a correctness improvement, since restoring stale JAudio handles is wrong regardless.)
 
 3. **Tracked root-heap allocations** (the `kPointedAllocs` table). The `JKRSolidHeap` snapshot does NOT cover the root heap — there's a swath of allocations made in `TApplication::initialize()` (TFlagManager, gamepads, fader, rumble manager, ...) that live on the root heap before the JKRSolidHeap starts. The pointers to them are in BSS and get preserved by bucket 2 above, but the pointed-to bytes need a separate snapshot. For each one we follow the pointer at save time and capture the target as another region.
 
@@ -65,16 +68,17 @@ Three buckets:
 - **`.data`** — almost entirely vtables and static const tables, read-only at runtime.
 - **stack** — we're running on it.
 - **System BSS below the game-half boundaries** — JSystem / JAudio / OS / DVD / VI / PAD / CARD / GX / SI / EXI / THP / TRK. Hardware-tied or kernel-tied state.
-- **Audio** — `gpMSound`'s playing-sounds list references DSP-side state we can't snapshot. We call `gpMSound->stopAllSound()` before BOTH save and restore, so the audio engine never sees inconsistent state. Music re-triggers naturally on the next stage event.
+- **Audio** — `gpMSound`'s playing-sounds list references DSP-side state we can't snapshot. We call `gpMSound->stopAllSound()` before BOTH save and restore, so the audio engine never sees inconsistent state. Music re-triggers naturally on the next stage event. This is also why the SMS audio-module BSS is carved out of the game-bss range (see the audio-module carve-out above) — restoring it would put back stale JAudio handles.
 - **`gpCardManager`** — has its own worker thread + mutex + cond var on the root heap. Byte-copying those would trash kernel-side bookkeeping. Instead, `loadState` spins (yielding) on `gpCardManager->getLastStatus() == CARD_ERROR_BUSY` until the card thread is idle before restoring anything. (Note the launcher disables memory-card *emulation* by default — see below — but the game still runs the same CARD code paths against real/absent EXI.)
 
 ### Invariants enforced before load
 
 - Snapshot magic matches (`'SUSA' = 0x53555341`)
-- Snapshot version matches (`kSnapshotVersion`, currently 4; bump when the layout breaks)
+- Snapshot version matches (`kSnapshotVersion`, currently 6; bump when the layout breaks)
 - `gpApplication.mCurrentHeap` is at the same address as save time (heap moved → all pointers stale)
 - Heap size matches
 - Area + episode IDs match — same-scenario only. Cross-scenario would have to deal with `freeAll()` between directors.
+- **Not in a load/intro transition** (`inLoadTransition()`): refuses while `gpMarDirector->_260 == 0` (the async setup thread is still populating the heap — the all-black loading screen) or while `mCurState < STATE_GAME_STARTING` (the black init + intro-cutscene states 0/1). It is allowed from `STATE_GAME_STARTING` (2) onward — i.e. as soon as the opening wipe fades the stage back in and Mario plays his materialise-in animation, since the whole stage is loaded and nothing streams in dynamically by then.
 
 ### Where the snapshot buffer lives
 
@@ -87,6 +91,13 @@ Buffer is sized at 16 MB reserved (`kSnapshotReservedSize`). Layout: 256-byte he
 
 ## Known issues / open work
 
+- **SHELVED: console-only hang loading during an NPC-talk shine-get.** Loading a savestate taken during the shine-get animation that a Pianta hands you (repro'd on Pianta Village ep 3 and 6, Sirena Beach ep 6) hard-hangs the console. What we know:
+  - **Console only** — cannot reproduce on Dolphin (its permissive memory map tolerates whatever real hardware faults on).
+  - **Hangs *inside* `loadState`, not after it.** With `ENABLE_SAVESTATE_DBG`, the on-screen status text — re-rendered every frame, so the last value drawn before the freeze is the last checkpoint reached — stays on the pre-load text (`saved`) and never reaches `loaded`. So the restore loop itself wedges before returning; the graphics freeze and audio stays muted (we mute the DAC across the interrupts-off restore and never reach the un-mute).
+  - **Not a bad restore-write address.** A temporary guard that validated every restore target against MEM1 (`0x80003100–0x81800000`) and reported out-of-range regions as `R<i> <addr>` never fired — every `r.addr`/`r.size` we write is in range. So it's not a captured pointer resolving to an unmapped address on our side.
+  - **No exception dump.** Nintendont installs its own exception handler, so there's nothing on screen, and an `OSSetErrorHandler` overlay from the mod (record SRR0/DAR, skip the faulting instruction, resume so the render loop shows it) never displayed — Nintendont's handler wins and/or the resume didn't take. `OSFatal` isn't linked in the game either.
+  - **Ruled out:** the SMS audio-module BSS (carving it out of the snapshot — see the audio carve-out above — did *not* fix this, though it's kept as a correctness improvement); and all shine/talk/demo/event-interpreter state, which the decomp shows is entirely in the captured stage heap.
+  - **Leading remaining suspects:** (1) the **MEM2 snapshot buffer at `0x91F00000`** colliding with Nintendont specifically on these larger stages (Pianta Village / Sirena Beach have big heaps → big snapshots → the copy reads far into MEM2) — note save works, so the *write* range is fine, but a load-time read or a subsequent Nintendont I/O could still wedge; (2) the **long interrupts-disabled window** during the multi-MB heap copy starving Nintendont's background I/O on these bigger heaps (save does a similar copy though, and save works, which argues against this). Next diagnostic step if picked back up: relocate/uncached-mirror the snapshot buffer and retest; or chunk the copy and re-enable interrupts between chunks.
 - **Buffer placement on console** is best-effort. The previous attempt at `0xD1000000` (uncached MEM2 + 16 MB) collided with Nintendont; current `0x91F00000` is the educated guess. If saves work but subsequent Nintendont I/O explodes, this is the first thing to move.
 - **Async DVD load mid-snapshot** — there's no `JKRDvdRipper::isIdle()`-style check. If a snapshot is taken mid-archive-load, you'd capture an inconsistent heap. In practice gameplay is quiescent, but a robust version would gate on this.
 - **Cross-scenario load** is refused. To support it we'd need to trigger the same boot-time setup the game's stage transition does — much more involved.
@@ -112,7 +123,7 @@ Buffer is sized at 16 MB reserved (`kSnapshotReservedSize`). Layout: 256-byte he
 
 Key modifications from stock Nintendont:
 
-- **Mod injection** — `scripts/build_launcher.py` generates `launcher/kernel/susamune_inject.h` (the mod blob + the `(addr, word)` write list from the manifest, guarded by `SUSAMUNE_GAME_ID`). `launcher/kernel/Patch.c`'s `PatchSusamune()` (called from `PatchGame` after `DoPatches`) checks the running game id equals `SUSAMUNE_GAME_ID`, memcpy's the blob into MEM1 at `base & 0x7FFFFFFF`, applies each write, and flushes. The checked-in `susamune_inject.h` is a no-op placeholder until a build regenerates it.
+- **Mod injection** — `scripts/build_launcher.py` generates `susamune_inject.h` (the mod blob + the `(addr, word)` write list from the manifest, guarded by `SUSAMUNE_GAME_ID`). It's a **build artifact** written into the CMake build dir (next to the manifest), *not* version-controlled; the kernel Makefile finds it via `-I$(SUSAMUNE_INJECT_DIR)`, which `build_launcher.py` passes as a make variable. `launcher/kernel/Patch.c` includes it under `__has_include` so the kernel still compiles standalone (the `PatchSusamune*` functions fall back to no-ops when `SUSAMUNE_GAME_ID` is undefined). `PatchSusamune()` (called from `PatchGame` after `DoPatches`) checks the running game id equals `SUSAMUNE_GAME_ID`, memcpy's the blob into MEM1 at `base & 0x7FFFFFFF`, applies each write, and flushes.
 - **Gecko-code relocation** — the mod raises the arena floor by `mod_region_size` (`0x8000`), shifting every bottom-anchored heap allocation up by that much, which breaks Gecko practice codes that write to *hardcoded heap addresses*. `PatchSusamuneGeckoCodes()` (Patch.c, called right after the `.gct` is copied to `cheats_start`) scans the loaded cheat list for the known signature of the SMS "fast text" code (`dpad.txt` — it stamps Shift-JIS `!!!` into a buffer at `0x808D8A7E`) and bumps its two hardcoded addresses by `SUSAMUNE_ARENA_RESERVE` (exported into `susamune_inject.h` from the manifest's `region_reserve`, which is `mod_region_size`). The signature is 24 bytes (three code lines) so false matches are implausible. Add more `(signature → relocate)` entries here if other absolute-heap-address codes need it; the general alternative is a top-of-arena reservation (keeps bottom-anchored data at stock addresses, no per-code signatures).
 - **Real-disc (RealDI) boot** — pass a `di` game path (the loader accepts a `di:` arg / a `d…` argv). The RealDI disc buffer was relocated into the ISO-cache region (`0x11000000`, shrunk to 3 MB) so it no longer collides with the savestate mod's MEM2 window at `0x91F00000`.
 - **Memory-card emulation disabled by default** — `launcher/loader/source/main.c` clears `NIN_CFG_MEMCARDEMU | NIN_CFG_MC_MULTI` and zeroes `MemCardBlocks` under `#ifndef ENABLE_MEMCARD_EMU`, *before* the card-file init and the kernel handoff. This skips the loader's card-file creation and the kernel's `GCNCard_Load` (both flag-gated), so no card file is created and no emulation code runs; the game falls back to real-EXI/SRAM (reports no memory card). Define `ENABLE_MEMCARD_EMU` to restore stock behavior.

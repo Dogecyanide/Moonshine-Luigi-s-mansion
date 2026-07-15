@@ -115,7 +115,22 @@ struct StaticRange {
 
 const StaticRange kStaticRanges[] = {
     { 0x803e6000u, 0x803e604cu, "gpApp"      }, // gpApplication (TApplication, 0x4c)
-    { 0x803f1c50u, 0x80408ac0u, "bss-game"   }, // MarioUtil .. _e_bss
+    // The game half of .bss, [0x803f1c50, 0x80408ac0), but with the SMS audio
+    // modules carved OUT. Those modules (System.a/MSoundMainSide and the whole
+    // MSound.a cluster) sit inside the game-bss range yet hold live JAudio
+    // handles/track pointers. We stopAllSound() on both save and load, which
+    // resets JAudio, so restoring an OLD copy of those handles points them at
+    // track state that has since been freed/reused -> dangling deref, an
+    // intermittent crash when loading during e.g. a Pianta-talk shine-get
+    // (talkModeIn + shine BGM leave those handles live). Leaving the audio BSS
+    // untouched keeps it consistent with the post-stopAllSound JAudio state,
+    // matching the "we deliberately don't snapshot audio" design. Boundaries
+    // from maps/jp.map:
+    //   MSoundMainSide.cpp .bss = [0x803f2c38, 0x803f2cf0)
+    //   MSound.a cluster   .bss = [0x803f44d0, 0x803f57a0)  (MAnmSound..MSModBgm)
+    { 0x803f1c50u, 0x803f2c38u, "bss-game-1" }, // DrawUtil .. (before MSoundMainSide)
+    { 0x803f2cf0u, 0x803f44d0u, "bss-game-2" }, // (after MSoundMainSide) .. (before MSound.a)
+    { 0x803f57a0u, 0x80408ac0u, "bss-game-3" }, // (after MSound.a) .. _e_bss
     { 0x80409008u, 0x804097acu, "sdata-game" }, // MoveBG    .. _e_sdata
     { 0x8040a208u, 0x8040b45cu, "sbss-game"  }, // MarioUtil .. _e_sbss
     // MSL rand.c `next` -- the seed for libc rand()/srand(), which is what
@@ -172,7 +187,7 @@ const int kNumPointedAllocs = sizeof(kPointedAllocs) / sizeof(kPointedAllocs[0])
 // One header lives at the very start of the snapshot buffer; the saved
 // bytes follow at kHeaderSize.
 const u32 kSnapshotMagic   = 0x53555341u; // 'SUSA'
-const u32 kSnapshotVersion = 5u;          // bumped: rand-seed range added to snapshot layout
+const u32 kSnapshotVersion = 6u;          // bumped: SMS audio-module BSS carved out of snapshot
 const u32 kHeaderSize      = 0x100u;
 // One slot per static range, one per pointed alloc, plus one for the heap.
 const int kMaxRegions      = kNumStaticRanges + kNumPointedAllocs + 1;
@@ -262,12 +277,16 @@ inline void unmuteAudioDma(bool wasOn) {
 // crash. TMarDirector::direct() returns early every frame while _260 == 0,
 // which is precisely the window where the setup thread (gSetupThread) has not
 // been joined yet -- i.e. the all-black "loading" screen. It flips to 1 only
-// after the load completes. States 0..3 (INTRO_INIT / INTRO_PLAYING /
-// GAME_STARTING / opening wipe) are the intro cutscene + fade-in that follow,
-// where the camera demo and further archive/particle loads are still settling
-// and snapshotting was also seen to crash. Only allow it once the director has
-// reached STATE_NORMAL (4) or a later, settled state (pause / shine-select /
-// blue save screen -- the transitions we deliberately support restoring from).
+// after the load completes.
+//
+// After that, the opening runs: STATE_INTRO_INIT (0) then, on stages with an
+// intro, STATE_INTRO_PLAYING (1) -- the demo-camera cutscene, which still
+// crashed when snapshotted. We block those two. Once the intro's closing/
+// opening wipe fades the stage back in, the director reaches
+// STATE_GAME_STARTING (2) / the opening-wipe state (3), where Mario plays his
+// materialise-in animation before the "GO": the whole stage is loaded and
+// visible by then (SMS loads everything up front -- nothing streams in
+// dynamically), so snapshotting is safe. Allow state >= 2.
 bool inLoadTransition() {
     if (!gpMarDirector) {
         return true;
@@ -275,11 +294,16 @@ bool inLoadTransition() {
     if (gpMarDirector->_260 == 0) {
         return true; // setup thread still loading -- all-black screen
     }
-    if (gpMarDirector->mCurState < TMarDirector::STATE_NORMAL) {
-        return true; // intro cutscene / stage fade-in still playing
+    if (gpMarDirector->mCurState < TMarDirector::STATE_GAME_STARTING) {
+        return true; // black init (0) / intro-cutscene (1) still playing
     }
     return false;
 }
+
+// Backing store for the on-screen status text. Lives in the mod's BSS (not the
+// pressured system heap, and not the stage heap that gets freed between levels)
+// so J2DTextBox::mStrPtr can point at it permanently. See SavestateManager ctor.
+char sStatusBuf[32];
 
 } // namespace
 
@@ -295,15 +319,32 @@ SavestateManager::SavestateManager() {
     mInfoText->mGradientBottom   = { 255, 200, 0, 255 };
     mInfoText->mGradientTop      = { 255, 200, 0, 255 };
 
+    // J2DTextBox::setString does `delete[] mStrPtr; mStrPtr = new char[...]` on
+    // whatever heap is current -- which during gameplay is the stage heap. That
+    // buffer then gets freed on the next stage transition, leaving mStrPtr
+    // dangling so draw() renders garbage. Instead we own a fixed BSS buffer and
+    // point mStrPtr at it once; setStatus() just copies into it, never
+    // reallocating (and never touching the pressured system heap). Free the
+    // tiny buffer the ctor allocated for "ready" first.
+    if (mInfoText->mStrPtr) {
+        delete[] mInfoText->mStrPtr;
+    }
+    mInfoText->mStrPtr = sStatusBuf;
+    setStatus("ready");
+
     // Mark the snapshot buffer empty so a stale MEM2 load doesn't
     // accidentally pass the magic check after a cold boot.
     headerPtr()->magic = 0;
 }
 
 void SavestateManager::setStatus(const char *msg) {
-    if (mInfoText) {
-        mInfoText->setString(msg);
+    // Copy into our static buffer (mStrPtr already points at it); do NOT call
+    // J2DTextBox::setString, which reallocates on the current/stage heap.
+    u32 i = 0;
+    for (; msg[i] != '\0' && i < sizeof(sStatusBuf) - 1; i++) {
+        sStatusBuf[i] = msg[i];
     }
+    sStatusBuf[i] = '\0';
 }
 
 bool SavestateManager::saveState() {

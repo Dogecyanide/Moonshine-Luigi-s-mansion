@@ -7,3 +7,5 @@ __pycache__/
 *.iso
 **.o
 syms.log
+# Generated mod-injection header (build artifact, lives in build/ at build time)
+launcher/kernel/susamune_inject.h

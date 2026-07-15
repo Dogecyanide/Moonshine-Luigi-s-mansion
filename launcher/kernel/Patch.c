@@ -37,7 +37,15 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "codehandler.h"
 #include "codehandleronly.h"
 #include "ff_utf8.h"
-#include "susamune_inject.h"
+// Generated build artifact (mod blob + write list), written to the CMake build
+// dir and found via -I$(SUSAMUNE_INJECT_DIR); not version-controlled. Guarded so
+// the kernel still compiles standalone (PatchSusamune* fall back to no-ops when
+// SUSAMUNE_GAME_ID is undefined).
+#if defined(__has_include)
+#  if __has_include("susamune_inject.h")
+#    include "susamune_inject.h"
+#  endif
+#endif
 
 //#define DEBUG_DSP  // Very slow!! Replace with raw dumps?
 

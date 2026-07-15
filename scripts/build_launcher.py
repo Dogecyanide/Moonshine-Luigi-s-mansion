@@ -46,8 +46,6 @@ DEVKITARM = Path(os.environ.get("DEVKITARM", BUILTIN_TOOLCHAIN_DIR / "devkitARM"
 NEED_TOOLCHAIN_UNZIP = ((not os.path.exists(BUILTIN_TOOLCHAIN_DIR)) and
     ((os.environ.get("DEVKITPPC") is None) or (os.environ.get("DEVKITARM") is None)))
 
-# Generated header consumed by launcher/kernel/Patch.c to inject the mod.
-INJECT_HEADER = LAUNCHER_DIR / "kernel" / "susamune_inject.h"
 
 # HBC app folder produced by the loader build (boot.dol lands here).
 APP_DIR = LAUNCHER_DIR / "nintendont"
@@ -149,7 +147,12 @@ def main():
             z.extractall(LAUNCHER_DIR)
 
     manifest = json.loads(Path(args.manifest).read_text())
-    write_inject_header(manifest, INJECT_HEADER)
+    # The generated inject header is a build artifact (its contents depend on the
+    # mod blob + build flags), so it lives in the build dir alongside the
+    # manifest, not in version control. The kernel Makefile picks it up via
+    # -I$(SUSAMUNE_INJECT_DIR) below.
+    inject_dir = Path(args.manifest).resolve().parent
+    write_inject_header(manifest, inject_dir / "susamune_inject.h")
     install_shims()
     ensure_compiler_dlls()
     APP_DIR.mkdir(parents=True, exist_ok=True)  # loader copies boot.dol here
@@ -161,10 +164,15 @@ def main():
         DEVKITARM=str(DEVKITARM),
     )
 
+    # Command-line make variable (propagates to the recursive kernel make) that
+    # points the compiler's include search at the build dir where we just wrote
+    # susamune_inject.h. Forward slashes so it's happy through sh and gcc.
+    inject_inc = f"SUSAMUNE_INJECT_DIR={inject_dir.as_posix()}"
+
     make = shutil.which("make")
     if make is None:
         raise RuntimeError("`make` not found on PATH")
-    cmd = [make, "-C", str(LAUNCHER_DIR)]
+    cmd = [make, "-C", str(LAUNCHER_DIR), inject_inc]
     if os.name == "nt":
         # Drive make through Git Bash's sh + coreutils (see find_git_bash) so the
         # build works from any parent shell. Recursive `$(MAKE)` also runs
@@ -175,7 +183,8 @@ def main():
         env["PATH"] = str(sh.parent) + os.pathsep + env["PATH"]
         make_short = short_path(make)
         cmd = [make_short, "-C", str(LAUNCHER_DIR),
-               f"MAKE={make_short}", f"SHELL={short_path(sh)}", "windows=1"]
+               f"MAKE={make_short}", f"SHELL={short_path(sh)}", "windows=1",
+               inject_inc]
 
     subprocess.run(cmd, env=env, check=True)
 

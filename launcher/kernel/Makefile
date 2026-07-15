@@ -26,7 +26,7 @@ CFLAGS	:= -mbig-endian -O2 -std=gnu89 -g -I. -Wall \
 	   -mcpu=arm926ej-s -msoft-float -mfloat-abi=soft \
 	   -fdata-sections -ffunction-sections -fno-builtin-toupper -fno-builtin-memcpy \
 	   -fno-builtin-memset -fno-builtin-memcmp -fno-builtin-malloc -fno-builtin-free
-CPPFLAGS := -I. -I../fatfs -I../codehandler
+CPPFLAGS := -I. -I../fatfs -I../codehandler $(addprefix -I,$(SUSAMUNE_INJECT_DIR))
 
 ASFLAGS	:= -mbig-endian -mcpu=arm926ej-s
 LDFLAGS	:= -nostartfiles -nodefaultlibs -mbig-endian -Wl,--gc-sections,-T,kernel.ld,-Map,kernel.map -n
