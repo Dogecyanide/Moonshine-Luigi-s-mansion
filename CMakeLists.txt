@@ -47,6 +47,11 @@ endif()
 
 set(VERS "jp" CACHE STRING "Game version to build against")
 set_property(CACHE VERS PROPERTY STRINGS jp us pal)
+set(SUPPORTED_VERS jp us pal)
+if(NOT VERS IN_LIST SUPPORTED_VERS)
+    message(FATAL_ERROR "VERS must be one of: ${SUPPORTED_VERS}")
+endif()
+string(TOUPPER "${VERS}" VERS_UPPER)
 
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "Where to load the iso from by default in meta.xml")
 set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
@@ -114,6 +119,7 @@ target_compile_options(susamune_obj PRIVATE
 target_compile_definitions(susamune_obj PRIVATE
     IS_EMULATOR=$<BOOL:${IS_EMULATOR}>
     ENABLE_SAVESTATE_DBG=$<BOOL:${ENABLE_SAVESTATE_DBG}>
+    SUSAMUNE_VERSION_${VERS_UPPER}=1
     $<$<BOOL:${ENABLE_WARP_MENU}>:ENABLE_WARP_MENU>)
 
 target_link_options(susamune_obj PRIVATE ${SHARED_FLAGS} -fuse-ld=lld -Werror -r)
@@ -129,7 +135,7 @@ set(MANIFEST "${CMAKE_BINARY_DIR}/susamune_manifest.json")
 set(PATCHED_DOL "${CMAKE_BINARY_DIR}/main.dol")
 set(GECKO_TXT "${CMAKE_BINARY_DIR}/susamune.txt")
 set(FINAL_ISO "${CMAKE_BINARY_DIR}/susamune_${VERS}.iso")
-set(LAUNCHER_ZIP "${CMAKE_BINARY_DIR}/susamune_launcher.zip")
+set(LAUNCHER_ZIP "${CMAKE_BINARY_DIR}/susamune_launcher_${VERS}.zip")
 
 add_custom_command(
     OUTPUT "${IN_ISO_STAMP}"
@@ -221,4 +227,14 @@ add_custom_target(launcher
 add_custom_target(regen_ld
     COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/map_to_ld.py" "${MAP_FILE}" "${LD_SCRIPT}"
     COMMENT "Regenerating ${LD_SCRIPT} from ${MAP_FILE}"
+    VERBATIM)
+
+add_custom_target(regen_all_ld
+    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/map_to_ld.py"
+        "${CMAKE_SOURCE_DIR}/maps/jp.map" "${CMAKE_SOURCE_DIR}/maps/jp.ld"
+    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/map_to_ld.py"
+        "${CMAKE_SOURCE_DIR}/maps/us.map" "${CMAKE_SOURCE_DIR}/maps/us.ld"
+    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/map_to_ld.py"
+        "${CMAKE_SOURCE_DIR}/maps/pal.map" "${CMAKE_SOURCE_DIR}/maps/pal.ld"
+    COMMENT "Regenerating linker scripts for all supported versions"
     VERBATIM)

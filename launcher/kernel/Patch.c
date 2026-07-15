@@ -4073,70 +4073,105 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 // bottom-anchored heap allocation ends up that many bytes higher than on stock.
 // Most practice codes are fine (they patch .text, read .bss, or dereference
 // live pointers), but a code that writes to a *hardcoded* heap address misses
-// its target. The SMS "fast text" code (dpad.txt) is one: its unconditional
-// tail stamps the Shift-JIS string "!!!" (0x8149 x3) into a message buffer at
-// the absolute address 0x808D8A7E and null-terminates it at 0x808D8A84. Under
-// the mod that buffer lives at +SUSAMUNE_ARENA_RESERVE, so the writes land in
-// dead space and dialogue renders as the default text instead.
+// its target. The regional SMS DPad Functions code is one. Its JP and US
+// variants write directly to their message buffers; PAL conditionally writes
+// five words to its corresponding buffer. Under the mod those buffers live
+// at +SUSAMUNE_ARENA_RESERVE, so the writes otherwise land in dead space and
+// dialogue renders as the default text instead.
 //
-// We scan the loaded cheat list for that code's signature and bump the two
-// hardcoded addresses by the reserve. The signature is three full code lines
-// (the two writes plus the following TMario::taking nop), 24 bytes of very
-// specific values, so a false match against an unrelated code is astronomically
-// unlikely. Bytes are compared/edited directly (the .gct stores each word
-// big-endian) so this is independent of the kernel's own endianness.
+// We scan the loaded cheat list for the full region-specific tail and bump the
+// hardcoded heap addresses by the reserve. Bytes are compared/edited directly
+// (the .gct stores each word big-endian) so this is independent of the
+// kernel's own endianness.
+static int RelocateSusamuneGeckoSignature(u8 *codes, u32 size,
+		const u8 *sig, u32 sig_size, const u8 *addr_offsets,
+		u32 addr_count, const char *region)
+{
+	if (size < sig_size)
+		return 0;
+
+	u32 i, j;
+	for (i = 0; i <= size - sig_size; ++i)
+	{
+		for (j = 0; j < sig_size; ++j)
+			if (codes[i + j] != sig[j])
+				break;
+		if (j != sig_size)
+			continue;
+
+		for (j = 0; j < addr_count; ++j)
+		{
+			u8 *addr = &codes[i + addr_offsets[j]];
+			u32 value = ((u32)addr[0] << 16) | ((u32)addr[1] << 8) | addr[2];
+			value += SUSAMUNE_ARENA_RESERVE;
+			addr[0] = (u8)(value >> 16);
+			addr[1] = (u8)(value >> 8);
+			addr[2] = (u8)value;
+		}
+
+		sync_after_write(&codes[i], sig_size);
+		dbgprintf("Patch:Relocated %s susamune dpad gecko code (+0x%X)\r\n",
+				region, SUSAMUNE_ARENA_RESERVE);
+		return 1; // Each regional signature is unique; one instance is expected.
+	}
+	return 0;
+}
+
 static void PatchSusamuneGeckoCodes(u8 *codes, u32 size)
 {
 #ifdef SUSAMUNE_GAME_ID
 	if (GAME_ID != SUSAMUNE_GAME_ID)
 		return;
 
-	// dpad.txt tail, as stored big-endian in the .gct:
-	//   028D8A7E 00028149   write "!" (Shift-JIS 0x8149) x3 -> 0x808D8A7E  [patch]
-	//   048D8A84 00000000   null terminator                -> 0x808D8A84  [patch]
-	//   0411EB10 60000000   nop TMario::taking             (anchor only)
-	static const u8 sig[24] = {
+	// JP dpad.txt tail. The first two lines target the message buffer; the
+	// following TMario::taking nop anchors the match.
+	static const u8 jp_sig[] = {
 		0x02,0x8D,0x8A,0x7E, 0x00,0x02,0x81,0x49,
 		0x04,0x8D,0x8A,0x84, 0x00,0x00,0x00,0x00,
 		0x04,0x11,0xEB,0x10, 0x60,0x00,0x00,0x00,
 	};
+	static const u8 jp_addr_offsets[] = { 1, 9 };
 
-	if (size < sizeof(sig))
-		return;
+	// GMSE01 dpad_us.txt tail: the message-buffer write plus its taking nop.
+	static const u8 us_sig[] = {
+		0x04,0x8D,0x3A,0x3C, 0x21,0x00,0x00,0x00,
+		0x04,0x23,0xF9,0xD4, 0x60,0x00,0x00,0x00,
+	};
+	static const u8 us_addr_offsets[] = { 1 };
 
-	u32 i, j;
-	for (i = 0; i <= size - sizeof(sig); ++i)
-	{
-		for (j = 0; j < sizeof(sig); ++j)
-			if (codes[i + j] != sig[j])
-				break;
-		if (j != sizeof(sig))
-			continue;
+	// GMSP01 dpad_pal.txt tail: five conditional message-buffer writes,
+	// their end marker, and the following taking nop as an anchor.
+	static const u8 pal_sig[] = {
+		0x20,0x57,0x0B,0x7C, 0x00,0x00,0x00,0x00,
+		0x04,0x74,0xE8,0x7C, 0x21,0x00,0x00,0x00,
+		0x20,0x57,0x0B,0x7D, 0x00,0x00,0x00,0x01,
+		0x04,0x74,0xE9,0xF4, 0x21,0x21,0x00,0x00,
+		0x20,0x57,0x0B,0x7D, 0x00,0x00,0x00,0x02,
+		0x04,0x74,0xED,0x38, 0x00,0x00,0x00,0x00,
+		0x20,0x57,0x0B,0x7D, 0x00,0x00,0x00,0x03,
+		0x04,0x74,0xEE,0x04, 0xA1,0x00,0x00,0x00,
+		0x20,0x57,0x0B,0x7D, 0x00,0x00,0x00,0x04,
+		0x04,0x74,0xEB,0xDC, 0x21,0x21,0x00,0x00,
+		0xE2,0x00,0x00,0x01, 0x00,0x00,0x00,0x00,
+		0x04,0x23,0x77,0x60, 0x60,0x00,0x00,0x00,
+	};
+	static const u8 pal_addr_offsets[] = { 9, 25, 41, 57, 73 };
 
-		// Bump the two hardcoded heap addresses by the arena reserve. The
-		// address is the low 24 bits of each write's first word (bytes 1..3,
-		// after the codetype byte): 0x808D8A7E -> 0x808E2A7E and
-		// 0x808D8A84 -> 0x808E2A84.
-		u8 *a0 = &codes[i + 1];  // line 1 address bytes
-		u8 *a1 = &codes[i + 9];  // line 2 address bytes
-		u32 addr0 = ((u32)a0[0] << 16) | ((u32)a0[1] << 8) | a0[2];
-		u32 addr1 = ((u32)a1[0] << 16) | ((u32)a1[1] << 8) | a1[2];
-		addr0 += SUSAMUNE_ARENA_RESERVE;
-		addr1 += SUSAMUNE_ARENA_RESERVE;
-		a0[0] = (u8)(addr0 >> 16); a0[1] = (u8)(addr0 >> 8); a0[2] = (u8)addr0;
-		a1[0] = (u8)(addr1 >> 16); a1[1] = (u8)(addr1 >> 8); a1[2] = (u8)addr1;
-
-		sync_after_write(&codes[i], sizeof(sig));
-		dbgprintf("Patch:Relocated susamune fast-text gecko code (+0x%X)\r\n",
-		          SUSAMUNE_ARENA_RESERVE);
-		break; // signature is unique; only one instance expected
-	}
+	if (GAME_ID == 0x474D534Au) // GMSJ
+		RelocateSusamuneGeckoSignature(codes, size, jp_sig, sizeof(jp_sig),
+				jp_addr_offsets, sizeof(jp_addr_offsets), "JP");
+	else if (GAME_ID == 0x474D5345u) // GMSE
+		RelocateSusamuneGeckoSignature(codes, size, us_sig, sizeof(us_sig),
+				us_addr_offsets, sizeof(us_addr_offsets), "US");
+	else if (GAME_ID == 0x474D5350u) // GMSP
+		RelocateSusamuneGeckoSignature(codes, size, pal_sig, sizeof(pal_sig),
+				pal_addr_offsets, sizeof(pal_addr_offsets), "PAL");
 #endif
 }
 
 // Inject the susamune mod into the freshly-loaded game image: copy its code
-// into the region reserved at the top of the game's stack, then apply the
-// resolved hook writes (branches into the mod plus the stack-pointer shrink).
+// into the region reserved at the bottom of the game's root heap, then apply
+// the resolved hook writes (branches into the mod plus the raised arena floor).
 // All game addresses are MEM1-cached (0x80xxxxxx); mask to physical for the
 // kernel's direct RAM access.
 void PatchSusamune(void)

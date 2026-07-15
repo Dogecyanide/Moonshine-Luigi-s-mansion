@@ -49,9 +49,13 @@ NEED_TOOLCHAIN_UNZIP = ((not os.path.exists(BUILTIN_TOOLCHAIN_DIR)) and
 
 # HBC app folder produced by the loader build (boot.dol lands here).
 APP_DIR = LAUNCHER_DIR / "nintendont"
-APP_NAME = "susamune_launcher"
+APP_NAME_PREFIX = "susamune_launcher"
 META_TEMPLATE = LAUNCHER_DIR / "meta.xml.j2"
-APP_ICON = LAUNCHER_DIR / "icon_jp.png"
+APP_ICONS = {
+    "JP": LAUNCHER_DIR / "icon_jp.png",
+    "US": LAUNCHER_DIR / "icon_us.png",
+    "PAL": LAUNCHER_DIR / "icon_pal.png",
+}
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
@@ -128,11 +132,16 @@ def render_meta(manifest, source):
     )
 
 
-def make_zip(out_zip, meta_xml):
+def app_name_for_region(region):
+    return f"{APP_NAME_PREFIX}_{region.lower()}"
+
+
+def make_zip(out_zip, meta_xml, region):
+    app_name = app_name_for_region(region)
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
-        z.write(APP_DIR / "boot.dol", f"{APP_NAME}/boot.dol")
-        z.write(APP_ICON, f"{APP_NAME}/icon.png")
-        z.writestr(f"{APP_NAME}/meta.xml", meta_xml)
+        z.write(APP_DIR / "boot.dol", f"{app_name}/boot.dol")
+        z.write(APP_ICONS[region], f"{app_name}/icon.png")
+        z.writestr(f"{app_name}/meta.xml", meta_xml)
 
 
 def main():
@@ -188,7 +197,7 @@ def main():
 
     subprocess.run(cmd, env=env, check=True)
 
-    make_zip(Path(args.out_zip), render_meta(manifest, args.source))
+    make_zip(Path(args.out_zip), render_meta(manifest, args.source), manifest["region"])
 
 
 if __name__ == "__main__":

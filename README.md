@@ -8,7 +8,8 @@ It exploits the fact that the Wii has a considerable amount of RAM free when run
 
 D-pad left to save, d-pad right to load. If you have the position/red coin/timer/etc. savestate gecko codes on it will technically run both but these savestates will take precedence. 
 
-* Currently only JP 1.0 is supported
+* JP 1.0 (GMSJ01), US (GMSE01), and PAL (GMSP01) are supported. Builds and
+  launchers must match the disc's region.
 * You can only save and load from within the same area (the buttons do nothing if there is no savestate or if it belongs to a different area). It uses a pretty strict definition as to what is a different area, for example airstrip before and after collecting FLUDD are different areas. Going to another stage doesn't get rid of your savestate. 
 * Loading from a savestate breaks the music and may mess with the audio in other ways, but generally speaking the sound effects still work. In some cases, FLUDD sounds break, like when loading after collecting a shine. Reloading the level should restore the music and sound effects though.
 * Saving and loading during stage intro cutscenes works but seems a bit flaky, especially when using a real disc.
@@ -17,13 +18,13 @@ D-pad left to save, d-pad right to load. If you have the position/red coin/timer
 
 ### Console (wii)
 
-Download the latest `susamune-launcher` zip from the Releases page. Extract to your `apps/` folder on your SD card, so that you have the folder structure: `apps:/susamune-launcher/{boot.dol,meta.xml,icon.png}`.  By default, the launcher is configured to load from a real disc. If you want to load your game from SD card or USB instead, follow the instructions in the comments in `meta.xml` to change the boot path to your ISO. 
+Download the launcher zip for your region from the Releases page. Extract it to your `apps/` folder on your SD card, so that you have a region-matched folder such as `apps:/susamune_launcher_us/{boot.dol,meta.xml,icon.png}`. By default, the launcher is configured to load from a real disc. If you want to load your game from SD card or USB instead, follow the instructions in the comments in `meta.xml` to change the boot path to your ISO.
 
-To launch your game, simply go to the homebrew channel and run the susamune launcher app that should appear. Your gecko codes should work out of the box if you are already using Nintendont for practice. For example, for JP version, it expects codes in `codes/GMSJ01.gct` on your SD card.
+To launch your game, simply go to the homebrew channel and run the susamune launcher app that should appear. Your gecko codes should work out of the box if you are already using Nintendont for practice. The code file must match the disc, such as `codes/GMSJ01.gct` (JP), `codes/GMSE01.gct` (US), or `codes/GMSP01.gct` (PAL).
 
 ### Emulator
 
-Unfortunately, for emulator you currently have to build the patched ISO yourself. Only windows is supported for building. You will need CMake and Python in PATH. You will also need to place the game ISO at the repo root, with the name "GMSJ01.iso".
+Unfortunately, for emulator you currently have to build the patched ISO yourself. Only windows is supported for building. You will need CMake and Python in PATH. Place the source ISO at the repo root as `GMSJ01.iso`, `GMSE01.iso`, or `GMSP01.iso` (or pass its path with `-DSMS_ISO`).
 
 In the root of the repo, first install the virtualenv with:
 
@@ -43,7 +44,8 @@ Then build with:
 cmake --build preset emu_iso
 ```
 
-The iso should appear in `build/susamune_jp.iso`. 
+The ISO appears as `build/susamune_<version>.iso`. To build US or PAL, add
+`-DVERS=us` or `-DVERS=pal` when configuring CMake.
 
 > [!IMPORTANT]
 > Saving and loading the goop is broken in Dolphin unless 'Texture Cache Accuracy' it set to Safe. You can find this option in the 'Hacks' tab of 'Graphics' in the game's config:
@@ -85,4 +87,5 @@ Because:
 
 ### What regions/versions are supported?
 
-Currently only JP 1.0 (GMSJ01). But it has the tooling to build for PAL & US, it just needs all the memory addresses patched.
+JP 1.0 (GMSJ01), US (GMSE01), and PAL (GMSP01) are supported. Select the
+target with `-DVERS=jp`, `-DVERS=us`, or `-DVERS=pal` at configure time.
