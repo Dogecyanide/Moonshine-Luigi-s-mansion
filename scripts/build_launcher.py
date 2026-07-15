@@ -53,7 +53,7 @@ INJECT_HEADER = LAUNCHER_DIR / "kernel" / "susamune_inject.h"
 APP_DIR = LAUNCHER_DIR / "nintendont"
 APP_NAME = "susamune_launcher"
 META_TEMPLATE = LAUNCHER_DIR / "meta.xml.j2"
-APP_ICON = LAUNCHER_DIR / "icon.png"
+APP_ICON = LAUNCHER_DIR / "icon_jp.png"
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
@@ -131,7 +131,7 @@ def render_meta(manifest):
 def make_zip(out_zip, meta_xml):
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(APP_DIR / "boot.dol", f"{APP_NAME}/boot.dol")
-        z.write(APP_ICON, f"{APP_NAME}/icon.png")
+        z.write(APP_ICON, f"{APP_NAME}/icon_jp.png")
         z.writestr(f"{APP_NAME}/meta.xml", meta_xml)
 
 

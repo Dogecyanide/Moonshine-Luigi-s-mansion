@@ -1561,6 +1561,7 @@ int main(int argc, char **argv)
 			ncfg->Config |= NIN_CFG_ARCADE_MODE;
 			ncfg->Config |= NIN_CFG_REMLIMIT;
 			ncfg->Config |= NIN_CFG_AUTO_BOOT;
+			ncfg->Config |= NIN_CFG_NATIVE_SI;
 			ncfg->VideoMode |= NIN_VID_AUTO;
 			ncfg->Language |= NIN_LAN_AUTO;
 			ncfg->MaxPads = NIN_CFG_MAXPAD;
@@ -1844,9 +1845,12 @@ int main(int argc, char **argv)
 	bool SaveSettings = false;
 	if(!(ncfg->Config & NIN_CFG_AUTO_BOOT))
 	{
-		// Not autobooting.
-		// Prompt the user to select a device and game.
-		SaveSettings = SelectDevAndGame();
+		// Not autobooting, i.e. no valid game path was resolved.
+		// The SD/USB device+game picker doesn't work with the controller
+		// setup on this fork, so show a message instead of that menu.
+		char NotFoundMsg[300];
+		snprintf(NotFoundMsg, sizeof(NotFoundMsg), "File not found: %s:%s", GetRootDevice(), ncfg->GamePath);
+		ShowMessageScreenAndWaitForPower(NotFoundMsg);
 	}
 	else
 	{

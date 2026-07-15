@@ -89,6 +89,13 @@ void ShowMessageScreen(const char *msg);
 void ShowMessageScreenAndExit(const char *msg, int ret)
 	__attribute__ ((noreturn));
 
+/**
+ * Show a message screen and wait for the POWER button before exiting to loader.
+ * @param msg Message.
+ */
+void ShowMessageScreenAndWaitForPower(const char *msg)
+	__attribute__ ((noreturn));
+
 // Predefined messages.
 static inline void ShowLoadingScreen(void)
 {

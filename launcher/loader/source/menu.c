@@ -1862,6 +1862,34 @@ void ShowMessageScreenAndExit(const char *msg, int ret)
 }
 
 /**
+ * Show a message screen and wait for the POWER button before exiting to loader.
+ * Used in place of the SD/USB device+game picker, which doesn't work with the
+ * controller setup on this fork.
+ * @param msg Message.
+ */
+void ShowMessageScreenAndWaitForPower(const char *msg)
+{
+	static const char PowerLine[] = "Press POWER to exit to Homebrew Channel.";
+	const int msgX = (640 - (int)strlen(msg)*10) / 2;
+	const int powerX = (640 - (int)sizeof(PowerLine)*10) / 2;
+
+	while (1)
+	{
+		VIDEO_WaitVSync();
+		FPAD_Update();
+		if (Shutdown)
+			ExitToLoader(0);
+
+		ClearScreen();
+		PrintInfo();
+		PrintFormat(DEFAULT_SIZE, MAROON, msgX, 232, "%s", msg);
+		PrintFormat(DEFAULT_SIZE, MAROON, powerX, 252, "%s", PowerLine);
+		GRRLIB_Render();
+		ClearScreen();
+	}
+}
+
+/**
  * Print Nintendont version and system hardware information.
  */
 void PrintInfo(void)
@@ -2030,7 +2058,7 @@ void PrintLoadKernelError(LoadKernelError_t iosErr, int err)
 			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*7, "WARNING: IOS58 may be corrupted.");
 			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*9, "Sagashita koe ga kikoete kureba Chiisana yume ga kagayaki ni naru Hohoemi ni sono hikari Itsuka te wo nobashiteku");
 			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*11, "TODOKETE Setsunasa ni wa namae o tsukeyou ka Snow Halation");
-			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*14, "Amar, sentir Son cosas que no tengo si no existes tu Si me haces ver el cielo siempre más azul Y empiezo a comprender a toda plenitud Lo que es morir en vida Cuando tu me abrazas Que acaba el mundo Que no pasa nada si estás tú");
+			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*14, "Amar, sentir Son cosas que no tengo si no existes tu Si me haces ver el cielo siempre mï¿½s azul Y empiezo a comprender a toda plenitud Lo que es morir en vida Cuando tu me abrazas Que acaba el mundo Que no pasa nada si estï¿½s tï¿½");
 			break;
 	}
 }
