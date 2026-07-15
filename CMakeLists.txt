@@ -48,6 +48,9 @@ endif()
 set(VERS "jp" CACHE STRING "Game version to build against")
 set_property(CACHE VERS PROPERTY STRINGS jp us pal)
 
+set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "Where to load the iso from by default in meta.xml")
+set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
+
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
 option(ENABLE_SAVESTATE_DBG "Enable savestate debug output" OFF)
 option(ENABLE_WARP_MENU "Enable warp menu" OFF)
@@ -205,6 +208,7 @@ add_custom_target(iso DEPENDS "${FINAL_ISO}")
 
 add_custom_target(launcher
     COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/build_launcher.py"
+        --source "${LAUNCHER_DEFAULT_SOURCE}"
         --manifest "${MANIFEST}"
         --out-zip "${LAUNCHER_ZIP}"
     DEPENDS "${MANIFEST}"

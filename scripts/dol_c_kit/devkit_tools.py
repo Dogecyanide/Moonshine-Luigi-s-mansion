@@ -604,6 +604,11 @@ class Project(object):
         manifest = {
             "base_addr": self.base_addr,
             "size": len(datablob),
+            # The arena reservation (mod_region_size) is the amount every
+            # bottom-anchored heap allocation shifts up by once the mod is
+            # active. The launcher needs it to relocate hardcoded-heap-address
+            # Gecko codes (see PatchSusamuneGeckoCodes in Patch.c).
+            "region_reserve": max_size if max_size is not None else 0,
             "code": datablob.hex(),
             "writes": [[addr & 0xFFFFFFFF, val & 0xFFFFFFFF] for addr, val in writes],
         }

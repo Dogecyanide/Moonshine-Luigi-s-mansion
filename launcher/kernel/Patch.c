@@ -88,6 +88,7 @@ u32 NeedRelPatches = 0;
 u32 NeedConstantRelPatches = 0;
 
 static char cheatPath[255];
+static void PatchSusamuneGeckoCodes(u8 *codes, u32 size);
 extern u32 prs_decompress(void* source,void* dest);
 extern u32 prs_decompress_size(void* source);
 
@@ -3337,6 +3338,7 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 					{
 						memcpy((void*)cheats_start, CMem, CodeFD.obj.objsize);
 						sync_after_write((void*)cheats_start, CodeFD.obj.objsize);
+						PatchSusamuneGeckoCodes((u8*)cheats_start, CodeFD.obj.objsize);
 						dbgprintf("Patch:Copied %s to memory\r\n", cheatPath);
 					}
 					else
@@ -4054,6 +4056,74 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 	if((RealDiscCMD != 0 && !Datel) || TRIGame != TRI_NONE || IsN64Emu 
 			|| ConfigGetConfig(NIN_CFG_REMLIMIT))
 		UseReadLimit = 0;
+}
+
+// Relocate hardcoded-heap-address Gecko codes so they keep working with the
+// mod active.
+//
+// The mod raises the game's arena floor by SUSAMUNE_ARENA_RESERVE, so every
+// bottom-anchored heap allocation ends up that many bytes higher than on stock.
+// Most practice codes are fine (they patch .text, read .bss, or dereference
+// live pointers), but a code that writes to a *hardcoded* heap address misses
+// its target. The SMS "fast text" code (dpad.txt) is one: its unconditional
+// tail stamps the Shift-JIS string "!!!" (0x8149 x3) into a message buffer at
+// the absolute address 0x808D8A7E and null-terminates it at 0x808D8A84. Under
+// the mod that buffer lives at +SUSAMUNE_ARENA_RESERVE, so the writes land in
+// dead space and dialogue renders as the default text instead.
+//
+// We scan the loaded cheat list for that code's signature and bump the two
+// hardcoded addresses by the reserve. The signature is three full code lines
+// (the two writes plus the following TMario::taking nop), 24 bytes of very
+// specific values, so a false match against an unrelated code is astronomically
+// unlikely. Bytes are compared/edited directly (the .gct stores each word
+// big-endian) so this is independent of the kernel's own endianness.
+static void PatchSusamuneGeckoCodes(u8 *codes, u32 size)
+{
+#ifdef SUSAMUNE_GAME_ID
+	if (GAME_ID != SUSAMUNE_GAME_ID)
+		return;
+
+	// dpad.txt tail, as stored big-endian in the .gct:
+	//   028D8A7E 00028149   write "!" (Shift-JIS 0x8149) x3 -> 0x808D8A7E  [patch]
+	//   048D8A84 00000000   null terminator                -> 0x808D8A84  [patch]
+	//   0411EB10 60000000   nop TMario::taking             (anchor only)
+	static const u8 sig[24] = {
+		0x02,0x8D,0x8A,0x7E, 0x00,0x02,0x81,0x49,
+		0x04,0x8D,0x8A,0x84, 0x00,0x00,0x00,0x00,
+		0x04,0x11,0xEB,0x10, 0x60,0x00,0x00,0x00,
+	};
+
+	if (size < sizeof(sig))
+		return;
+
+	u32 i, j;
+	for (i = 0; i <= size - sizeof(sig); ++i)
+	{
+		for (j = 0; j < sizeof(sig); ++j)
+			if (codes[i + j] != sig[j])
+				break;
+		if (j != sizeof(sig))
+			continue;
+
+		// Bump the two hardcoded heap addresses by the arena reserve. The
+		// address is the low 24 bits of each write's first word (bytes 1..3,
+		// after the codetype byte): 0x808D8A7E -> 0x808E2A7E and
+		// 0x808D8A84 -> 0x808E2A84.
+		u8 *a0 = &codes[i + 1];  // line 1 address bytes
+		u8 *a1 = &codes[i + 9];  // line 2 address bytes
+		u32 addr0 = ((u32)a0[0] << 16) | ((u32)a0[1] << 8) | a0[2];
+		u32 addr1 = ((u32)a1[0] << 16) | ((u32)a1[1] << 8) | a1[2];
+		addr0 += SUSAMUNE_ARENA_RESERVE;
+		addr1 += SUSAMUNE_ARENA_RESERVE;
+		a0[0] = (u8)(addr0 >> 16); a0[1] = (u8)(addr0 >> 8); a0[2] = (u8)addr0;
+		a1[0] = (u8)(addr1 >> 16); a1[1] = (u8)(addr1 >> 8); a1[2] = (u8)addr1;
+
+		sync_after_write(&codes[i], sizeof(sig));
+		dbgprintf("Patch:Relocated susamune fast-text gecko code (+0x%X)\r\n",
+		          SUSAMUNE_ARENA_RESERVE);
+		break; // signature is unique; only one instance expected
+	}
+#endif
 }
 
 // Inject the susamune mod into the freshly-loaded game image: copy its code

@@ -118,6 +118,14 @@ const StaticRange kStaticRanges[] = {
     { 0x803f1c50u, 0x80408ac0u, "bss-game"   }, // MarioUtil .. _e_bss
     { 0x80409008u, 0x804097acu, "sdata-game" }, // MoveBG    .. _e_sdata
     { 0x8040a208u, 0x8040b45cu, "sbss-game"  }, // MarioUtil .. _e_sbss
+    // MSL rand.c `next` -- the seed for libc rand()/srand(), which is what
+    // every gameplay RNG funnels through (MarioUtil MsRandF/MsRandI, so King
+    // Boo's fruit pulls, Gooper Blooper / manta patterns, enemy timers, etc).
+    // It sits at 0x80408cf0 in .sdata, BELOW the sdata-game boundary at
+    // 0x80409008, so it was excluded before -- which is why the RNG stream
+    // kept advancing across a load instead of rewinding. It's a plain 4-byte
+    // counter with no hardware/kernel linkage, so restoring it is safe.
+    { 0x80408cf0u, 0x80408cf4u, "rand-seed"  }, // MSL rand.c `next`
 };
 const int kNumStaticRanges = sizeof(kStaticRanges) / sizeof(kStaticRanges[0]);
 
@@ -164,7 +172,7 @@ const int kNumPointedAllocs = sizeof(kPointedAllocs) / sizeof(kPointedAllocs[0])
 // One header lives at the very start of the snapshot buffer; the saved
 // bytes follow at kHeaderSize.
 const u32 kSnapshotMagic   = 0x53555341u; // 'SUSA'
-const u32 kSnapshotVersion = 4u;          // bumped: save_time added for mission-timer correction
+const u32 kSnapshotVersion = 5u;          // bumped: rand-seed range added to snapshot layout
 const u32 kHeaderSize      = 0x100u;
 // One slot per static range, one per pointed alloc, plus one for the heap.
 const int kMaxRegions      = kNumStaticRanges + kNumPointedAllocs + 1;
@@ -216,6 +224,63 @@ void wordCopy(void *dst, const void *src, size_t bytes) {
     }
 }
 
+// ---------------------------------------------------------------------
+// Hardware audio mute
+// ---------------------------------------------------------------------
+// The snapshot copy runs with interrupts disabled (see save/loadState). For
+// a multi-megabyte heap that is several ms during which the DSP-driven audio
+// DMA never gets its refill interrupt, so the DAC just replays its last block
+// -> an unpleasant hiccup/buzz. stopAllSound() only quiets the software mixer;
+// it does not stop the DMA that is already feeding the DAC.
+//
+// The master audio-out DMA enable is bit 0x8000 of DSPRegs[27] (0xCC005000 +
+// 27*2). This is exactly the bit AIStartDMA sets / AIStopDMA clears -- SMS's
+// own audio interrupt handler toggles it every block. Clearing it silences
+// the DAC immediately at the hardware level, which is the only mute that
+// survives our interrupts-disabled window; setting it back resumes output.
+// (AIStopDMA itself is stripped from the game binary, so we poke the register
+// directly. The 0xCC00_xxxx MMIO block is uncached, so no cache handling.)
+volatile u16 *const kDspRegs      = reinterpret_cast<volatile u16 *>(0xCC005000u);
+const u16           kAiDmaEnable  = 0x8000u;
+
+inline bool muteAudioDma() {
+    bool wasOn = (kDspRegs[27] & kAiDmaEnable) != 0;
+    kDspRegs[27] = kDspRegs[27] & ~kAiDmaEnable;
+    return wasOn;
+}
+inline void unmuteAudioDma(bool wasOn) {
+    if (wasOn) {
+        kDspRegs[27] = kDspRegs[27] | kAiDmaEnable;
+    }
+}
+
+// ---------------------------------------------------------------------
+// Load-in-flight / transition gate
+// ---------------------------------------------------------------------
+// Snapshotting during a stage load or the opening sequence captures (or
+// scribbles over) a heap that the async setup thread is still populating ->
+// crash. TMarDirector::direct() returns early every frame while _260 == 0,
+// which is precisely the window where the setup thread (gSetupThread) has not
+// been joined yet -- i.e. the all-black "loading" screen. It flips to 1 only
+// after the load completes. States 0..3 (INTRO_INIT / INTRO_PLAYING /
+// GAME_STARTING / opening wipe) are the intro cutscene + fade-in that follow,
+// where the camera demo and further archive/particle loads are still settling
+// and snapshotting was also seen to crash. Only allow it once the director has
+// reached STATE_NORMAL (4) or a later, settled state (pause / shine-select /
+// blue save screen -- the transitions we deliberately support restoring from).
+bool inLoadTransition() {
+    if (!gpMarDirector) {
+        return true;
+    }
+    if (gpMarDirector->_260 == 0) {
+        return true; // setup thread still loading -- all-black screen
+    }
+    if (gpMarDirector->mCurState < TMarDirector::STATE_NORMAL) {
+        return true; // intro cutscene / stage fade-in still playing
+    }
+    return false;
+}
+
 } // namespace
 
 
@@ -242,6 +307,13 @@ void SavestateManager::setStatus(const char *msg) {
 }
 
 bool SavestateManager::saveState() {
+    // Refuse while a stage load is in flight or the intro sequence is playing;
+    // the heap is not yet stable there. See inLoadTransition().
+    if (inLoadTransition()) {
+        setStatus("E:loading");
+        return false;
+    }
+
     JKRHeap *heap = gpApplication.mCurrentHeap;
     if (!heap) {
         setStatus("E:noheap");
@@ -291,6 +363,9 @@ bool SavestateManager::saveState() {
     // quiescent point in the frame, but disable interrupts anyway so we
     // don't race a VI retrace callback that touches heap objects.
     bool ints = OSDisableInterrupts();
+    // Silence the DAC for the whole interrupts-off window so the frozen audio
+    // DMA doesn't buzz; restored just before interrupts come back.
+    bool dma = muteAudioDma();
 
     SavestateHeader *h = headerPtr();
     h->magic        = 0; // committed at end as a torn-write guard
@@ -358,6 +433,7 @@ bool SavestateManager::saveState() {
     h->magic = kSnapshotMagic;
     DCStoreRange(&h->magic, sizeof(h->magic));
 
+    unmuteAudioDma(dma);
     OSRestoreInterrupts(ints);
 
     setStatus("saved");
@@ -365,6 +441,14 @@ bool SavestateManager::saveState() {
 }
 
 bool SavestateManager::loadState() {
+    // Refuse while a stage load is in flight or the intro sequence is playing;
+    // overwriting a heap the setup thread is still filling crashes. See
+    // inLoadTransition().
+    if (inLoadTransition()) {
+        setStatus("E:loading");
+        return false;
+    }
+
     SavestateHeader *h = headerPtr();
     if (h->magic != kSnapshotMagic) {
         setStatus("E:nosnap");
@@ -440,6 +524,9 @@ bool SavestateManager::loadState() {
     // GXDrawDone();
 
     bool ints = OSDisableInterrupts();
+    // Silence the DAC across the interrupts-off restore so the frozen audio
+    // DMA doesn't buzz; restored just before interrupts come back.
+    bool dma = muteAudioDma();
 
     for (u32 i = 0; i < h->region_count; i++) {
         const RegionEntry &r = h->regions[i];
@@ -468,6 +555,7 @@ bool SavestateManager::loadState() {
         DCFlushRange(&gpMarDirector->mStopwatch, sizeof(OSStopwatch));
     }
 
+    unmuteAudioDma(dma);
     OSRestoreInterrupts(ints);
 
     setStatus("loaded");

@@ -9,11 +9,17 @@
     FOR {{ region }} ONLY!!! </long_description>
 <ahb_access/>
 <arguments>
+{% if source == "di" %}
 <arg>di:</arg> <!-- Load from real disc -->
 <!-- If you want to load from SD instead, comment above, uncomment below and provide a path e.g. -->
 <!-- <arg>sd:/games/{{ disc_name }}.iso</arg> -->
 <!-- or USB  -->
 <!-- <arg>usb:/games/{{ disc_name }}.iso</arg> -->
+{% elif source == "sd" %}
+<arg>sd:/games/{{ disc_name }}.iso</arg>
+{% elif source == "usb" %}
+<arg>usb:/games/{{ disc_name }}.iso</arg>
+{% endif %}
 <!-- NOTE: ORDER OF THE FOLLOWING ARGUMENTS IS IMPORTANT HERE !! Don't change! --> 
 <arg>--cheats</arg> 
 <arg>--noIPL</arg>

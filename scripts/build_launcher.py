@@ -96,6 +96,7 @@ def write_inject_header(manifest, path):
         f"#define SUSAMUNE_CODE_BASE 0x{manifest['base_addr']:08X}u",
         f"#define SUSAMUNE_CODE_SIZE {len(code)}u",
         f"#define SUSAMUNE_WRITE_COUNT {len(manifest['writes'])}u",
+        f"#define SUSAMUNE_ARENA_RESERVE 0x{manifest.get('region_reserve', 0x8000):X}u",
         "",
         "static const unsigned char susamune_code[] = {",
     ]
@@ -112,7 +113,7 @@ def write_inject_header(manifest, path):
     path.write_text("\n".join(lines))
 
 
-def render_meta(manifest):
+def render_meta(manifest, source):
     import jinja2
     try:
         version = subprocess.check_output(
@@ -125,18 +126,20 @@ def render_meta(manifest):
         region=manifest["region"],
         version=version,
         disc_name=manifest["disc_name"],
+        source=source
     )
 
 
 def make_zip(out_zip, meta_xml):
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(APP_DIR / "boot.dol", f"{APP_NAME}/boot.dol")
-        z.write(APP_ICON, f"{APP_NAME}/icon_jp.png")
+        z.write(APP_ICON, f"{APP_NAME}/icon.png")
         z.writestr(f"{APP_NAME}/meta.xml", meta_xml)
 
 
 def main():
     ap = argparse.ArgumentParser(description="Build the custom Nintendont launcher with the mod injected.")
+    ap.add_argument("--source", default="di", choices=["di", "sd", "usb"])
     ap.add_argument("--manifest", required=True, help="Mod manifest JSON from link_mod.py launcher")
     ap.add_argument("--out-zip", required=True, help="Output HBC app zip")
     args = ap.parse_args()
@@ -176,7 +179,7 @@ def main():
 
     subprocess.run(cmd, env=env, check=True)
 
-    make_zip(Path(args.out_zip), render_meta(manifest))
+    make_zip(Path(args.out_zip), render_meta(manifest, args.source))
 
 
 if __name__ == "__main__":

@@ -1,56 +1,69 @@
 {
-  "version": 3,
-  "cmakeMinimumRequired": {
-    "major": 3,
-    "minor": 21,
-    "patch": 0
-  },
-  "configurePresets": [
-    {
-      "name": "savestates_console",
-      "displayName": "Savestates only (Console)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build"
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
     },
-    {
-      "name": "savestates_emu",
-      "displayName": "Savestates only (Dolphin)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
-      "cacheVariables": {
-        "IS_EMULATOR": "ON"
-      }
-    },
-    {
-      "name": "all_console",
-      "displayName": "All features (Console)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
-      "cacheVariables": {
-        "ENABLE_WARP_MENU": "ON"
-      }
-    },
-    {
-      "name": "all_emu",
-      "displayName": "All features (Emulator)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build",
-      "cacheVariables": {
-        "IS_EMULATOR": "ON",
-        "ENABLE_WARP_MENU": "ON"
-      }
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "console",
-      "configurePreset": "savestates_console",
-      "targets": ["launcher"]
-    },
-    {
-      "name": "emu_iso",
-      "configurePreset": "savestates_emu",
-      "targets": ["iso"]
-    }
-  ]
+    "configurePresets": [
+        {
+            "name": "savestates_console",
+            "displayName": "Savestates only (Console)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "hidden": false
+        },
+        {
+            "name": "savestates_emu",
+            "displayName": "Savestates only (Dolphin)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "IS_EMULATOR": "ON"
+            },
+            "hidden": false
+        },
+        {
+            "name": "dev_console",
+            "displayName": "Dev build (Console)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "ENABLE_WARP_MENU": "ON",
+                "ENABLE_SAVESTATE_DBG": "ON",
+                "LAUNCHER_DEFAULT_SOURCE": "sd"
+            },
+            "hidden": false
+        },
+        {
+            "name": "dev_emu",
+            "displayName": "Dev build (Emulator)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "IS_EMULATOR": "ON",
+                "ENABLE_WARP_MENU": "ON",
+                "ENABLE_SAVESTATE_DBG": "ON"
+            },
+            "hidden": false
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "console",
+            "hidden": false,
+            "configurePreset": "savestates_console",
+            "targets": [
+                "launcher"
+            ]
+        },
+        {
+            "name": "emu_iso",
+            "hidden": false,
+            "configurePreset": "savestates_emu",
+            "targets": [
+                "iso"
+            ]
+        }
+    ]
 }
