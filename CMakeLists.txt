@@ -212,15 +212,45 @@ add_custom_command(
     VERBATIM)
 add_custom_target(iso DEPENDS "${FINAL_ISO}")
 
-add_custom_target(launcher
-    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/build_launcher.py"
-        --source "${LAUNCHER_DEFAULT_SOURCE}"
-        --manifest "${MANIFEST}"
-        --out-zip "${LAUNCHER_ZIP}"
-    DEPENDS "${MANIFEST}"
-            "${CMAKE_SOURCE_DIR}/scripts/build_launcher.py"
-    COMMENT "Building Nintendont launcher"
+# The launcher (custom Nintendont) is a CMake super-build under launcher/. It's a
+# separate build tree because it spans three cross toolchains (devkitARM,
+# devkitPPC, devkitPPC+libogc) that CMake can't mix with the Kuribo clang used
+# here. We drive it as an ExternalProject.
+#
+# First, the mod's inject header becomes a real build artifact: generating it from
+# the manifest, and pointing the launcher's kernel at it, makes a mod-source edit
+# relink only the kernel + loader instead of rebuilding the whole launcher.
+include(ExternalProject)
+
+set(INJECT_HEADER "${CMAKE_BINARY_DIR}/susamune_inject.h")
+add_custom_command(
+    OUTPUT "${INJECT_HEADER}"
+    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/gen_inject_header.py"
+        "${MANIFEST}" -o "${INJECT_HEADER}"
+    DEPENDS "${MANIFEST}" "${CMAKE_SOURCE_DIR}/scripts/gen_inject_header.py"
+    COMMENT "Generating susamune_inject.h"
     VERBATIM)
+add_custom_target(inject_header DEPENDS "${INJECT_HEADER}")
+
+ExternalProject_Add(nintendont_launcher
+    SOURCE_DIR "${CMAKE_SOURCE_DIR}/launcher"
+    BINARY_DIR "${CMAKE_BINARY_DIR}/launcher"
+    CMAKE_GENERATOR "${CMAKE_GENERATOR}"
+    CMAKE_ARGS
+        "-DLAUNCHER_PYTHON=${VENV_PYTHON}"
+        "-DLAUNCHER_SCRIPTS_DIR=${CMAKE_SOURCE_DIR}/scripts"
+        "-DSUSAMUNE_INJECT_DIR=${CMAKE_BINARY_DIR}"
+        "-DSUSAMUNE_MANIFEST=${MANIFEST}"
+        "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
+        "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
+    DEPENDS inject_header
+    BUILD_ALWAYS ON
+    INSTALL_COMMAND ""
+    USES_TERMINAL_CONFIGURE ON
+    USES_TERMINAL_BUILD ON
+    EXCLUDE_FROM_ALL TRUE)
+
+add_custom_target(launcher DEPENDS nintendont_launcher)
 
 # Regenerate the checked-in linker script from the CodeWarrior map. Run on
 # demand (`cmake --build build --target regen_ld`) after the map changes.

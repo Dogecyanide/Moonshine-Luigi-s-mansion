@@ -31,17 +31,26 @@ def emit(path, alignment, out):
 
 def main(argv):
     alignment = 4
+    output = None
     files = []
     i = 0
     while i < len(argv):
         if argv[i] == "-a":
             alignment = int(argv[i + 1])
             i += 2
+        elif argv[i] in ("-o", "--output"):
+            output = argv[i + 1]
+            i += 2
         else:
             files.append(argv[i])
             i += 1
-    for path in files:
-        emit(path, alignment, sys.stdout)
+    out = open(output, "w") if output else sys.stdout
+    try:
+        for path in files:
+            emit(path, alignment, out)
+    finally:
+        if output:
+            out.close()
     return 0
 
 
