@@ -1,0 +1,50 @@
+name: Build release launchers
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    name: ${{ matrix.region }} launcher
+    # The bundled devkitPro toolchain is Windows-specific.  Pin the runner so
+    # its pre-installed CMake/Ninja versions cannot change unexpectedly.
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        region: [us, jp, pal]
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.target_commitish }}
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify build tools
+        run: |
+          cmake --version
+          ninja --version
+
+      - name: Install build dependencies
+        run: python setup_venv.py
+
+      - name: Configure console build
+        run: cmake --preset savestates_console -D VERS=${{ matrix.region }}
+
+      - name: Build launcher
+        run: cmake --build --preset console
+
+      - name: Upload launcher to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "build/susamune_launcher_${{ matrix.region }}.zip" --clobber
