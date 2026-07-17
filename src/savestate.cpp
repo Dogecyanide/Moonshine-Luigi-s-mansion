@@ -57,6 +57,7 @@
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
 #include "susamune/mem2_map.h"
+#include "susamune/settings.hxx"
 
 #include "Dolphin/CARD.h"
 #include "Dolphin/GX.h"
@@ -109,14 +110,21 @@ static const u32 kSnapshotReservedSize = SUSAMUNE_MEM2_SNAPSHOT_SIZE;
 
 namespace {
 
+// A range is captured unconditionally when gate == kNoGate; otherwise it is
+// only captured while the named setting is enabled. This lets a menu toggle
+// exclude a range from the snapshot (e.g. the libc RNG seed) without touching
+// the save/load machinery.
+const int kNoGate = -1;
+
 struct StaticRange {
     u32 start;
     u32 end;
     const char *name;
+    int gate;  // kNoGate, or a SettingId that must be enabled
 };
 
 const StaticRange kStaticRanges[] = {
-    { SUSAMUNE_ADDR_APPLICATION, SUSAMUNE_ADDR_APPLICATION + sizeof(TApplication), "gpApp" },
+    { SUSAMUNE_ADDR_APPLICATION, SUSAMUNE_ADDR_APPLICATION + sizeof(TApplication), "gpApp", kNoGate },
 #if defined(SUSAMUNE_VERSION_JP)
     // JP only: the game half of .bss [GAME_BSS_START, GAME_BSS_END) with the SMS
     // audio modules carved OUT. Those modules (System.a/MSoundMainSide and the
@@ -133,14 +141,14 @@ const StaticRange kStaticRanges[] = {
     //   MSound.a cluster   .bss = [0x803f44d0, 0x803f57a0)  (MAnmSound..MSModBgm)
     // US/PAL keep the window contiguous below until their audio modules are
     // mapped in maps/us.map / maps/pal.map.
-    { SUSAMUNE_ADDR_GAME_BSS_START, 0x803f2c38u,               "bss-game-1" }, // .. before MSoundMainSide
-    { 0x803f2cf0u,                  0x803f44d0u,               "bss-game-2" }, // after MSoundMainSide .. before MSound.a
-    { 0x803f57a0u,                  SUSAMUNE_ADDR_GAME_BSS_END, "bss-game-3" }, // after MSound.a ..
+    { SUSAMUNE_ADDR_GAME_BSS_START, 0x803f2c38u,               "bss-game-1", kNoGate }, // .. before MSoundMainSide
+    { 0x803f2cf0u,                  0x803f44d0u,               "bss-game-2", kNoGate }, // after MSoundMainSide .. before MSound.a
+    { 0x803f57a0u,                  SUSAMUNE_ADDR_GAME_BSS_END, "bss-game-3", kNoGate }, // after MSound.a ..
 #else
-    { SUSAMUNE_ADDR_GAME_BSS_START, SUSAMUNE_ADDR_GAME_BSS_END, "bss-game" },
+    { SUSAMUNE_ADDR_GAME_BSS_START, SUSAMUNE_ADDR_GAME_BSS_END, "bss-game", kNoGate },
 #endif
-    { SUSAMUNE_ADDR_GAME_SDATA_START, SUSAMUNE_ADDR_GAME_SDATA_END, "sdata-game" },
-    { SUSAMUNE_ADDR_GAME_SBSS_START, SUSAMUNE_ADDR_GAME_SBSS_END, "sbss-game" },
+    { SUSAMUNE_ADDR_GAME_SDATA_START, SUSAMUNE_ADDR_GAME_SDATA_END, "sdata-game", kNoGate },
+    { SUSAMUNE_ADDR_GAME_SBSS_START, SUSAMUNE_ADDR_GAME_SBSS_END, "sbss-game", kNoGate },
     // MSL rand.c `next` -- the seed for libc rand()/srand(), which is what
     // every gameplay RNG funnels through (MarioUtil MsRandF/MsRandI, so King
     // Boo's fruit pulls, Gooper Blooper / manta patterns, enemy timers, etc).
@@ -148,7 +156,11 @@ const StaticRange kStaticRanges[] = {
     // before -- which is why the RNG stream
     // kept advancing across a load instead of rewinding. It's a plain 4-byte
     // counter with no hardware/kernel linkage, so restoring it is safe.
-    { SUSAMUNE_ADDR_LIBC_RAND_SEED, SUSAMUNE_ADDR_LIBC_RAND_SEED + sizeof(u32), "rand-seed" },
+    // Gated on SETTING_SAVE_RNG_STATE: when the menu toggle is Off, the seed is
+    // left out of the snapshot so the RNG stream keeps advancing across a load
+    // instead of rewinding. On (default) preserves the historical behaviour.
+    { SUSAMUNE_ADDR_LIBC_RAND_SEED, SUSAMUNE_ADDR_LIBC_RAND_SEED + sizeof(u32), "rand-seed",
+      SETTING_SAVE_RNG_STATE },
 };
 const int kNumStaticRanges = sizeof(kStaticRanges) / sizeof(kStaticRanges[0]);
 
@@ -434,6 +446,13 @@ bool SavestateManager::saveState() {
 
     u32 offset = 0;
     for (int i = 0; i < kNumStaticRanges; i++) {
+        // Skip a setting-gated range when its setting is disabled (e.g. the RNG
+        // seed when "Save RNG state" is Off). It simply won't be in the region
+        // list, so a later load leaves that memory untouched.
+        if (kStaticRanges[i].gate != kNoGate &&
+            !gSettings.getBool((SettingId)kStaticRanges[i].gate)) {
+            continue;
+        }
         u32 sz = kStaticRanges[i].end - kStaticRanges[i].start;
         wordCopy(bufferPtr() + offset,
                  reinterpret_cast<void *>(kStaticRanges[i].start), sz);

@@ -9,7 +9,9 @@ The mod sources live at the repo root (there is no longer a `susamune/` subdirec
 - `src/*.cpp` — mod source, auto-globbed by CMake:
   - `main.cpp` — hook entry points. `onUpdate` runs each frame in place of `mDirector->direct()`, `afterDraw` runs at the end of rendering and processes queued savestate loads after the game's `GXDrawDone` barrier, `onSetup` runs once per stage load, and `onUpdateGameMode` runs in the game-mode loop. Also holds `getArenaLo` (heap-reservation hook, see below).
   - `savestate.cpp` / `savestate.hxx` — the savestate feature.
-  - `settings_menu.cpp` — the warp/settings menu (compiled always, but only wired up when `ENABLE_WARP_MENU` is set).
+  - `menu.cpp` / `menu.hxx` — the on-screen menu: presentation and navigation only. A `Menu` frames a list of tabs (`MenuTab` subclasses defined inside `menu.cpp`); each tab owns its own `update`/`draw`. Adding a tab is a new class plus one line in `Menu::Menu()`. Wired up only when `ENABLE_MENU` is set (default ON). Uses **no heap**: the `Menu` and its tabs are placement-new'd once into static BSS buffers, and rendering re-points a single shared `J2DTextBox` at borrowed const strings each frame (the system heap is nearly full — see `getArenaLo`). Feature logic is delegated out: warp tabs call `warp.*`, the savestate tab edits `settings.*`.
+  - `warp.cpp` / `warp.hxx` — stage-warp data (`kStageNames`, `kPresets`) and logic. The menu only calls `Warp::request(...)`; `main.cpp`'s `onUpdateGameMode` polls `Warp::pending()` and calls `Warp::execute()` (flag setup + `mNextScene`) then `moveStage()`.
+  - `settings.cpp` / `settings.hxx` — persistent mod settings, independent of the menu that edits them and the features that read them. Each setting is one row in `kSettingDescs` (name, type BOOL/CHOICE, default) plus one byte of live value in the global `gSettings`; the menu renders/edits them generically and `savestate.cpp` reads them. `SettingsData` is a POD blob (magic+version) sized for future memory-card / SD serialization. Current settings: `SETTING_SAVE_RNG_STATE` (gates the RNG-seed snapshot range in `savestate.cpp`).
 - `scripts/patches.py` — the hook table + memory-reservation config (addresses, mod region size, game id, region/disc metadata).
 - `maps/<vers>.map` / `maps/<vers>.ld` — the CodeWarrior map and the linker script regenerated from it (`scripts/map_to_ld.py`).
 - `include/` — reverse-engineered game headers (`include/JSystem` too).
@@ -111,7 +113,11 @@ Buffer is sized at 16 MB reserved (`kSnapshotReservedSize`). Layout: 256-byte he
 3. Add an entry to `kPointedAllocs` in `savestate.cpp`.
 4. `kMaxRegions` is computed automatically; verify `sizeof(SavestateHeader) < kHeaderSize` (currently 256 bytes — generous headroom).
 
-**Adding a new static range** (e.g. some BSS modules in the OS half turn out to be safe to snapshot): add to `kStaticRanges`. The load loop is uniform, no other changes needed.
+**Adding a new static range** (e.g. some BSS modules in the OS half turn out to be safe to snapshot): add to `kStaticRanges`. The load loop is uniform, no other changes needed. The trailing `gate` field is `kNoGate` for an always-captured range, or a `SettingId` that must be enabled for the range to be captured (this is how `SETTING_SAVE_RNG_STATE` excludes the RNG seed).
+
+**Adding a new setting:** add a `SettingId` enumerator (before `SETTING_COUNT`) in `settings.hxx` and a matching row in `kSettingDescs` (`settings.cpp`) — name, `SETTING_BOOL`/`SETTING_CHOICE`, choice count + labels, default. Nothing else changes: the savestate-settings tab renders/edits it generically, and features read it via `gSettings.get*/`. `SettingsData::values` is sized off `SETTING_COUNT`.
+
+**Adding a new menu tab:** define a `MenuTab` subclass in `menu.cpp` (implement `title`/`update`/`draw`, keep per-tab cursor state in the object), give it a static BSS buffer next to the others, and add one `mTabs[mNumTabs++] = new (buf) YourTab();` line in `Menu::Menu()`. `kMaxTabs` caps the count; the tab strip scrolls horizontally when titles overflow. Tabs draw via `Menu::drawText` / `J2DFillBox` and must not allocate.
 
 **Adding a new hook:** add an entry to `patches[]` in `scripts/patches.py` (`sym` = an `extern "C"` symbol in `src/`, `type` = `B`/`BL`/`W32`) and implement the symbol. The manifest/launcher/dol/gecko targets all pick it up automatically.
 
@@ -168,7 +174,7 @@ Build options (toggle in `ccmake`/`cmake-gui`, or with `-D<name>=<value>`):
 
 - `IS_EMULATOR` (default OFF) — ON targets Dolphin (`kSnapshotBase = 0x70000000`), OFF targets Wii/Nintendont (the dedicated `0x91F00000–0x92F00000` window). Sets the `IS_EMULATOR` compile define. **Test on Dolphin first** (`-DIS_EMULATOR=ON` + the `dol`/`iso` targets); for console builds, leave it OFF and keep all launcher MEM2 changes in `include/susamune/mem2_map.h`.
 - `ENABLE_SAVESTATE_DBG` (default OFF) — savestate debug output.
-- `ENABLE_WARP_MENU` (default OFF) — wire up `settings_menu.cpp`'s warp menu.
+- `ENABLE_MENU` (default ON) — wire up `menu.cpp`'s in-game menu (warps + settings). Compiled regardless; this flag only controls whether `main.cpp` constructs/updates/draws it. (Formerly `ENABLE_WARP_MENU`, default OFF.)
 - `UPDATE_ISO_METADATA` (default OFF) — for the `iso` target, bump the game code (01→02), swap banner/name, etc.
 - `VERS` (jp/us/pal, default jp) — game version. This selects the map/linker script, patch addresses, game ID, and the C++ MEM1 layout definitions.
 

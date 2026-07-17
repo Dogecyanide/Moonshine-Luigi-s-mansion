@@ -58,7 +58,7 @@ set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
 
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
 option(ENABLE_SAVESTATE_DBG "Enable savestate debug output" OFF)
-option(ENABLE_WARP_MENU "Enable warp menu" OFF)
+option(ENABLE_MENU "Enable the in-game menu (warps + settings)" ON)
 option(UPDATE_ISO_METADATA "Update ISO metadata (game code 01 -> 02, change picture, name, etc.)" OFF)
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
 
@@ -121,7 +121,7 @@ target_compile_definitions(susamune_obj PRIVATE
     IS_EMULATOR=$<BOOL:${IS_EMULATOR}>
     ENABLE_SAVESTATE_DBG=$<BOOL:${ENABLE_SAVESTATE_DBG}>
     SUSAMUNE_VERSION_${VERS_UPPER}=1
-    $<$<BOOL:${ENABLE_WARP_MENU}>:ENABLE_WARP_MENU>)
+    $<$<BOOL:${ENABLE_MENU}>:ENABLE_MENU>)
 
 target_link_options(susamune_obj PRIVATE ${SHARED_FLAGS} -fuse-ld=lld -Werror -r)
 
@@ -132,6 +132,7 @@ set(MOD_OBJ "$<TARGET_FILE:susamune_obj>")
 set(IN_ISO_DIR "${CMAKE_BINARY_DIR}/in_iso")
 set(OUT_ISO_DIR "${CMAKE_BINARY_DIR}/out_iso")
 set(IN_ISO_STAMP "${CMAKE_BINARY_DIR}/in_iso.stamp")
+set(OUT_ISO_STAMP "${CMAKE_BINARY_DIR}/out_iso.stamp")
 set(MANIFEST "${CMAKE_BINARY_DIR}/susamune_manifest.json")
 set(PATCHED_DOL "${CMAKE_BINARY_DIR}/main.dol")
 set(GECKO_TXT "${CMAKE_BINARY_DIR}/susamune.txt")
@@ -144,6 +145,20 @@ add_custom_command(
     COMMAND "${CMAKE_COMMAND}" -E touch "${IN_ISO_STAMP}"
     DEPENDS "${SMS_ISO}" "${CMAKE_SOURCE_DIR}/scripts/extract_iso.py"
     COMMENT "Extracting ${SMS_ISO}"
+    VERBATIM)
+
+# The pristine extracted disc copied into a working directory that Dolphin can
+# folder-boot (out_iso/root/sys/main.dol + out_iso/root/files/...). The heavy
+# copy only reruns when the extraction changes; the `dol` target then drops the
+# freshly patched main.dol on top each build (see below). This is what the
+# former SCons `pre_iso` target did, and what the .vscode launch tasks expect.
+add_custom_command(
+    OUTPUT "${OUT_ISO_STAMP}"
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${OUT_ISO_DIR}/root"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${IN_ISO_DIR}/root" "${OUT_ISO_DIR}/root"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${OUT_ISO_STAMP}"
+    DEPENDS "${IN_ISO_STAMP}"
+    COMMENT "Populating out_iso for Dolphin folder-boot"
     VERBATIM)
 
 add_custom_command(
@@ -162,8 +177,8 @@ add_custom_command(
     VERBATIM)
 add_custom_target(manifest ALL DEPENDS "${MANIFEST}")
 
-# FIXME: This should also copy to OUT_ISO_DIR/root/sys/main.dol. Otherwise, the vscode tasks (run in dolphin) for development
-# will break, because the dol won't be up to date unless we also build the iso target. 
+# Patches main.dol and installs it into out_iso so Dolphin folder-boot (and the
+# .vscode tasks) always run the current build without needing the `iso` target.
 add_custom_command(
     OUTPUT "${PATCHED_DOL}"
     COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
@@ -174,7 +189,8 @@ add_custom_command(
         --in-dol "${IN_ISO_DIR}/root/sys/main.dol"
         --out "${PATCHED_DOL}"
         patch_dol
-    DEPENDS susamune_obj "${IN_ISO_STAMP}" "${LD_SCRIPT}"
+    COMMAND "${CMAKE_COMMAND}" -E copy "${PATCHED_DOL}" "${OUT_ISO_DIR}/root/sys/main.dol"
+    DEPENDS susamune_obj "${IN_ISO_STAMP}" "${OUT_ISO_STAMP}" "${LD_SCRIPT}"
             "${CMAKE_SOURCE_DIR}/scripts/patches.py"
             "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
     COMMENT "Patching main.dol"

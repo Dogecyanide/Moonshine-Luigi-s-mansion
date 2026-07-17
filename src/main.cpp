@@ -9,14 +9,15 @@
 #include "JSystem/J2D/J2DPicture.hxx"
 #include "JSystem/J2D/J2DOrthoGraph.hxx"
 #include "Dolphin/THP.h"
-#include "susamune/settings_menu.hxx"
+#include "susamune/menu.hxx"
+#include "susamune/settings.hxx"
+#include "susamune/warp.hxx"
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
 
 int gLoadMenu = 0;
 
-SettingsMenu* gSettingsMenu = nullptr;
 SavestateManager* gSavestateMgr = nullptr;
 
 // Replaces the game's OSGetArenaLo. The mod is linked into the bottom of the
@@ -32,7 +33,7 @@ extern "C" void* getArenaLo() {
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     u8 state = director->updateGameMode();
 
-#if ENABLE_WARP_MENU
+#if ENABLE_MENU
     auto controller = gpApplication.mGamePads[0];
 
     // changing to pause menu state, and Y is held? don't pause
@@ -40,9 +41,8 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
         state = director->mCurState;
     }
 
-    if (gSettingsMenu && gSettingsMenu->mChangeStageReady) {
-        gSettingsMenu->changeStageHook();
-        gSettingsMenu->mChangeStageReady = false;
+    if (Warp::pending()) {
+        Warp::execute();
         // QF timer reset flag
         if (SUSAMUNE_ADDR_QF_TIMER_RESET != 0) {
             volatile u8* flag = reinterpret_cast<volatile u8*>(SUSAMUNE_ADDR_QF_TIMER_RESET);
@@ -72,9 +72,13 @@ extern "C" void onSetup(TMarDirector* director) {
     
     if (inited) return; else inited = true;
 
+    // Install compiled-in setting defaults before anything reads them
+    // (savestate.cpp gates the RNG-seed snapshot on a setting).
+    gSettings.resetDefaults();
+
     JKRHeap *oldHeap = JKRHeap::sSystemHeap->becomeCurrentHeap();
-#if ENABLE_WARP_MENU
-    gSettingsMenu = new SettingsMenu();
+#if ENABLE_MENU
+    menuInit();
 #endif
     gSavestateMgr = new SavestateManager();
     
@@ -92,9 +96,9 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     if (gSavestateMgr) {
         gSavestateMgr->updateHook(gpApplication.mGamePads[0]);
     }
-#if ENABLE_WARP_MENU
-    if (gSettingsMenu) {
-        gSettingsMenu->processInput(gpApplication.mGamePads[0]);
+#if ENABLE_MENU
+    if (gMenu) {
+        gMenu->update(gpApplication.mGamePads[0]);
     }
 #endif
 
@@ -124,9 +128,9 @@ extern "C" void afterDraw() {
             GXSetProjection(mtx, GX_ORTHOGRAPHIC);
         }        
         
-#if ENABLE_WARP_MENU
-        if (gSettingsMenu)
-            gSettingsMenu->draw(&ortho);
+#if ENABLE_MENU
+        if (gMenu)
+            gMenu->draw(&ortho);
 #endif
         if (gSavestateMgr)
             gSavestateMgr->draw(&ortho);

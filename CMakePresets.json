@@ -29,7 +29,7 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
-                "ENABLE_WARP_MENU": "ON",
+                "ENABLE_MENU": "ON",
                 "ENABLE_SAVESTATE_DBG": "ON",
                 "LAUNCHER_DEFAULT_SOURCE": "sd"
             },
@@ -42,7 +42,7 @@
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
                 "IS_EMULATOR": "ON",
-                "ENABLE_WARP_MENU": "ON",
+                "ENABLE_MENU": "ON",
                 "ENABLE_SAVESTATE_DBG": "ON"
             },
             "hidden": false
