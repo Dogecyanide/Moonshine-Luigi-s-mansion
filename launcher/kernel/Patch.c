@@ -37,6 +37,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "codehandler.h"
 #include "codehandleronly.h"
 #include "ff_utf8.h"
+#include "susamune/mem2_map.h"
 // Generated build artifact (mod blob + write list), written to the CMake build
 // dir and found via -I$(SUSAMUNE_INJECT_DIR); not version-controlled. Guarded so
 // the kernel still compiles standalone (PatchSusamune* fall back to no-ops when
@@ -2338,12 +2339,12 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 						#endif
 
 						if (DspMatches[l].Length-UseLast > 0)
-							memcpy( (void*)0x12E80000+UseLast, (unsigned char*)Buffer+i+UseLast, DspMatches[l].Length-UseLast );
+							memcpy( DI_READ_BUFFER+UseLast, (unsigned char*)Buffer+i+UseLast, DspMatches[l].Length-UseLast );
 						
 						if (DspMatches[l].Length != UseLast)
 						{
 							sha1( SHA1i, NULL, 0, 0, NULL );
-							sha1( SHA1i, (void*)0x12E80000, DspMatches[l].Length, 2, hash );
+							sha1( SHA1i, DI_READ_BUFFER, DspMatches[l].Length, 2, hash );
 						}
 
 						if( memcmp( DSPHashes[DspMatches[l].SHA1], hash, 0x14 ) == 0 )
@@ -3346,7 +3347,9 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 					{
 						memcpy((void*)cheats_start, CMem, CodeFD.obj.objsize);
 						sync_after_write((void*)cheats_start, CodeFD.obj.objsize);
+#ifndef LAUNCHER_DISABLE_SUSAMUNE_PATCH
 						PatchSusamuneGeckoCodes((u8*)cheats_start, CodeFD.obj.objsize);
+#endif
 						dbgprintf("Patch:Copied %s to memory\r\n", cheatPath);
 					}
 					else
@@ -3905,22 +3908,27 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 			dbgprintf("Patch:Patched GameCube Service Disc NTSC-U\r\n");
 		}
 	}
-	dbgprintf("Patch:MEM2 cache is 0x%X.\r\n", read32(0x12000000));
-	if(read32(0x12000000) != 0) { //we have codes ready for writing
-		int count = read32(0x12000000);
-		int c = 0;
-		//for(c = 0; c < count; ++c)
-		//	write32(read32(0x12000004+(c*8)), read32(0x12000008+(c*8)));
-		
-		for(c = 0; c < count; ++c) {
-			// Check for conditionals
-			if((read32(0x12000004+(c*8)) & 1) == 1) {
-				if(*(u32*)((read32(0x12000004+(c*8))) & ~1) == read32(0x12000008+(c*8)))
-					write32(read32(0x1200000C+(c*8)), read32(0x12000010+(c*8)));
+	u32 filePatchCount = read32(NIN_MEM2_FILE_PATCH_PHYS_BASE);
+	const u32 maxFilePatchCount = (NIN_MEM2_FILE_PATCH_SIZE - sizeof(u32)) / (2 * sizeof(u32));
+	dbgprintf("Patch:MEM2 file-patch count is 0x%X.\r\n", filePatchCount);
+	if(filePatchCount > maxFilePatchCount) {
+		dbgprintf("Patch:Ignoring invalid file-patch count 0x%X.\r\n", filePatchCount);
+		filePatchCount = 0;
+	}
+	if(filePatchCount != 0) { //we have codes ready for writing
+		u32 c;
+		for(c = 0; c < filePatchCount; ++c) {
+			u32 entry = NIN_MEM2_FILE_PATCH_PHYS_BASE + sizeof(u32) + (c * 2 * sizeof(u32));
+			// Check for conditionals. A conditional consumes the next entry too.
+			if((read32(entry) & 1) == 1) {
+				if(c + 1 >= filePatchCount)
+					break;
+				if(*(u32*)((read32(entry)) & ~1) == read32(entry + sizeof(u32)))
+					write32(read32(entry + 2 * sizeof(u32)), read32(entry + 3 * sizeof(u32)));
 				++c; // Skip next set
 				continue;
 			} else
-				write32(read32(0x12000004+(c*8)), read32(0x12000008+(c*8)));
+				write32(read32(entry), read32(entry + sizeof(u32)));
 		}
 		
 		//dbgprintf("Patch:MEM2 wrote 0x%X.\r\n", c);
@@ -4242,7 +4250,9 @@ void PatchGame()
 	PatchState = PATCH_STATE_PATCH;
 	u32 FullLength = (DOLMaxOff - DOLMinOff + 31) & (~31);
 	DoPatches( (void*)DOLMinOff, FullLength, 0 );
+#ifndef LAUNCHER_DISABLE_SUSAMUNE_PATCH
 	PatchSusamune();
+#endif
 	// Some games need special timings
 	EXISetTimings(TITLE_ID, GAME_ID & 0xFF);
 #if 1

@@ -49,6 +49,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "wdvd.h"
 #include "b64/cdecode.h"
 #include "vi_encoder.h"
+#include "susamune/mem2_map.h"
 
 #include "ff_utf8.h"
 #include "diskio.h"
@@ -238,8 +239,8 @@ static void app_loadgameconfig(u8 *tempgameconf, u32 tempgameconfsize)
 	//u32 temp, tempoffset = 0; //searchNpoke
 	char parsebuffer[18];
 	u32 patch_count = 0;
-	u32 patch_address = 0x92000004;
-	vu32* patch_cntAddr = (vu32*)0x92000000;
+	u32 patch_address = NIN_MEM2_FILE_PATCH_PPC_BASE + sizeof(u32);
+	vu32* patch_cntAddr = (vu32*)NIN_MEM2_FILE_PATCH_PPC_BASE;
 	u32 memIncrement = 0;
 	
 	const char *discid = (const char *)patchID; //just a copy of gameid6
@@ -689,9 +690,9 @@ end:
 	if(patch_count) {
 		//gotta be careful the global patch.txt doesn't break the current code list
 		*patch_cntAddr = patch_count;
-		DCFlushRange((void *)0x92000000, 4);
+		DCFlushRange((void *)NIN_MEM2_FILE_PATCH_PPC_BASE, sizeof(u32));
 		
-		DCFlushRange((void *)0x92000004, patch_count*8);
+		DCFlushRange((void *)(NIN_MEM2_FILE_PATCH_PPC_BASE + sizeof(u32)), patch_count*8);
 		
 	/*	PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*20, "PATCHED: %d codes.", *patch_cntAddr);
 		UpdateScreen();
@@ -704,11 +705,11 @@ end:
 void SetFilePatches(void)
 {
 #if 0 // TEST: changes Sonic Mega Collection text from 'Game Title' to 'Game Reset'
-	vu32* patch_cntAddr = (vu32*)0x92000000; //amount of writes
-	vu32* patch_1 = (vu32*)0x92000004; //addr
-	vu32* patch_2 = (vu32*)0x92000008; //val
-	vu32* patch_3 = (vu32*)0x9200000C;
-	vu32* patch_4 = (vu32*)0x92000010;
+	vu32* patch_cntAddr = (vu32*)NIN_MEM2_FILE_PATCH_PPC_BASE; //amount of writes
+	vu32* patch_1 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x04u); //addr
+	vu32* patch_2 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x08u); //val
+	vu32* patch_3 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x0Cu);
+	vu32* patch_4 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x10u);
 
 	*patch_cntAddr = 2;
 	*patch_1 = 0x002406CC;
@@ -720,8 +721,9 @@ void SetFilePatches(void)
 	
 	//first set patch count to 0 regardless of using patch or not
 	//because the spot comes with some data
-	vu32* patch_cntAddr = (vu32*)0x92000000; //amount of writes
+	vu32* patch_cntAddr = (vu32*)NIN_MEM2_FILE_PATCH_PPC_BASE; //amount of writes
 	*patch_cntAddr = 0;
+	DCFlushRange((void*)patch_cntAddr, sizeof(*patch_cntAddr));
 	
 	//TODO: check for extracted fst format
 	char cheatPath[255];
@@ -741,15 +743,16 @@ void SetFilePatches(void)
 	FIL CodeFD;
 	if( f_open_char( &CodeFD, cheatPath, FA_READ|FA_OPEN_EXISTING ) == FR_OK )
 	{
-		if( CodeFD.obj.objsize > 6*1024*1024 )
+		if( CodeFD.obj.objsize > NIN_MEM2_FILE_PATCH_SIZE )
 		{
-			;//dbgprintf("Patch:File is too large, can't be larger than 2 MB!\r\n");
+			;//dbgprintf("Patch:File is too large, can't be larger than 6 MiB!\r\n");
 		}
 		else
 		{
-			void *patchbuf = (void*)0x92000000;
+			void *patchbuf = (void*)NIN_MEM2_FILE_PATCH_PPC_BASE;
 			UINT read;
 			f_read(&CodeFD, patchbuf, CodeFD.obj.objsize, &read);
+			DCFlushRange(patchbuf, read);
 		}
 		f_close( &CodeFD );
 	}
@@ -758,9 +761,9 @@ void SetFilePatches(void)
 		snprintf(cheatPath+i, sizeof(cheatPath), "patch.txt");
 		if( f_open_char( &CodeFD, cheatPath, FA_READ|FA_OPEN_EXISTING ) == FR_OK )
 		{
-			if( CodeFD.obj.objsize > 6*1024*1024 )
+			if( CodeFD.obj.objsize > NIN_MEM2_FILE_PATCH_SIZE )
 			{
-				;//dbgprintf("Patch:File is too large, can't be larger than 2 MB!\r\n");
+				;//dbgprintf("Patch:File is too large, can't be larger than 6 MiB!\r\n");
 			}
 			else
 			{
@@ -875,11 +878,11 @@ void SMC_ScanROM(u8 title)
 	if(strncmp((const char *)patchID, "GSOE", 4))
 		return;
 	
-	vu32* patch_cntAddr = (vu32*)0x92000000; //amount of writes
+	vu32* patch_cntAddr = (vu32*)NIN_MEM2_FILE_PATCH_PPC_BASE; //amount of writes
 	
 	if(title < 1) {
-		vu32* patch_1 = (vu32*)0x92000004;
-		vu32* patch_2 = (vu32*)0x92000008;
+		vu32* patch_1 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x04u);
+		vu32* patch_2 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x08u);
 		*patch_1 = 0x002AF0EC; //this is breaking mcd... why?
 	//	*patch_1 = 0x012000FC; //dummy write just to pad the codes below
 		*patch_2 = 0x00600000;
@@ -922,10 +925,10 @@ void SMC_ScanROM(u8 title)
 			//	*patch_2 = 0x802288CC;
 				
 				
-				vu32* patch_1 = (vu32*)(0x9200000C + (multAddr * 0x10)); //addr
-				vu32* patch_2 = (vu32*)(0x92000010 + (multAddr * 0x10)); //val
-				vu32* patch_3 = (vu32*)(0x92000014 + (multAddr * 0x10));
-				vu32* patch_4 = (vu32*)(0x92000018 + (multAddr * 0x10));
+				vu32* patch_1 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x0Cu + (multAddr * 0x10)); //addr
+				vu32* patch_2 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x10u + (multAddr * 0x10)); //val
+				vu32* patch_3 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x14u + (multAddr * 0x10));
+				vu32* patch_4 = (vu32*)(NIN_MEM2_FILE_PATCH_PPC_BASE + 0x18u + (multAddr * 0x10));
 				
 				*patch_1 = 0x002AF0C4 + (title*4);
 				*patch_2 = f.obj.objsize;
@@ -2148,7 +2151,7 @@ int main(int argc, char **argv)
 	WPAD_Shutdown();
 
 	#define GCN_IPL_SIZE 2097152
-	#define TRI_IPL_SIZE 1048576
+	#define TRI_IPL_SIZE NIN_MEM2_SEGABOOT_SIZE
 	void *iplbuf = NULL;
 	bool useipl = false;
 	bool useipltri = false;
@@ -2214,31 +2217,31 @@ int main(int argc, char **argv)
 				if (f.obj.objsize == TRI_IPL_SIZE)
 				{
 					f_lseek(&f, 0x20);
-					void *iplbuf = (void*)0x92A80000;
+					void *iplbuf = (void*)NIN_MEM2_SEGABOOT_PPC_BASE;
 					UINT read;
 					f_read(&f, iplbuf, TRI_IPL_SIZE - 0x20, &read);
 					useipltri = (read == (TRI_IPL_SIZE - 0x20));
 					
 					//check for 480p
 					if(progressive) {
-						*(s16 *)(0x92A80000 + 0x824AA - 0x20) = 2; //NTSC 480p
-						*(s16 *)(0x92A80000 + 0x824BE - 0x20) = 0; //no field rendering
+						*(s16 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x824AA - 0x20) = 2; //NTSC 480p
+						*(s16 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x824BE - 0x20) = 0; //no field rendering
 						
 						//other video mode, unused?
-						//*(s16 *)(0x92A80000 + 0x8A202 - 0x20) = 2; //NTSC 480p
-						//*(s16 *)(0x92A80000 + 0x8A216 - 0x20) = 0; //no field rendering
+						//*(s16 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x8A202 - 0x20) = 2; //NTSC 480p
+						//*(s16 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x8A216 - 0x20) = 0; //no field rendering
 					}
 					//no deflicker
 					//if(sharp) {
 						//It normally has no deflicker, but you can change it here 
-					//	*(s16 *)(0x92A80000 + 0x824DA - 0x20) = 0;
-					//	*(u32 *)(0x92A80000 + 0x824DC - 0x20) = 0x15001500;
-					//	*(s16 *)(0x92A80000 + 0x824E0 - 0x20) = 0;
+					//	*(s16 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x824DA - 0x20) = 0;
+					//	*(u32 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x824DC - 0x20) = 0x15001500;
+					//	*(s16 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x824E0 - 0x20) = 0;
 						
 						//other mode, has df
-					//	*(s16 *)(0x92A80000 + 0x8A232 - 0x20) = 0;
-					//	*(u32 *)(0x92A80000 + 0x8A234 - 0x20) = 0x15161500;
-					//	*(s16 *)(0x92A80000 + 0x8A238 - 0x20) = 0;
+					//	*(s16 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x8A232 - 0x20) = 0;
+					//	*(u32 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x8A234 - 0x20) = 0x15161500;
+					//	*(s16 *)(NIN_MEM2_SEGABOOT_PPC_BASE + 0x8A238 - 0x20) = 0;
 					//}
 				}
 				f_close(&f);
@@ -2272,7 +2275,7 @@ int main(int argc, char **argv)
 /*	FIL CodeFD;
 	if( f_open_char( &CodeFD, "sd:/codes/mem2.bin", FA_WRITE|FA_CREATE_ALWAYS ) == FR_OK )
 	{
-		void *patchbuf = (void*)0x92000000;
+		void *patchbuf = (void*)NIN_MEM2_FILE_PATCH_PPC_BASE;
 		
 		UINT wrote;
 		f_write(&CodeFD, patchbuf, 32*1024, &wrote);

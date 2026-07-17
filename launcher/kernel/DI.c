@@ -38,6 +38,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "FST.h"
 #include "HID.h"
 #include "BT.h"
+#include "susamune/mem2_map.h"
 #include "usbstorage.h"
 
 #include "ff_utf8.h"
@@ -71,8 +72,8 @@ extern bool wiiVCInternal;
 u32 WaitForRealDisc = 0;
 u32 DiscRequested = 0;
 
-u8 *const DI_READ_BUFFER = (u8*)0x12E80000;
-const u32 DI_READ_BUFFER_LENGTH = 0x80000;
+u8 *const DI_READ_BUFFER = (u8*)NIN_MEM2_DI_SCRATCH_PHYS_BASE;
+const u32 DI_READ_BUFFER_LENGTH = NIN_MEM2_DI_SCRATCH_SIZE;
 
 extern u32 GAME_ID;
 extern u16 GAME_ID6;
@@ -88,7 +89,7 @@ static u32 GCAMKeyC;
 
 static u8 *MediaBuffer;
 static u8 *NetworkCMDBuffer;
-static u8 *const DIMMMemory = (u8*)0x12B80000;
+static u8 *const DIMMMemory = (u8*)NIN_MEM2_DIMM_PHYS_BASE;
 
 // Multi-disc filenames.
 static const char disc_filenames[8][16] = {
@@ -140,7 +141,7 @@ void DiscReadSync(u32 Buffer, u32 Offset, u32 Length, u32 Mode)
 }
 
 //ISO Cache is disabled while SegaBoot runs
-static u8 *const SegaBoot = (u8*)0x12A80000;
+static u8 *const SegaBoot = (u8*)NIN_MEM2_SEGABOOT_PHYS_BASE;
 void ReadSegaBoot(u32 Buffer, u32 Offset, u32 Length)
 {
 	if(Offset > 0x100000) //set invalid
@@ -247,7 +248,7 @@ void DIinit( bool FirstTime )
 		memset32( NetworkCMDBuffer, 0, 512 );
 
 		//This normally contains default rankings but we just clear it
-		memset32( DIMMMemory, 0, 0x300000 );
+		memset32( DIMMMemory, 0, NIN_MEM2_DIMM_SIZE );
 
 		memset32( (void*)DI_BASE, 0, 0x30 );
 		sync_after_write( (void*)DI_BASE, 0x40 );

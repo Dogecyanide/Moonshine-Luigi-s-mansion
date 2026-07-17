@@ -11,8 +11,14 @@ public:
     SavestateManager();
 
     // Called once per frame from main.cpp's onUpdate hook. Polls the d-pad
-    // and triggers save/load.
+    // and triggers saves. Loads are queued until the post-render hook so the
+    // current frame cannot consume a mixture of live and restored state.
     void updateHook(TMarioGamePad *controller);
+
+    // Called after the game's THPPlayerDrawDone()/GXDrawDone barrier. A queued
+    // load is restored here, after director, fader, audio, and rendering work
+    // for the current frame has finished.
+    void processPendingLoad();
 
     // Drawn after the scene each frame, shows "saved" / "loaded" / error.
     void draw(J2DOrthoGraph *ortho);
@@ -25,6 +31,7 @@ private:
     void setStatus(const char *msg);
 
     J2DTextBox *mInfoText;
+    bool mLoadPending;
 };
 
 #endif // _SUSAMUNE_SAVESTATE_HXX

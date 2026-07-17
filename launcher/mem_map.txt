@@ -7,12 +7,18 @@ MEM1
 
 MEM2
 0x90000000-0x91000000=aram
-0x91000000-0x92000000=memcard emu - end point depends on memcard size
-0x92000000-0x92E80000=cache - start point depends on memcard size end point depends on Triforce
-0x92B80000-0x92E80000=(In Triforce mode this is reserved for DIMM memory)
-0x92E80000-0x92F00000=temporary di buffer (Also used by Patch code when processing DSP)
+0x91000000-0x91300000=ISO cache / RealDI buffer (mutually exclusive)
+0x91300000-0x91400000=Triforce SegaBoot IPL
+0x91400000-0x91700000=Triforce DIMM memory
+0x91700000-0x91780000=temporary DI/DSP patch buffer
+0x91780000-0x91900000=PPC loader-only real-disc DMA buffer
+0x91900000-0x91F00000=patch.bin / patch.txt loader-to-kernel handoff
+0x91F00000-0x92F00000=Susamune savestate snapshot (dedicated; 16 MiB)
 
 0x92F00000-0x93000000=Nintendont kernel
+
+Memory-card emulation is disabled in the Susamune launcher. Its stock buffer
+starts at 0x91000000 and is incompatible with the dedicated layout above.
 
 0x93000000-0x93003000=padread gc bin
 

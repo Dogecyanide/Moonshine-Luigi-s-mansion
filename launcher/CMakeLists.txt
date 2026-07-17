@@ -27,6 +27,7 @@ endif()
 get_filename_component(_repo_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(LAUNCHER_SCRIPTS_DIR "${_repo_root}/scripts" CACHE PATH "repo scripts/ dir")
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "meta.xml default load source (di/sd/usb)")
+option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
 
 # The mod's inject header dir. In the integrated build the root project generates
 # susamune_inject.h and points us at it; standalone we drop an empty one so the
@@ -82,6 +83,7 @@ ExternalProject_Add(arm
     CMAKE_ARGS
         "-DCMAKE_TOOLCHAIN_FILE=${_cmake_dir}/toolchain-devkitARM.cmake"
         "-DSUSAMUNE_INJECT_DIR=${SUSAMUNE_INJECT_DIR}"
+        "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
         ${_common_args}
     DEPENDS ppc
     BUILD_ALWAYS ON

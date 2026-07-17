@@ -7,6 +7,7 @@
 #include "ff_utf8.h"
 
 #include "NAND.h"
+#include "susamune/mem2_map.h"
 
 // ENABLE ring giver in Heroes/Shadow/SMCSonic2
 //#define spRings 1
@@ -370,7 +371,7 @@ typedef struct _SPData_ctx {
 extern vu32 TRIGame;
 
 // Memory Card context.
-static u8 *const GCNCard_base = (u8*)(0x11000000);
+static u8 *const GCNCard_base = (u8*)NIN_MEM2_DISC_CACHE_PHYS_BASE;
 
 typedef struct _GCNCard_ctx {
 	char filename[0x20];    // Memory Card filename.

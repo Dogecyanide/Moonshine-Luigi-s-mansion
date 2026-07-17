@@ -17,6 +17,7 @@ target_compile_definitions(loader PRIVATE
 
 target_include_directories(loader PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
     "${CMAKE_CURRENT_SOURCE_DIR}/../fatfs"
     "${CMAKE_CURRENT_SOURCE_DIR}/extlibs/include"
     "${LIBOGC_INC}")

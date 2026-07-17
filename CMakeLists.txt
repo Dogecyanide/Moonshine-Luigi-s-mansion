@@ -60,6 +60,7 @@ option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
 option(ENABLE_SAVESTATE_DBG "Enable savestate debug output" OFF)
 option(ENABLE_WARP_MENU "Enable warp menu" OFF)
 option(UPDATE_ISO_METADATA "Update ISO metadata (game code 01 -> 02, change picture, name, etc.)" OFF)
+option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
 
 set(ISO_CODE_jp GMSJ01)
 set(ISO_CODE_us GMSE01)
@@ -243,6 +244,7 @@ ExternalProject_Add(nintendont_launcher
         "-DSUSAMUNE_MANIFEST=${MANIFEST}"
         "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
+        "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
     DEPENDS inject_header
     BUILD_ALWAYS ON
     INSTALL_COMMAND ""

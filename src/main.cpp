@@ -107,7 +107,12 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
 }
 
 extern "C" void afterDraw() {
+    // The original call is a full GXDrawDone barrier. Process queued loads
+    // immediately afterward: director, fader, audio, and the current frame's
+    // GPU work are all complete, while the next game frame has not begun.
     THPPlayerDrawDone();
+    if (gSavestateMgr)
+        gSavestateMgr->processPendingLoad();
     {
         J2DOrthoGraph ortho(0, 0, 640, 480);
         ortho.setup2D();

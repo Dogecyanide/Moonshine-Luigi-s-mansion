@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <unistd.h>
 #include "dip.h"
 #include "global.h"
+#include "susamune/mem2_map.h"
 
 void DVDStartCache(void)
 {
@@ -30,9 +31,10 @@ void DVDStartCache(void)
 	while( DI_CONTROL & 1 );
 }
 
-//Use same buffer as kernel, uncached though, to see howto cache see DI.c
-static u8 *const DISC_DRIVE_BUFFER = (u8*)0x92000800;
-//static const u32 DISC_DRIVE_BUFFER_LENGTH = 0x7FF000;
+// Loader-only DI DMA space, packed below the external-patch handoff buffer.
+// The game never uses this after the loader hands control to Nintendont.
+static u8 *const DISC_DRIVE_BUFFER = (u8*)NIN_MEM2_LOADER_DISC_PPC_BASE;
+static const u32 DISC_DRIVE_BUFFER_LENGTH = NIN_MEM2_LOADER_DISC_SIZE;
 void ReadRealDisc(u8 *Buffer, u64 Offset, u32 Length, u32 Command)
 {
 	u32 ReadDiff = 0;
@@ -60,6 +62,9 @@ void ReadRealDisc(u8 *Buffer, u64 Offset, u32 Length, u32 Command)
 		write32(DIP_CMD_1, (u32)(TmpOffset >> 2));
 		write32(DIP_CMD_2, TmpLen);
 	}
+
+	if (TmpLen > DISC_DRIVE_BUFFER_LENGTH)
+		return;
 
 	DCInvalidateRange(DISC_DRIVE_BUFFER, TmpLen);
 	write32(DIP_DMA_ADR, (u32)DISC_DRIVE_BUFFER);

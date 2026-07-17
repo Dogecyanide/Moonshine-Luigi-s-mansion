@@ -24,8 +24,12 @@ target_compile_options(kernel PRIVATE
     -fno-builtin-memcmp -fno-builtin-malloc -fno-builtin-free
     $<$<COMPILE_LANGUAGE:ASM>:-D_LANGUAGE_ASSEMBLY>)
 
+target_compile_definitions(kernel PRIVATE
+    $<$<BOOL:${LAUNCHER_DISABLE_SUSAMUNE_PATCH}>:LAUNCHER_DISABLE_SUSAMUNE_PATCH>)
+
 target_include_directories(kernel PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
     "${CMAKE_CURRENT_SOURCE_DIR}/../fatfs"
     "${LAUNCHER_GEN_DIR}"          # codehandler.h + asm/*.h blob headers
     "${SUSAMUNE_INJECT_DIR}")      # susamune_inject.h (mod blob + writes)

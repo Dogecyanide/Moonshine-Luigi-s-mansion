@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "alloc.h"
 #include "RealDI.h"
 #include "DI.h"
+#include "susamune/mem2_map.h"
 
 static struct ipcmessage realdimsg ALIGNED(32);
 static u32 outbuf[8] __attribute__((aligned(32)));
@@ -35,13 +36,13 @@ u32 RealDiscCMD = 0, RealDiscError = 0;
 
 //Disc mode never uses the ISO cache, so reuse its region (ISO.c CACHE_START /
 //CACHE_SIZE: 3 MiB at 0x11000000) for disc buffering. ISO and disc modes are
-//mutually exclusive, so sharing is safe, and it keeps RealDI out of 0x12000000+
-//where the savestate mod reserves MEM2. Reads larger than the buffer are split
-//by the DI read loop, so the smaller buffer only costs extra iterations.
-static u8 *const DISC_FRONT_CACHE = (u8*)0x11000000;
-static u8 *const DISC_DRIVE_BUFFER = (u8*)0x11000800;
-static const u32 DISC_DRIVE_BUFFER_LENGTH = 0x2FF000;
-static u8 *const DISC_TMP_CACHE = (u8*)0x112FF800;
+//mutually exclusive, and keeping this below physical 0x11300000 leaves the
+//relocated Nintendont buffers and dedicated savestate window untouched. Reads
+//larger than the buffer are split by the DI loop.
+static u8 *const DISC_FRONT_CACHE = (u8*)NIN_MEM2_DISC_CACHE_PHYS_BASE;
+static u8 *const DISC_DRIVE_BUFFER = (u8*)(NIN_MEM2_DISC_CACHE_PHYS_BASE + 0x800u);
+static const u32 DISC_DRIVE_BUFFER_LENGTH = NIN_MEM2_DISC_CACHE_SIZE - 0x1000u;
+static u8 *const DISC_TMP_CACHE = (u8*)(NIN_MEM2_DISC_CACHE_PHYS_BASE + NIN_MEM2_DISC_CACHE_SIZE - 0x800u);
 
 static s32 realdiqueue = -1;
 static vu32 realdi_msgrecv = 0;

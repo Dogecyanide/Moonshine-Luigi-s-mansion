@@ -48,16 +48,18 @@
 // Where the snapshot lives
 // ------------------------
 // On Wii via Nintendont, MEM2 cached lives at 0x90000000 / uncached at
-// 0xD0000000. Nintendont reserves chunks of MEM2 for itself; the safe
-// window depends on the Nintendont build. The address below is a guess
-// and almost certainly needs to be tuned per setup. On Dolphin we just
-// pick a spot in the emulator's larger virtual space.
+// 0xD0000000. The custom launcher reserves a dedicated 16 MiB physical
+// window and relocates all Nintendont buffers below it; mem2_map.h is the
+// shared source of truth for the PPC mod/loader and ARM kernel. On Dolphin
+// we just pick a spot in the emulator's larger virtual space.
 // =====================================================================
 
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
+#include "susamune/mem2_map.h"
 
 #include "Dolphin/CARD.h"
+#include "Dolphin/GX.h"
 #include "Dolphin/OS.h"
 #include "J2D/J2DOrthoGraph.hxx"
 #include "J2D/J2DTextBox.hxx"
@@ -81,15 +83,15 @@
 // Dolphin: a region in the emulator's "free" space.
 static const u32 kSnapshotBase = 0x70000000u;
 #else
-// Wii: on Nintendont, when memcard emu is disabled, this area is right
-// after the 3MB DI cache. It is free until 0x92F00000 which is where
-// the Nintendont kernel itself is loaded.
-static const u32 kSnapshotBase = 0x91F00000;
+// Wii: a dedicated 16 MiB window. The custom Nintendont memory map relocates
+// all of its former users below this address; the ARM kernel begins exactly at
+// the window's exclusive end.
+static const u32 kSnapshotBase = SUSAMUNE_MEM2_SNAPSHOT_PPC_BASE;
 #endif
 
 // How much MEM2 we promise not to step outside of. The actual snapshot is
 // (game-bss + game-sdata + game-sbss + heap), which should be under 16MiB.
-static const u32 kSnapshotReservedSize = 0x01000000u; // 16 MiB
+static const u32 kSnapshotReservedSize = SUSAMUNE_MEM2_SNAPSHOT_SIZE;
 
 
 // ---------------------------------------------------------------------
@@ -322,6 +324,7 @@ char sStatusBuf[32];
 // ---------------------------------------------------------------------
 
 SavestateManager::SavestateManager() {
+    mLoadPending                 = false;
     mInfoText                    = new J2DTextBox(gpSystemFont->mFont, "ready");
     mInfoText->mCharSizeX        = 18;
     mInfoText->mCharSizeY        = 18;
@@ -567,16 +570,12 @@ bool SavestateManager::loadState() {
         gpMSound->stopAllSound();
     }
 
-    // NOTE (disabled): draining the GP here (GXDrawDone), then invalidating
-    // the texture cache after the restore (GXInvalidateTexAll), was an
-    // attempt to stop an in-flight goop EFB copy from clobbering the restore
-    // and to force the GPU to re-read our restored bytes. The real cause of
-    // goop not restoring was Dolphin serving a stale cached copy of the
-    // pollution texture -- fixed by Texture Cache Accuracy = Safe -- not GP
-    // timing, and on console the game already invalidates every frame. Left
-    // out to avoid the one-frame stall; re-enable for a console test if
-    // needed. (#include "Dolphin/GX.h")
-    // GXDrawDone();
+    // Never overwrite heap-resident textures or display-list backing storage
+    // while the graphics processor can still be reading the current frame.
+    // D-pad loads normally arrive from processPendingLoad(), immediately after
+    // THPPlayerDrawDone() has already issued this barrier. Keep it here too so
+    // direct callers of loadState() receive the same safety guarantee.
+    GXDrawDone();
 
     bool ints = OSDisableInterrupts();
     // Silence the DAC across the interrupts-off restore so the frozen audio
@@ -595,7 +594,10 @@ bool SavestateManager::loadState() {
         // No instruction-cache invalidation: we never restore .text.
     }
 
-    // (see note above) GXInvalidateTexAll();
+    // The restored heap contains texture/image bytes from the saved frame.
+    // Invalidate the GP texture cache before any subsequent draw so it cannot
+    // keep sampling lines cached from the pre-load state.
+    GXInvalidateTexAll();
 
     // TMarDirector::mStopwatch (the Piantissimo-chase / blooper-race mission
     // countdown, restored above as part of the heap region) stores an
@@ -628,8 +630,23 @@ void SavestateManager::updateHook(TMarioGamePad *controller) {
     if (ri & JUTGamePad::DPAD_LEFT) {
         saveState();
     } else if (ri & JUTGamePad::DPAD_RIGHT) {
-        loadState();
+        // TApplication still runs the fader and gpMSound->mainLoop(), then
+        // submits the rest of the frame after this hook returns. Restoring here
+        // made those systems consume half-live/half-restored state. Defer the
+        // operation until after the post-render GXDrawDone barrier instead.
+        mLoadPending = true;
+        setStatus("loading");
     }
+}
+
+void SavestateManager::processPendingLoad() {
+    if (!mLoadPending) {
+        return;
+    }
+
+    // Clear first so a rejected load is not retried every frame.
+    mLoadPending = false;
+    loadState();
 }
 
 void SavestateManager::draw(J2DOrthoGraph *ortho) {

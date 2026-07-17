@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "GCNCard.h"
 #include "debug.h"
 #include "wdvd.h"
+#include "susamune/mem2_map.h"
 
 #include "ff_utf8.h"
 
@@ -34,9 +35,8 @@ extern bool wiiVCInternal;
 u32 ISOFileOpen = 0;
 
 #define CACHE_MAX		0x400
-#define CACHE_START		(u8*)0x11000000
-//#define CACHE_SIZE		0x1E80000
-#define CACHE_SIZE		0x300000
+#define CACHE_START		((u8*)NIN_MEM2_DISC_CACHE_PHYS_BASE)
+#define CACHE_SIZE		NIN_MEM2_DISC_CACHE_SIZE
 
 #undef USE_NAND
 
