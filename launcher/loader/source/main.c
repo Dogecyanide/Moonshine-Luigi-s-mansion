@@ -1813,6 +1813,7 @@ int main(int argc, char **argv)
 			ncfg->Language = NIN_LAN_AUTO;
 			ncfg->MaxPads = NIN_CFG_MAXPAD;
 			ncfg->MemCardBlocks = 0x2;//251 blocks
+			ncfg->Config |= NIN_CFG_REMLIMIT;
 		}
 
 		// Prevent autobooting if B is pressed
