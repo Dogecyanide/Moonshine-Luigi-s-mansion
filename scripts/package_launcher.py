@@ -26,14 +26,27 @@ APP_ICONS = {
 }
 
 
+def git_version():
+    """The tag name if HEAD is exactly at a tag (CI release builds), else the
+    short commit hash."""
+    repo_dir = str(LAUNCHER_DIR.parent)
+    try:
+        return subprocess.check_output(
+            ["git", "describe", "--tags", "--exact-match", "HEAD"],
+            cwd=repo_dir, text=True, stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        pass
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_dir, text=True).strip()
+    except Exception:
+        return "unknown"
+
+
 def render_meta(manifest, source):
     import jinja2
-    try:
-        version = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(LAUNCHER_DIR.parent), text=True).strip()
-    except Exception:
-        version = "unknown"
+    version = git_version()
     template = jinja2.Template(META_TEMPLATE.read_text())
     return template.render(
         region=manifest["region"],

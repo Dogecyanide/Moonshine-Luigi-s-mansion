@@ -1,3 +1,18 @@
+## 2026-07-18
+
+Miscellaneous notes from zeldocto conversation that have not been sorted into gecko_codes.md and todo.md:
+
+Settings Presets:
+Fast Any% mode 
+IL mode
+
+QFT AND shine get. some people like both.
+
+make the gecko code limit higher
+or just put gci loader (low priority)
+
+https://github.com/AlexanderHarrison/HOW-TO-WRITE-GECKO-CODES
+
 ## 2026-06-27
 
 TODO: 

@@ -10,12 +10,34 @@
 
 ## TODO
 
-- [X] Add customized nintendont loader that loads the mod as a patch to a real disc or ISO. Removes the need to have an ISO at build time for console users.
-- [X] Add nintendont toolchains to repo for reproducible compilations.
-- [X] Integrate nintendont compilation with the cmake and create easy presets for console and emulator. 
-- [ ] Remove nintendont dependency on make.
-- [ ] Add a CI.
+- [ ] [Bindings menu](#bindings)
+- [ ] [SD card settings persistence](#sd-card-persistence)
+- [ ] [Customizable GUI support](#customizable-gui)
+- [ ] Gecko code porting (gecko_codes.md)
 - [ ] Emulator autodetect.
 - [ ] dont require different channels for different regions. load a bin from SD card
 - [ ] Input tracing feature. Needs planning.
 - [ ] Switch everything to a single Clang compiler (based on the kuribo tree) that does PowerPC and ARM to simplify dependencies.
+
+### Bindings
+
+TODO describe
+
+Settings menu itself needs a bind. Default Y-Start. Savestate has a bind, default is d-pad left save d-pad right load (same as currently).
+
+Either do 2 (3) gui buttons or have it record inputs. 
+
+
+### SD card settings persistence
+
+TODO describe
+
+SD card save persistence / USB as backup.
+- Saved popup
+- OR failed save.
+
+popup when loading saves.
+
+### Customizable GUI
+
+TODO describe
