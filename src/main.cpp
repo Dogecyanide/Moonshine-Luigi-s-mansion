@@ -11,6 +11,7 @@
 #include "Dolphin/THP.h"
 #include "susamune/menu.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/features.hxx"
 #include "susamune/warp.hxx"
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
@@ -90,8 +91,12 @@ extern "C" void onSetup(TMarDirector* director) {
 }
 
 
-extern "C" s32 onUpdate(JDrama::TDirector* director) {    
+extern "C" s32 onUpdate(JDrama::TDirector* director) {
     int state = director->direct();
+
+    // Apply/restore the toggled memory-patch features (ported gecko codes).
+    // Runs every frame like the gecko handler; no-ops when nothing changed.
+    featuresApply();
 
     if (gSavestateMgr) {
         gSavestateMgr->updateHook(gpApplication.mGamePads[0]);

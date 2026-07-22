@@ -16,15 +16,58 @@
 // =====================================================================
 
 // The full set of settings. Add a value here and a matching row in
-// kSettingDescs (settings.cpp); nothing else needs to change.
+// kSettingDescs (settings.cpp); nothing else needs to change. The enum order
+// controls the values[] layout and the within-category display order in the
+// menu (which filters by category), so keep each category's entries grouped.
 enum SettingId {
+    // -- Savestate --
     SETTING_SAVE_RNG_STATE,  // savestates rewind the libc RNG seed on load
+
+    // -- Quality-of-life toggles (ported gecko codes; see features.cpp) --
+    SETTING_INFINITE_LIVES,
+    SETTING_UNLOCK_NOZZLES,
+    SETTING_UNLOCK_YOSHI,
+    SETTING_ANY_FRUIT_YOSHI,
+    SETTING_INFINITE_JUICE,
+    SETTING_EXIT_AREA_EVERYWHERE,
+    SETTING_FMV_SKIPS,
+    SETTING_RESPAWN_SHINES,
+    SETTING_FRUIT_NEVER_TIMEOUT,
+    SETTING_FREE_PAUSE,
+    SETTING_DISABLE_BLUE_COIN,
+    SETTING_DEATHLESS_BLOOPER,
+    SETTING_FAST_TEXT,      // DPad Functions: replace dialog with "!!!"
+    SETTING_FLUDD_SECRETS,  // CHOICE: Completed(default) / No FLUDD / All secrets
+
+    // -- Cosmetic toggles --
+    SETTING_MUTE_BGM,
+    SETTING_SHINE_OUTFIT,
+    SETTING_SHINY_SHINES,
+    SETTING_SHADOW_MARIO_HP,
+    SETTING_REPLACE_EPISODE_NAMES,
+
+    // -- Misc toggles --
+    SETTING_FAST_PIANTISSIMO,
+    SETTING_NEVER_PAUSE_IGT,
+    SETTING_FORCE_PLAZA_EVENTS,
+    SETTING_NOZZLE_LOCK,  // CHOICE: Unlocked(default) / Rocket / Turbo / Hover
+
     SETTING_COUNT
 };
 
 enum SettingType {
     SETTING_BOOL,    // two states, rendered On / Off
     SETTING_CHOICE,  // 1-of-N, rendered as choices[value]
+};
+
+// Which menu tab a setting appears under. The menu builds one generic tab per
+// category and renders the settings tagged with it.
+enum SettingCategory {
+    SETTING_CAT_SAVESTATE,
+    SETTING_CAT_QOL,
+    SETTING_CAT_COSMETIC,
+    SETTING_CAT_MISC,
+    SETTING_CAT_COUNT
 };
 
 // Static, const description of one setting. Lives in .rodata.
@@ -34,6 +77,7 @@ struct SettingDesc {
     u8                 numChoices;  // SETTING_BOOL => 2
     u8                 defaultValue;
     const char *const *choices;     // SETTING_CHOICE => numChoices labels
+    SettingCategory    category;    // menu tab it renders under
 };
 
 // The serialisable payload. POD so it can be blitted to/from a save file

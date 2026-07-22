@@ -259,22 +259,36 @@ private:
 };
 
 // ---------------------------------------------------------------------
-// Savestate settings tab (generic settings renderer)
+// Category settings tab (generic settings renderer)
+//
+// Renders every setting tagged with `mCat` -- one tab per SettingCategory.
+// The setting/value store lives in settings.*; this only navigates and
+// draws. The filtered id list is rebuilt each frame off kSettingDescs
+// (SETTING_COUNT is tiny), so adding a setting needs no change here.
 // ---------------------------------------------------------------------
-class SavestateSettingsTab : public MenuTab {
+class CategorySettingsTab : public MenuTab {
 public:
-    SavestateSettingsTab() : mSel(0) {}
+    CategorySettingsTab(const char *title, SettingCategory cat)
+        : mTitle(title), mCat(cat), mSel(0) {}
 
-    const char *title() const override { return "Savestate"; }
+    const char *title() const override { return mTitle; }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
+        SettingId ids[SETTING_COUNT];
+        int       n = buildList(ids);
+        if (n == 0) {
+            return;
+        }
         u32 rapid = pad->mButtons.mRapidInput;
         if (rapid & TMarioGamePad::CSTICK_UP) {
-            mSel = wrap(mSel - 1, SETTING_COUNT);
+            mSel = wrap(mSel - 1, n);
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
-            mSel = wrap(mSel + 1, SETTING_COUNT);
+            mSel = wrap(mSel + 1, n);
         }
-        SettingId id = (SettingId)mSel;
+        if (mSel >= n) {
+            mSel = n - 1;
+        }
+        SettingId id = ids[mSel];
         if ((rapid & TMarioGamePad::A) || (rapid & TMarioGamePad::CSTICK_RIGHT)) {
             gSettings.cycle(id, +1);
         } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
@@ -283,10 +297,22 @@ public:
     }
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
+        SettingId ids[SETTING_COUNT];
+        int       n = buildList(ids);
+        if (n == 0) {
+            menu->drawText("(none)", x + 4, y, ROW_SZ, ROW_SZ, cRowDim());
+            return;
+        }
+        int maxRows = h / ROW_H;
+        int start   = listScrollStart(mSel, n, maxRows);
+        int end     = start + maxRows;
+        if (end > n) {
+            end = n;
+        }
         int ry = y;
-        for (int i = 0; i < SETTING_COUNT; i++) {
-            SettingId          id = (SettingId)i;
-            const SettingDesc &d  = Settings::desc(id);
+        for (int i = start; i < end; i++) {
+            SettingId          id       = ids[i];
+            const SettingDesc &d        = Settings::desc(id);
             bool               selected = (i == mSel);
             if (selected) {
                 drawRowHighlight(menu, x, ry, w, ROW_H);
@@ -298,10 +324,28 @@ public:
             menu->drawText(val, vx, ry, ROW_SZ, ROW_SZ, cValue());
             ry += ROW_H;
         }
+        if (start > 0) {
+            menu->drawText("^", x + w - 12, y, ROW_SZ, ROW_SZ, cRowDim());
+        }
+        if (end < n) {
+            menu->drawText("v", x + w - 12, y + h - ROW_H, ROW_SZ, ROW_SZ, cRowDim());
+        }
     }
 
 private:
-    int mSel;
+    int buildList(SettingId *out) const {
+        int n = 0;
+        for (int i = 0; i < SETTING_COUNT; i++) {
+            if (Settings::desc((SettingId)i).category == mCat) {
+                out[n++] = (SettingId)i;
+            }
+        }
+        return n;
+    }
+
+    const char     *mTitle;
+    SettingCategory mCat;
+    int             mSel;
 };
 
 // =====================================================================
@@ -312,9 +356,12 @@ private:
 // vtables are set without relying on C++ static-init, which the injected mod
 // does not run).
 namespace {
-u8 sPresetsBuf[sizeof(WarpPresetsTab)]        __attribute__((aligned(8)));
-u8 sStagesBuf[sizeof(WarpStagesTab)]          __attribute__((aligned(8)));
-u8 sSettingsBuf[sizeof(SavestateSettingsTab)] __attribute__((aligned(8)));
+u8 sPresetsBuf[sizeof(WarpPresetsTab)]         __attribute__((aligned(8)));
+u8 sStagesBuf[sizeof(WarpStagesTab)]           __attribute__((aligned(8)));
+u8 sQolBuf[sizeof(CategorySettingsTab)]        __attribute__((aligned(8)));
+u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
+u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
+u8 sSavestateBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 }  // namespace
 
 Menu::Menu() : mText(gpSystemFont->mFont, " ") {
@@ -344,7 +391,10 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
 
     mTabs[mNumTabs++] = new (sPresetsBuf) WarpPresetsTab();
     mTabs[mNumTabs++] = new (sStagesBuf) WarpStagesTab();
-    mTabs[mNumTabs++] = new (sSettingsBuf) SavestateSettingsTab();
+    mTabs[mNumTabs++] = new (sQolBuf) CategorySettingsTab("QoL", SETTING_CAT_QOL);
+    mTabs[mNumTabs++] = new (sCosmeticBuf) CategorySettingsTab("Cosmetic", SETTING_CAT_COSMETIC);
+    mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab("Misc", SETTING_CAT_MISC);
+    mTabs[mNumTabs++] = new (sSavestateBuf) CategorySettingsTab("Savestate", SETTING_CAT_SAVESTATE);
 }
 
 int Menu::textWidth(const char *s, int sizeX) {

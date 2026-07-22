@@ -14,6 +14,7 @@
 - [ ] [SD card settings persistence](#sd-card-persistence)
 - [ ] [Customizable GUI support](#customizable-gui)
 - [ ] Gecko code porting (gecko_codes.md)
+- [ ] gui wonkiness, text moving around when switching to on/off etc. needs to be right-justified
 - [ ] Emulator autodetect.
 - [ ] dont require different channels for different regions. load a bin from SD card
 - [ ] Input tracing feature. Needs planning.
