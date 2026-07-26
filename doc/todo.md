@@ -16,9 +16,11 @@
 - [ ] Gecko code porting (gecko_codes.md)
 - [ ] gui wonkiness, text moving around when switching to on/off etc. needs to be right-justified
 - [ ] Emulator autodetect.
+- [ ] probably have a separate way to control default settings rather than autosaving? and rather than pressing a button to just save the current
 - [ ] dont require different channels for different regions. load a bin from SD card
 - [ ] Input tracing feature. Needs planning.
 - [ ] Switch everything to a single Clang compiler (based on the kuribo tree) that does PowerPC and ARM to simplify dependencies.
+- [ ] QFT doesnt pause on shine get grab when no shine get animation is on (maybe just my qft settings? probably not)
 
 ### Bindings
 

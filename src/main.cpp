@@ -31,18 +31,44 @@ extern "C" void* getArenaLo() {
     return (void*)(*(volatile u32*)SUSAMUNE_ADDR_OS_ARENA_LO + kArenaReserve);
 }
 
-// Replaces the `bl TApplication::initialize` in main() (see patches.py). main()
-// is only initialize(); proc(); finalize(), so this is the last point before
-// the game's app-state machine starts running -- the logo, the progressive-mode
-// prompt, the title screen and gameplay all live inside proc(). Settings have
-// to be live by now: featuresApply() runs from onUpdate, which is hooked into
-// gameLoop(), and proc() calls gameLoop() for the logo and title states too --
-// so initialising settings any later (as onSetup used to) left every feature
-// reading zeroed BSS for the whole boot sequence. Codes that patch the boot
-// path itself, like Intro Skip, need it earlier still.
+// Replaces the `bl TApplication::initialize` in main() (see patches.py), the
+// last point before proc() starts the app-state machine. Settings must be live
+// by here: proc() runs gameLoop() -- and so featuresApply() -- for the logo and
+// title states too, and Intro Skip below patches the boot path itself.
 extern "C" void onAppInit(TApplication* app) {
     app->initialize();
     gSettings.init();
+
+    // Intro Skip. Boot runs BOOT -> NLOGO -> intro-movie -> stage(AREA_OPTION),
+    // where that last stage IS the title screen. Both halves are set up here
+    // because proc() has not started yet and neither is reachable from the
+    // per-frame hooks: onUpdate replaces only the *general* director->direct()
+    // call in gameLoop, and the logo/intro states run before it ever fires.
+    if (gSettings.getBool(SETTING_INTRO_SKIP)) {
+        // 1. Logos. gameLoop directs the logo director only while bit 0 of
+        //    sGameInit is clear and leaves NLOGO once sGameInit == 3 (bit 0 =
+        //    logo done, bit 1 = setup thread joined), so presetting bit 0 means
+        //    the logo never runs. The NLOGO/BOOT states themselves must still
+        //    happen: their post-gameLoop tails call initialize_boot/nlogoAfter,
+        //    which create the stage heap. Side effect (as upstream documents):
+        //    the progressive/60Hz prompt lives in direct_nlogo() and is lost.
+        *(volatile u32*)SUSAMUNE_ADDR_GAME_INIT_FLAGS |= 1;
+
+        // 2. Intro movie. Repoint proc()'s app-state jump table so the
+        //    intro-movie state dispatches straight into the stage case,
+        //    bypassing the TMovieDirector entirely. Do NOT instead let the
+        //    movie run and rewrite the state afterwards: that path also runs
+        //    the movie state's own body, which overwrites mNextScene.
+        *(volatile u32*)SUSAMUNE_ADDR_APP_STATE_JUMP_INTRO =
+            SUSAMUNE_ADDR_APP_PROC_STAGE_CASE;
+
+        // 3. The stage case reads mCurrentScene, which proc() fills from
+        //    mNextScene at the end of every earlier iteration -- so staging
+        //    AREA_OPTION here is what makes it load the title screen.
+        gpApplication.mNextScene.mAreaID    = 15;  // AREA_OPTION
+        gpApplication.mNextScene.mEpisodeID = 0;
+        gpApplication.mNextScene.mFlag      = 0;
+    }
 }
 
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
@@ -84,7 +110,10 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 extern "C" void onSetup(TMarDirector* director) {
     static bool inited = false;
     director->setupObjects();
-    
+
+    // Runs on every stage load, so this must stay above the once-only guard.
+    featuresOnStageLoad();
+
     if (inited) return; else inited = true;
 
     // Settings are already initialised, much earlier, by onAppInit.

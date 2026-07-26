@@ -59,22 +59,62 @@ addresses differ), the encoded branch word is the same constant in all three
 columns — e.g. "Enable Exit Area Everywhere" is `b +0xC` = `0x4800000C`
 everywhere; only the address to write it at changes.
 
-## Three implementation classes
+## Prefer reimplementing the behaviour in C
+
+**The mechanisms below reproduce a gecko code's *bytes*; that is a convenience
+for simple codes, not the goal.** Replaying someone else's compiled
+instructions is opaque, hard to review, and has to be re-derived per revision.
+Once a code is more than a couple of writes, the better port is to understand
+what it does and write the equivalent **C in the mod**, against the decomp's
+types and the mod's own hooks.
+
+Rule of thumb:
+
+- A handful of constant writes → a table row (Class A/C). Cheap and clear.
+- Anything with control flow, state, or ordering → **reimplement in C**. The
+  three "stateful" codes (Intro Skip, Stage Intro Skip, No Shine Get Animation)
+  are done this way and are a fraction of the size of their gecko originals.
+
+Reimplementing needs the *semantics*, which come from `../../src/sms`, not from
+staring at hex. Resolve the code's addresses to functions via
+`maps/<vers>.map`, read those functions in the decomp, and then express the
+intent. See "Reimplemented in C" below for three worked examples.
+
+### Never infer behaviour from a name
+
+Every bug in the first pass of the stateful codes came from trusting a label:
+
+- `APP_STATE_MENU` is the **debug** menu, not the title screen.
+- `APP_STATE_TITLE` builds the **file-select** screen, not the title screen.
+  (The title screen is `APP_STATE_GAMEPLAY` running `AREA_OPTION` as a stage.)
+- "No Shine Get **Animation**" does not remove the animation — the animation is
+  the point; what it removes is banking the shine and ending the run.
+
+Names in this codebase come from three different reverse-engineering efforts
+(susamune's `Context`, the decomp's `APP_STATE_*`, and the upstream code
+titles) and none of them agree. Confirm against the function that actually
+does the work — for a state machine, the transition function; for a feature,
+the code's `<description>` plus the decomp. If a port looks far simpler than
+the gecko original, that is evidence the behaviour has been misread, not that
+the original is overbuilt.
+
+## Implementation classes
 
 1. **Class A — static memory / instruction writes** (`04`/`02`/`00`/`C6`, and
    `06` data writes to a fixed datum). The code just overwrites game memory
    with a constant. Handled by the `kFeatures` patch table in `features.cpp`.
 2. **Class B — asm injections** (`C2`/`C0`, and `06` code-caves that are jumped
    into). The logic lives in asm that runs with a hooked function's register
-   state. **The `C2` case is implemented** via `kAsmHooks` in `features.cpp`
-   (reproduce the asm verbatim in a mod cave; toggle a branch at the site — see
-   "Class B: asm hooks" below). The `06` code-cave and stateful variants
-   (Intro Skip, Stage Intro Skip, No Shine Get Animation) are **not yet built**.
+   state. Implemented via `kAsmHooks` in `features.cpp` (reproduce the asm
+   verbatim in a mod cave; toggle a branch at the site — see "Class B: asm
+   hooks" below). Use this only when the asm is short and opaque; prefer C.
 3. **Class C — multi-state options** carved out of a big multi-feature code
    (DPad Functions, Nozzle Lock). These use the gecko VM to store a mode byte
-   and apply different writes per mode. **Implemented** as `kChoiceFeatures` /
+   and apply different writes per mode. Implemented as `kChoiceFeatures` /
    plain patches in `features.cpp` (Nozzle Lock, FLUDD-in-secrets, Fast Text) —
    see "Class C: multi-state options" below.
+4. **Reimplemented in C** — no gecko bytes at all; the behaviour is written as
+   mod logic driven by a setting. See "Reimplemented in C" below.
 
 ## Class A: the `features.cpp` mechanism
 
@@ -118,7 +158,9 @@ they're valid to read/write as soon as the game loop is running.
      regions when the distances match — verify).
 3. **Add a `Patch[]` table** for the code, commenting the raw gecko lines and
    what each patched word is (opcode mnemonic helps future readers).
-4. **Add a `SettingId`** in `settings.hxx` (in its category's group) and a row
+4. **Add a `SettingId`** by appending a row to `SUSAMUNE_SETTING_LIST`
+   (`settings_list.h` — the list is shared with the launcher and is
+   **append-only**, since its order is the persisted layout) and a row
    in `kSettingDescs` (`settings.cpp`) — `name`, `SETTING_BOOL`, default `0`
    (Off), and the `SETTING_CAT_*` for the tab it belongs in.
 5. **Add a `FEAT(SETTING_…, kYourTable)`** line to `kFeatures`.
@@ -223,6 +265,106 @@ what a block does.** For DPad Functions that showed:
 
 Getting this from the raw gecko alone is a trap; the map is authoritative.
 
+## Reimplemented in C
+
+Three codes are ported as mod logic rather than as gecko bytes. Each is worth
+reading as a template for the next one.
+
+### Intro Skip (`main.cpp`)
+
+*Skip the boot logos and the intro cutscene, landing on the title screen.*
+
+Boot runs `BOOT -> NLOGO -> intro-movie -> stage(AREA_OPTION)`, and **that last
+stage is the title screen** — it is an ordinary `TMarDirector` stage, not a menu
+director. Both halves are set up in `onAppInit` because `proc()` has not started
+yet and neither is reachable from the per-frame hooks: `onUpdate` replaces only
+the *general* `director->direct()` call in `gameLoop`, and the logo/intro states
+run before it ever fires (NLOGO calls `direct()` from a second, unhooked site).
+
+1. **Logos** — `gameLoop` directs the logo director only while bit 0 of the
+   static `sGameInit` is clear, and leaves NLOGO once `sGameInit == 3` (bit 0 =
+   logo done, bit 1 = setup thread joined). Presetting bit 0 means the logo
+   never runs. The logo *states* must still happen: their post-`gameLoop` tails
+   call `initialize_boot/nlogoAfter`, and the latter creates the stage heap.
+2. **Cutscene** — repoint `proc()`'s app-state jump table so the intro-movie
+   state dispatches straight into the stage case, bypassing `TMovieDirector`.
+3. **Destination** — the stage case reads `mCurrentScene`, which `proc()` fills
+   from `mNextScene` at the end of every earlier iteration, so staging
+   `AREA_OPTION` (15) in `onAppInit` is what makes it load the title screen.
+
+Upstream does exactly this with three writes: two branches making
+`TGCLogoDir::direct()` report "done" on frame 1 (equivalent to the `sGameInit`
+preset), and a code cave over the intro-movie case body that sets
+`mCurrentScene` and branches to the stage case.
+
+> **Do not** instead let the movie director run and rewrite `gameLoop`'s
+> returned state. Two separate failures come from that: returning *before*
+> `direct()` skips `TMovieDirector`'s first-call setup (it joins `gSetupThread`
+> and calls `initSound()`) and hangs boot on a black screen; letting it run and
+> overriding the result afterwards still executes the movie state's own body,
+> which overwrites `mNextScene` and lands you in the airstrip instead. Bypass
+> the state, do not post-process it.
+
+### Stage Intro Skip (`features.cpp`)
+
+*Skip the per-stage intro cutscene.* It is a **skip, not a fast-forward** — the
+whole intro is run out inside a single frame.
+
+`TMarDirector::direct` spends a tick budget in a loop, ending it by setting
+`mGameState |= 0x4000` (which also gates the draw pass). Two hooks:
+
+- **`direct+0x158`**, on that very store. While `mCurState == 1` and the
+  intro-text state `mConsole->unk94->unk2BC < 3`, it refills the budget
+  (`r3 + 15`, r3 being the pre-decrement budget), resets the tick counter, and
+  **branches past the store** — so the loop keeps running game logic, without
+  rendering, until the intro state advances. At `unk2BC == 3` it zeroes
+  `mFader->unk18` instead; otherwise the original store runs.
+- **`changeState+0x1CC`**, on the `andi.` that tests the skip buttons. It
+  `crandc`s the result so that when `unk2BC == 0` the code takes its "player
+  pressed skip" path unprompted.
+
+`unk2BC`'s offset differs per revision (JP `0x2BC`, US `0x2B8`, **PAL `0x8DC`**),
+as does the fader load, so those words come from the per-region upstream
+sources.
+
+> Do **not** confuse this with the separate *Fast Forward* code, which scales
+> `direct()`'s `600` literal (2 ticks/frame stock → 8 at 4x, 16 at 8x) and
+> applies to the whole game. An earlier version of this feature implemented that
+> instead, which merely sped the intro up.
+
+### No Shine Get Animation (`features.cpp`)
+
+*Play the shine grab in full, then stop dead.* Mario should do the spin and fall
+to the ground — so the landing can be timed — and from the moment he lands be
+back under player control, with no collected-shine animation trailing him and
+nothing banked.
+
+Five hooks; four are asm, the fifth is `featuresOnStageLoad()`:
+
+| site | original | replaced with |
+|---|---|---|
+| `winDemo+0x88` | `gpMarDirector->fireGetStar(shine)` | remember `director->unk58` (frame) |
+| `winDemo+0xA4` | `shine->receiveMessage(mario, TAKE)` | `shine->unk64 &= ~1` |
+| `winDemo+0xAC` | `mario->mSubState = 1` | `mState = STATE_IDLE; mSubState = 0` |
+| `TShine::touchPlayer` entry | prologue | return unless >4 frames since last touch |
+| `setupObjects` | — | clear the remembered frame |
+
+Each does one necessary thing, and dropping any of them shows:
+
+- `fireGetStar` is what banks the shine and ends the run.
+- **`receiveMessage(TAKE)` is what makes the collected shine animate and follow
+  Mario** — leaving it in place is why an earlier version had a shine bobbing
+  over his head afterwards. Clearing bit 0 of the shine's flags instead also
+  restores its collision so it can be grabbed again.
+- `+0xAC` keeps Mario out of winDemo's second phase, which would otherwise
+  re-assert the Shine Get animation and stop his process every frame.
+- The debounce is required *because* collision comes back: without it Mario
+  re-enters the grab on the next frame while still standing in the shine.
+
+Upstream keeps the touch timestamp at a fixed scratch address; we own a
+variable instead, and the cave's `lis`/`ori` pair is rewritten at init to point
+at it (`slotLis` in `AsmHook`).
+
 ## Codes ported so far
 
 - **Class A** — Infinite Lives, Unlock Nozzles, Unlock Yoshi, Any Fruit Opens
@@ -234,30 +376,17 @@ Getting this from the raw gecko alone is a trap; the map is authoritative.
   Never Pause IGT, Force Plaza Events (Misc).
 - **Class C (multi-state)** — FLUDD in secrets (QoL, 3-state); Nozzle Lock
   (Misc, 4-state).
+- **Reimplemented in C** — Intro Skip, Stage Intro Skip, No Shine Get Animation
+  (Misc).
 
 All default Off / choice 0. See the per-feature comments in `features.cpp` for
 the exact gecko-line → patch/asm mapping.
 
-## Remaining from the "simple toggles" list
+This completes the "Simple On/Off Toggles or Select Options" list in
+`doc/gecko_codes.md`.
 
-- **`06` code-caves & stateful `C2`.** *Intro Skip* and *Stage Intro Skip* use
-  `06` (write an instruction blob into a fixed game address) plus branches into
-  it, and *Stage Intro Skip* / *No Shine Get Animation* are stateful (a gecko
-  mode byte toggled by binds, `28…`/`E0…` conditionals). Porting: for `06`,
-  write the blob to the target address as a multi-word patch and add the
-  branches (all restorable like Class A); for the stateful ones, model the mode
-  as a `SettingId` and apply the corresponding word set.
+## Remaining
 
-  **Intro Skip specifically** patches `TGCLogoDir::direct_nlogo + 0x24`,
-  `TGCLogoDir::direct + 0x114`, and writes a 5-instruction cave over
-  `TApplication::proc + 0x248` that forces `mCurrentScene` to stage 15 /
-  episode 0 and branches back to `proc + 0x108`. All three run before the
-  first `gameLoop()`, so it cannot be applied from `featuresApply()` where the
-  other codes live — it needs the `onAppInit` hook (`main + 0x1c`, see
-  AGENTS.md). Settings persistence now exists, so the code is finally useful:
-  without it, skipping the logo means never being able to reach the
-  progressive/60Hz prompt, which is why the original gecko code carries that
-  warning.
 - **DPad leftovers (not toggles).** The DPad Functions code also carries
   *position save/load* (the `gpMarioPos`/`gpCamera` gecko-register blocks) and
   *Regrab last held object* (`0x408`). Per `doc/gecko_codes.md` these belong

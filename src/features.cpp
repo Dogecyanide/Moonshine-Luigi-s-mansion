@@ -1,22 +1,18 @@
 // =====================================================================
 // features.cpp
 //
-// The patch table behind the quality-of-life / cosmetic toggles. Each
-// ported gecko code becomes a Feature: a SettingId plus a list of Patch
-// entries. A Patch overwrites (part of) one 32-bit word in game memory;
-// the original word is captured from the live game the first time the
-// patch is touched, so "Off" restores the exact retail instruction on any
-// region without hardcoding it.
+// The patch tables behind the ported gecko codes. A Feature is a SettingId
+// plus Patch rows; each Patch overwrites (part of) one word in game memory.
+// The original word is captured from the live game on first apply, so "Off"
+// restores the retail instruction without hardcoding it per region.
 //
-// Region handling: every game address is written with the shared
-// SUSAMUNE_MEM1_ADDR(jp, us, pal) macro (addresses.hxx), so one table
-// serves all three supported revisions. Feature patch addresses live here,
-// next to the feature, rather than in addresses.hxx -- there are many and
-// each is meaningless outside its feature row.
+// Addresses use SUSAMUNE_MEM1_ADDR(jp, us, pal) so one table serves all three
+// revisions, and live here rather than addresses.hxx since each is meaningless
+// outside its feature row.
 //
-// The source gecko codes are in ../../src/gct-generator/Codes.xml. Each
-// feature comments the code it ports and how the raw gecko lines map to the
-// Patch rows; see doc/gecko_porting.md for the general method.
+// Source codes are in ../../src/gct-generator/Codes.xml; see
+// doc/gecko_porting.md for the porting method and when NOT to use these
+// tables (anything with real control flow belongs in C instead).
 // =====================================================================
 
 #include "susamune/features.hxx"
@@ -270,26 +266,16 @@ u32 branchWord(u32 from, u32 to) {
 // =====================================================================
 // Asm-hook features: ports of the gecko C2 ("insert asm") codes.
 //
-// A C2 code branches from a site in game code into a block of PPC asm hosted
-// by the code handler, which runs and branches back to site+4. We reproduce
-// that exactly: the asm block lives in a mutable "cave" in the mod, authored
-// with the code's asm words verbatim including the trailing 00000000
-// placeholder every C2 ends with. On first apply we patch that placeholder to
-// `b -> site+4` in place (the code handler does the same overwrite of the last
-// word). Enabling the feature writes `b site->cave` at the site; disabling
-// restores the captured original word. Register environment and any displaced
-// original instruction are handled inside the asm exactly as the code's author
-// intended -- it is reproduced verbatim, so no semantic understanding of the
-// asm is required.
+// A C2 branches from a game site into a block of asm and back to site+4. Each
+// cave below holds that asm verbatim, including the trailing 00000000
+// placeholder every C2 ends with, which is patched in place to `b -> site+4`
+// on first apply (the code handler does the same). Enabling writes
+// `b site->cave`; disabling restores the captured original.
 //
-// Where a code's asm embeds a region-specific address, the differing words are
-// built with SUSAMUNE_MEM1_ADDR so one array serves all three revisions.
+// The caves are mutable *initialized* arrays, so they load pre-populated with
+// the blob -- no const source, no copy. Region-specific words inside the asm
+// are built with SUSAMUNE_MEM1_ADDR so one array serves all three revisions.
 // =====================================================================
-
-// The cave IS the storage the game branches into. It is a mutable, initialized
-// array (lives in the blob, so it loads pre-populated and icache-coherent): all
-// the asm words as authored, with the trailing 00000000 placeholder patched to
-// `b -> site+4` in place on first apply. No separate const source and no copy.
 
 // Fast Piantissimo (asm identical across regions).
 u32 gCaveFastPiant[] = {
@@ -347,6 +333,131 @@ u32 gCaveFreePause[] = {
 };
 #undef FREE_PAUSE_ADDR
 
+// -- No Shine Get Animation ------------------------------------------------
+//
+// The grab must play out in full (immobile, jump, landing) and then simply
+// stop: control back to Mario, shine neither banked nor left floating over his
+// head. Four hooks in TMario::winDemo / TShine::touchPlayer do that; the fifth
+// upstream hook (clearing the touch timestamp on stage load) is featuresOnStage
+// Load() below. Translated:
+//
+//   winDemo, phase 0, "landed" branch:
+//     +0x88  gpMarDirector->fireGetStar(shine)   -> gLastShineTouch = dir->unk58
+//     +0xA4  shine->receiveMessage(mario, TAKE)  -> shine->unk64 &= ~1
+//     +0xAC  mario->mSubState = 1                -> mState = IDLE, mSubState = 0
+//   TShine::touchPlayer entry:
+//            (prologue)                          -> return early unless more
+//                                                   than 4 frames since the
+//                                                   last touch
+//
+// Dropping the TAKE message is what stops the collected-shine animation from
+// following Mario around; clearing bit 0 of the shine's flags puts its
+// collision back so it can be grabbed again. That in turn is why touchPlayer
+// needs the 4-frame debounce -- without it Mario re-enters the grab on the very
+// next frame while still standing in the shine.
+//
+// gLastShineTouch replaces the upstream code's fixed scratch address: the two
+// words marked below are rewritten at init to point at it (see kSlotLis).
+u32 gLastShineTouch;
+
+// winDemo+0x88, replacing `bl fireGetStar` (r3 = gpMarDirector).
+u32 gCaveShineNoFire[] = {
+    0x3D800000u, 0x618C0000u,  // [slot] lis/ori r12, &gLastShineTouch
+    0x81630058u,               // lwz r11, 0x58(r3)   director->unk58 (frame)
+    0x916C0000u,               // stw r11, 0(r12)
+    0x00000000u,
+};
+
+// TShine::touchPlayer entry, replacing `mflr r0`. Safe to return from here:
+// nothing has been pushed yet, so LR still holds the caller's return address.
+u32 gCaveShineTouch[] = {
+    0x3D800000u, 0x618C0000u,  // [slot] lis/ori r12, &gLastShineTouch
+    0x800C0000u,               // lwz r0, 0(r12)      last touch frame
+    SUSAMUNE_MEM1_ADDR(0x816D97E8u, 0x816D9FB8u, 0x816D9EE0u),  // lwz r11,gpMarDirector(r13)
+    0x816B0058u,               // lwz r11, 0x58(r11)  current frame
+    0x7C005850u,               // subf r0, r0, r11    elapsed
+    0x28000004u,               // cmplwi r0, 4
+    0x916C0000u,               // stw r11, 0(r12)     remember this touch
+    0x4C810020u,               // blelr               <= 4 frames -> do nothing
+    0x7C0802A6u,               // mflr r0             (displaced original)
+    0x00000000u,
+};
+
+// winDemo+0xA4, replacing the `receiveMessage(mario, TAKE)` call (r3 = shine).
+u32 gCaveShineKeep[] = {
+    0x80030064u,               // lwz r0, 0x64(r3)
+    0x5400003Cu,               // rlwinm r0,r0,0,0,30   clear bit 0
+    0x90030064u,               // stw r0, 0x64(r3)
+    0x00000000u,
+};
+
+// winDemo+0xAC, replacing `mSubState = 1` so Mario never enters winDemo's
+// second phase (which re-asserts the animation and stops his process).
+u32 gCaveShineRelease[] = {
+    0x3C000C40u, 0x60000201u,  // lis/ori r0, 0x0C400201 (STATE_IDLE)
+    0x901F007Cu,               // stw r0, 0x7C(r31)   mario->mState
+    0x38000000u, 0x901F0084u,  // li r0,0 ; stw r0, 0x84(r31)  mSubState(+timer)
+    0x00000000u,
+};
+
+// -- Stage Intro Skip -------------------------------------------------------
+//
+// Not a fast-forward: it runs the intro to completion inside a single frame.
+// TMarDirector::direct spends its tick budget in a loop and ends the loop by
+// setting mGameState |= 0x4000; the first hook sits on exactly that store and,
+// while the intro is playing, refills the budget and branches *past* it, so the
+// loop keeps running game logic (and never reaches the draw pass) until the
+// intro-text state advances. The second hook makes changeState take its
+// "player pressed skip" path on its own. Translated:
+//
+//   direct+0x158, replacing `mGameState |= 0x4000`:
+//     s = mConsole->unk94->unk2BC            (intro-text state)
+//     if (mCurState == 1 && s < 3) { mTickBudget += 20; i = 0; }  // keep going
+//     else if (mCurState == 1 && s == 3) { gpApplication.mFader->unk18 = 0; }
+//     else                                 { mGameState |= 0x4000; }  // normal
+//
+//   changeState+0x1CC, replacing the `andi.` that tests the skip buttons:
+//     treat "no button pressed" as false when unk2BC == 0, i.e. auto-skip.
+//
+// unk2BC's offset and the fader load differ per revision (PAL moves the field
+// to 0x8DC), so those words come from the upstream per-region sources.
+#define SIS_CONSOLE_OFF SUSAMUNE_MEM1_ADDR(0x02BCu, 0x02B8u, 0x08DCu)
+u32 gCaveStageIntro[] = {
+    0x899A0064u,                       // lbz r12, 0x64(r26)   mCurState
+    0x2C0C0001u,                       // cmpwi r12, 1
+    0x40A20040u,                       // bne -> original
+    0x819A0074u,                       // lwz r12, 0x74(r26)   mConsole
+    0x818C0094u,                       // lwz r12, 0x94(r12)   ->unk94
+    0x816C0000u | SIS_CONSOLE_OFF,     // lwz r11, unk2BC(r12)
+    0x2C0B0003u,                       // cmpwi r11, 3
+    0x41A1002Cu,                       // bgt -> original
+    0x41A00018u,                       // blt -> keep-going
+    SUSAMUNE_MEM1_ADDR(0x3D80803Eu, 0x3D80803Fu, 0x3D80803Eu),  // lis r12, fader@ha
+    SUSAMUNE_MEM1_ADDR(0x818C6034u, 0x818C9734u, 0x818C10F4u),  // lwz r12, fader@l
+    0x39600000u,                       // li r11, 0
+    0x916C0018u,                       // stw r11, 0x18(r12)   fader->unk18 = 0
+    0x48000014u,                       // b -> original
+    0x3863000Fu,                       // addi r3, r3, 15      (r3 = pre-dec budget)
+    0x907A0054u,                       // stw r3, 0x54(r26)    refill
+    0x3B800000u,                       // li r28, 0            reset tick counter
+    0x48000008u,                       // b -> skip the original store
+    0xB01A004Cu,                       // sth r0, 0x4C(r26)    (displaced original)
+    0x00000000u,
+};
+
+// changeState+0x1CC, replacing `andi. r0, r0, 0x61`.
+u32 gCaveStageIntroSkipBtn[] = {
+    0x807F0074u,                       // lwz r3, 0x74(r31)   mConsole
+    0x80630094u,                       // lwz r3, 0x94(r3)
+    0x80630000u | SIS_CONSOLE_OFF,     // lwz r3, unk2BC(r3)
+    0x2C830000u,                       // cmpwi cr1, r3, 0
+    0x70000061u,                       // andi. r0, r0, 0x61  (displaced original)
+    0x4C423102u,                       // crandc eq, eq, cr1.eq
+    0x60000000u,                       // nop
+    0x00000000u,
+};
+#undef SIS_CONSOLE_OFF
+
 // Force Plaza Events (asm half). Word 0 loads a region-specific global.
 u32 gCaveForcePlaza[] = {
     SUSAMUNE_MEM1_ADDR(0x806D97D0u, 0x806D9FA0u, 0x806D9EC8u), 0x899D0001u,
@@ -361,11 +472,20 @@ struct AsmHook {
     u32       site;   // game address whose instruction becomes b->cave
     u32      *cave;    // asm block; its trailing word is patched to b->site+4
     u8        n;       // word count of cave
+    // Index of a `lis r12, 0 / ori r12, r12, 0` pair to rewrite at init so it
+    // materialises &gLastShineTouch (upstream hardcodes a scratch address; we
+    // own our storage instead). kNoSlot when the cave needs no such fixup.
+    s8        slotLis;
 };
+
+const s8 kNoSlot = -1;
 
 #define HOOK(id, jp, us, pal, caveArr) \
     { id, SUSAMUNE_MEM1_ADDR(jp, us, pal), caveArr, \
-      (u8)(sizeof(caveArr) / sizeof(u32)) }
+      (u8)(sizeof(caveArr) / sizeof(u32)), kNoSlot }
+#define HOOK_SLOT(id, jp, us, pal, caveArr, lisIdx) \
+    { id, SUSAMUNE_MEM1_ADDR(jp, us, pal), caveArr, \
+      (u8)(sizeof(caveArr) / sizeof(u32)), (lisIdx) }
 
 const AsmHook kAsmHooks[] = {
     HOOK(SETTING_FAST_PIANTISSIMO, 0x80256A14u, 0x80043064u, 0x80042EDCu,
@@ -382,6 +502,20 @@ const AsmHook kAsmHooks[] = {
          gCaveFreePause),
     HOOK(SETTING_FORCE_PLAZA_EVENTS, 0x8010C41Cu, 0x802B7764u, 0x802AF734u,
          gCaveForcePlaza),
+    // No Shine Get Animation: four sites, all gated on the one setting.
+    HOOK_SLOT(SETTING_NO_SHINE_ANIM, 0x80120540u, 0x80241400u, 0x8023918Cu,
+              gCaveShineNoFire, 0),
+    HOOK_SLOT(SETTING_NO_SHINE_ANIM, 0x80195304u, 0x801BD334u, 0x801B51ECu,
+              gCaveShineTouch, 0),
+    HOOK(SETTING_NO_SHINE_ANIM, 0x8012055Cu, 0x8024141Cu, 0x802391A8u,
+         gCaveShineKeep),
+    HOOK(SETTING_NO_SHINE_ANIM, 0x80120564u, 0x80241424u, 0x802391B0u,
+         gCaveShineRelease),
+    // Stage Intro Skip: direct+0x158 and changeState+0x1CC.
+    HOOK(SETTING_STAGE_INTRO_SKIP, 0x800ECF14u, 0x80299990u, 0x80291828u,
+         gCaveStageIntro),
+    HOOK(SETTING_STAGE_INTRO_SKIP, 0x800EC5D0u, 0x8029904Cu, 0x80290EE4u,
+         gCaveStageIntroSkipBtn),
 };
 
 const int kNumHooks = (int)(sizeof(kAsmHooks) / sizeof(kAsmHooks[0]));
@@ -432,6 +566,13 @@ void applyHooks() {
             // whole cave so the core can execute it.
             u32 backAddr    = reinterpret_cast<u32>(&h.cave[h.n - 1]);
             h.cave[h.n - 1] = branchWord(backAddr, h.site + 4);
+
+            // Materialise &gLastShineTouch into the cave's lis/ori pair.
+            if (h.slotLis >= 0) {
+                u32 slot = reinterpret_cast<u32>(&gLastShineTouch);
+                h.cave[h.slotLis]     = 0x3D800000u | (slot >> 16);      // lis r12
+                h.cave[h.slotLis + 1] = 0x618C0000u | (slot & 0xFFFFu);  // ori r12
+            }
             DCFlushRange(h.cave, h.n * 4);
             ICInvalidateRange(h.cave, h.n * 4);
 
@@ -450,12 +591,10 @@ void applyHooks() {
 }
 
 // =====================================================================
-// Choice features: multi-state options carved out of the big multi-feature
-// gecko codes (Nozzle Lock, and DPad Functions' FLUDD-in-secrets). Each is a
-// SETTING_CHOICE driving one or more sites. By convention choice 0 is the
-// game's default and restores the captured original word; choices 1..N-1 write
-// an explicit word from `vals` (vals[c-1] for choice c). Same capture /
-// early-out / writeCode discipline as the other mechanisms.
+// Choice features: multi-state options carved out of the multi-feature gecko
+// codes (Nozzle Lock, DPad Functions' FLUDD-in-secrets). Choice 0 must be the
+// game default -- it restores the captured original; choice c>=1 writes
+// vals[c-1].
 // =====================================================================
 
 struct ChoicePatch {
@@ -537,4 +676,11 @@ void featuresApply() {
     applyPatches();
     applyHooks();
     applyChoices();
+}
+
+void featuresOnStageLoad() {
+    // Upstream clears its shine-touch timestamp from a hook in setupObjects;
+    // ours lives here. Without it a stale frame number carries into the next
+    // stage and can swallow the first shine touch.
+    gLastShineTouch = 0;
 }

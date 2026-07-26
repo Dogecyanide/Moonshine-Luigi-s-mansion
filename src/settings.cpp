@@ -67,6 +67,12 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     { "Never pause IGT", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
     { "Force plaza events", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
     { "Nozzle lock", SETTING_CHOICE, 4, 0, kNozzleLabels, SETTING_CAT_MISC },
+    // The three "stateful" ports. Unlike the patch/hook features these are
+    // implemented as game logic in main.cpp (Intro Skip, Stage Intro Skip);
+    // No Shine Get Animation is a one-word patch in features.cpp.
+    { "Intro skip", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
+    { "Stage intro skip", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
+    { "No shine get animation", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'

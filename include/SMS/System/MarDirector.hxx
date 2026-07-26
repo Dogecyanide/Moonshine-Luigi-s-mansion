@@ -87,7 +87,11 @@ public:
     TPerformList *mPerformListShineAnim;   // 0x0048
     u16 mGameState;                        // 0x004C
     u16 _02;                               // 0x004E
-    u32 _03_1[0x8 / 4];                    // 0x0050
+    u32 _03_1;                             // 0x0050
+    // Game-logic tick budget for this frame (decomp: `unk54`). direct() adds
+    // 600/SMSGetVSyncTimesPerSec() on entry and spends 5 per tick until under
+    // 5, so stock is 2 ticks/frame; raising it before direct() fast-forwards.
+    int mTickBudget;                       // 0x0054
     int unk58;                             // 0x0058
     int unk5C;                             // 0x005C
     u32 _03_2[0x4 / 4];                    // 0x0060

@@ -51,6 +51,9 @@
     X(SETTING_FAST_PIANTISSIMO,     "fast_piantissimo")                       \
     X(SETTING_NEVER_PAUSE_IGT,      "never_pause_igt")                        \
     X(SETTING_FORCE_PLAZA_EVENTS,   "force_plaza_events")                     \
-    X(SETTING_NOZZLE_LOCK,          "nozzle_lock")
+    X(SETTING_NOZZLE_LOCK,          "nozzle_lock")                            \
+    X(SETTING_INTRO_SKIP,           "intro_skip")                             \
+    X(SETTING_STAGE_INTRO_SKIP,     "stage_intro_skip")                       \
+    X(SETTING_NO_SHINE_ANIM,        "no_shine_anim")
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

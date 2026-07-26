@@ -6,22 +6,16 @@
 // =====================================================================
 // features.hxx
 //
-// Runtime ports of the SMS practice "gecko" codes that are simple memory
-// patches -- overwriting a game instruction or datum. Each such code maps
-// to a BOOL setting (settings.hxx); when the setting is On the patched word
-// is written, when Off the original word (captured live from the game at
-// first apply) is restored. featuresApply() re-applies the whole table each
-// frame, mirroring how the gecko code handler runs every frame, and only
-// touches memory when a target word actually needs to change.
-//
-// See doc/gecko_porting.md for how a gecko code is reverse-engineered into
-// a table entry, and for the classes of code this mechanism does and does
-// not cover.
+// Ports of the SMS practice "gecko" codes that reduce to memory patches,
+// each driven by a setting. See doc/gecko_porting.md for the method and for
+// which codes belong in C instead.
 // =====================================================================
 
-// Apply every enabled feature's patches and restore every disabled one's.
-// Call once per frame (from onUpdate). Cheap: it early-outs on any patch
-// whose target already holds the desired word.
+// Apply enabled features' patches and restore disabled ones'. Call once per
+// frame (from onUpdate); early-outs on patches already holding the right word.
 void featuresApply();
+
+// Reset per-stage feature state. Call on every stage load (from onSetup).
+void featuresOnStageLoad();
 
 #endif  // _SUSAMUNE_FEATURES_HXX
