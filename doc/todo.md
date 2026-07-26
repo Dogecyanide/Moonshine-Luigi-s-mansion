@@ -11,7 +11,7 @@
 ## TODO
 
 - [ ] [Bindings menu](#bindings)
-- [ ] [SD card settings persistence](#sd-card-persistence)
+- [x] [SD card settings persistence](#sd-card-persistence)
 - [ ] [Customizable GUI support](#customizable-gui)
 - [ ] Gecko code porting (gecko_codes.md)
 - [ ] gui wonkiness, text moving around when switching to on/off etc. needs to be right-justified

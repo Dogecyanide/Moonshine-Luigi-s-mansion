@@ -36,6 +36,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "GCAM.h"
 #include "TRI.h"
 #include "Patch.h"
+#include "SusamuneCfg.h"
 
 #include "diskio.h"
 #include "usbstorage.h"
@@ -274,6 +275,11 @@ int _main( int argc, char *argv[] )
 	BootStatus(7, s_size, s_cnt);
 	ConfigInit();
 
+	// Parse susamune.ini into the MEM2 handoff block. Must happen before the
+	// game is patched and started: the mod reads the block from
+	// TApplication::initialize, i.e. before the first frame is drawn.
+	SusamuneCfgInit();
+
 	if (ConfigGetConfig(NIN_CFG_LOG))
 		SDisInit = 1;  // Looks okay after threading fix
 	dbgprintf("Game path: %s\r\n", ConfigGetGamePath());
@@ -428,6 +434,14 @@ int _main( int argc, char *argv[] )
 				DIInterrupt();
 			else
 				udelay(200); //let the driver load data
+		}
+		/* Same constraint as the card save below: FatFS is shared with the DI
+		 * thread, so only touch the SD card when no async read is in flight.
+		 * Ahead of SaveCard because that one sits on a 60 second timer and
+		 * would otherwise starve settings writes for a minute. */
+		else if(SusamuneCfgPending())
+		{
+			SusamuneCfgService();
 		}
 		else if(SaveCard == true) /* DI IRQ indicates we might read async, so dont write at the same time */
 		{

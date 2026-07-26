@@ -246,8 +246,18 @@ the exact gecko-line → patch/asm mapping.
   mode byte toggled by binds, `28…`/`E0…` conditionals). Porting: for `06`,
   write the blob to the target address as a multi-word patch and add the
   branches (all restorable like Class A); for the stateful ones, model the mode
-  as a `SettingId` and apply the corresponding word set. Intro Skip is also only
-  meaningful once settings persistence lands.
+  as a `SettingId` and apply the corresponding word set.
+
+  **Intro Skip specifically** patches `TGCLogoDir::direct_nlogo + 0x24`,
+  `TGCLogoDir::direct + 0x114`, and writes a 5-instruction cave over
+  `TApplication::proc + 0x248` that forces `mCurrentScene` to stage 15 /
+  episode 0 and branches back to `proc + 0x108`. All three run before the
+  first `gameLoop()`, so it cannot be applied from `featuresApply()` where the
+  other codes live — it needs the `onAppInit` hook (`main + 0x1c`, see
+  AGENTS.md). Settings persistence now exists, so the code is finally useful:
+  without it, skipping the logo means never being able to reach the
+  progressive/60Hz prompt, which is why the original gecko code carries that
+  warning.
 - **DPad leftovers (not toggles).** The DPad Functions code also carries
   *position save/load* (the `gpMarioPos`/`gpCamera` gecko-register blocks) and
   *Regrab last held object* (`0x408`). Per `doc/gecko_codes.md` these belong

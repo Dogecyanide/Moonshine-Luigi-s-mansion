@@ -33,6 +33,13 @@ public:
     bool shown() const { return mShown; }
     void hide() { mShown = false; }
 
+    // Show a transient status message. Drawn on top of everything and even
+    // while the menu is closed, since the thing it usually reports (a settings
+    // save) is triggered by closing the menu. `msg` is copied into a small
+    // internal buffer, so callers may pass scratch storage. Replaces any
+    // message still on screen; expires on its own after kToastFrames.
+    void toast(const char *msg);
+
     // --- helpers a tab uses to render itself (implemented in menu.cpp) ---
     // Draw one line of text with the shared textbox. No allocation: `s` is
     // borrowed (a const literal or a caller-owned scratch buffer).
@@ -47,10 +54,17 @@ public:
     static int textWidth(const char *s, int sizeX);
 
     static const int kMaxTabs = 12;
+    // How long a toast stays up, in frames (~3s at 60Hz).
+    static const int kToastFrames = 180;
 
 private:
     void switchTab(int dir);
     void drawTabStrip(int x, int y, int w);
+    void drawToast();
+    // Auto-save on close: fires a save when the menu is dismissed with edits
+    // pending, then watches for the launcher's answer and toasts the result.
+    void requestSettingsSave();
+    void pollSettingsSave();
 
     J2DTextBox      mText;   // the one reusable textbox; see note above
     J2DOrthoGraph  *mOrtho;  // borrowed from draw(); used to re-enter 2D state
@@ -61,6 +75,10 @@ private:
     int             mNumTabs;
     int             mTabScrollPx;   // horizontal scroll of the tab strip
     MenuTab        *mTabs[kMaxTabs];
+    char            mToastBuf[48];  // toast text, owned (see drawText's note
+                                    // on borrowed strings)
+    int             mToastFrames;   // frames left before the toast expires
+    bool            mSaveWatch;     // a save is in flight; poll for its result
 };
 
 // One instance, constructed once at boot (placement-new into BSS -- no heap).

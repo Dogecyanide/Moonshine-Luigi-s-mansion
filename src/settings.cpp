@@ -10,7 +10,17 @@
 
 #include "susamune/settings.hxx"
 
+#include "Dolphin/OS.h"  // DCInvalidateRange, DCStoreRange
+#include "susamune/susamune_cfg.h"
+
 namespace {
+
+// Stable ini keys, in SettingId order, from the same list that builds the
+// enum -- so the launcher's key table and this one cannot drift apart.
+#define SUSAMUNE_SETTING_KEY(id, key) key,
+const char *const kIniKeys[SETTING_COUNT] = { SUSAMUNE_SETTING_LIST(SUSAMUNE_SETTING_KEY) };
+#undef SUSAMUNE_SETTING_KEY
+
 
 // CHOICE labels. Index 0 is the default / "restore original" state (see the
 // choice-feature apply in features.cpp), so it must be the game's normal
@@ -64,6 +74,11 @@ const u16 kSettingsVersion = 1u;
 
 const char *const kBoolLabels[2] = { "Off", "On" };
 
+// How long to wait for the kernel to acknowledge a save before giving up.
+// Generous: the kernel only services the doorbell between disc reads, and a
+// FatFS write of a few hundred bytes can wait behind one.
+const u32 kSaveTimeoutFrames = 300;  // ~5s at 60Hz
+
 }  // namespace
 
 Settings gSettings;
@@ -75,12 +90,139 @@ void Settings::resetDefaults() {
     for (int i = 0; i < SETTING_COUNT; i++) {
         mData.values[i] = kSettingDescs[i].defaultValue;
     }
+    mDirty          = false;
+    mSaveState      = SETTINGS_SAVE_IDLE;
+    mLastError      = 0;
+    mSaveSeq        = 0;
+    mSaveWaitFrames = 0;
 }
+
+// ---------------------------------------------------------------------
+// Persistence
+//
+// On console the Nintendont ARM kernel has already parsed susamune.ini into
+// the MEM2 handoff block by the time the game boots (see SusamuneCfg.c), so
+// loading is just "validate and copy". On emulator there is no launcher and
+// hence no backend, so we keep the compiled-in defaults.
+// ---------------------------------------------------------------------
+
+#if IS_EMULATOR
+
+void Settings::init() { resetDefaults(); }
+
+void Settings::save() {
+    mSaveState = SETTINGS_SAVE_UNSUPPORTED;
+    mDirty     = false;
+}
+
+SettingsSaveState Settings::pollSave() { return mSaveState; }
+
+#else
+
+void Settings::init() {
+    resetDefaults();
+
+    // The kernel wrote this block from the ARM side before the game booted;
+    // drop anything our cache may have speculatively pulled in first.
+    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+    DCInvalidateRange((void *)cfg, sizeof(SusamuneCfg));
+
+    if (cfg->magic != SUSAMUNE_CFG_MAGIC || cfg->version != SUSAMUNE_CFG_VERSION) {
+        // No launcher, a stock Nintendont, or a build mismatch. Defaults stand
+        // and save() will still work if a compatible kernel is listening --
+        // but not against a block we could not identify, so leave it alone.
+        mSaveState = SETTINGS_SAVE_UNSUPPORTED;
+        return;
+    }
+
+    // Copy only what the writer actually filled in. A kernel older than the
+    // mod carries fewer settings than SETTING_COUNT; the remainder keep their
+    // compiled-in defaults, which is what makes adding a setting safe.
+    u16 n = cfg->count;
+    if (n > SETTING_COUNT) {
+        n = SETTING_COUNT;
+    }
+    for (u16 i = 0; i < n; i++) {
+        u8 v = cfg->values[i];
+        if (v == SUSAMUNE_CFG_UNSET) {
+            continue;  // absent from the ini -- keep the default
+        }
+        // Route through set() so an out-of-range value in a hand-edited ini
+        // is clamped into the setting's choice range rather than trusted.
+        set((SettingId)i, v);
+    }
+
+    // set() marks dirty; adopting persisted values is not a user edit.
+    mDirty     = false;
+    mSaveSeq   = cfg->saveSeq;
+    mSaveState = SETTINGS_SAVE_IDLE;
+
+    // First boot on this SD card: the kernel found no susamune.ini and cannot
+    // author one, because the defaults live here rather than in the launcher.
+    // Write it out now so the user has a file to look at (and to hand-edit)
+    // without having to visit the menu first. Fire-and-forget -- the menu that
+    // would report the result does not exist this early.
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_NO_FILE) {
+        save();
+    }
+}
+
+void Settings::save() {
+    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+
+    if (mSaveState == SETTINGS_SAVE_UNSUPPORTED) {
+        mDirty = false;
+        return;
+    }
+
+    for (int i = 0; i < SETTING_COUNT; i++) {
+        cfg->values[i] = mData.values[i];
+    }
+    cfg->count = SETTING_COUNT;
+
+    // Publish the payload before the doorbell, so the kernel can never see a
+    // bumped saveSeq alongside a half-written values[].
+    DCStoreRange((void *)cfg->values, sizeof(cfg->values));
+
+    mSaveSeq     = cfg->saveSeq + 1;
+    cfg->saveSeq = mSaveSeq;
+    DCStoreRange((void *)cfg, 32);  // line 0: magic/version/count/saveSeq
+
+    mDirty          = false;
+    mLastError      = 0;
+    mSaveWaitFrames = 0;
+    mSaveState      = SETTINGS_SAVE_PENDING;
+}
+
+SettingsSaveState Settings::pollSave() {
+    if (mSaveState != SETTINGS_SAVE_PENDING) {
+        return mSaveState;
+    }
+
+    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+    // Line 1 is written exclusively by the kernel, so invalidating it can
+    // never discard a pending write of ours (see the ownership note in
+    // susamune_cfg.h).
+    DCInvalidateRange((void *)&cfg->ackSeq, 32);
+
+    if (cfg->ackSeq == mSaveSeq) {
+        mLastError = cfg->status;
+        mSaveState = mLastError ? SETTINGS_SAVE_ERROR : SETTINGS_SAVE_OK;
+    } else if (++mSaveWaitFrames > kSaveTimeoutFrames) {
+        mSaveState = SETTINGS_SAVE_TIMEOUT;
+    }
+    return mSaveState;
+}
+
+#endif  // IS_EMULATOR
 
 void Settings::set(SettingId id, u8 value) {
     const SettingDesc &d = kSettingDescs[id];
     if (d.numChoices != 0) {
         value = value % d.numChoices;
+    }
+    if (mData.values[id] != value) {
+        mDirty = true;
     }
     mData.values[id] = value;
 }
@@ -95,6 +237,9 @@ void Settings::cycle(SettingId id, int dir) {
     } else if (v >= n) {
         v -= n;
     }
+    if (mData.values[id] != (u8)v) {
+        mDirty = true;
+    }
     mData.values[id] = (u8)v;
 }
 
@@ -108,3 +253,13 @@ const char *Settings::valueLabel(SettingId id) const {
 }
 
 const SettingDesc &Settings::desc(SettingId id) { return kSettingDescs[id]; }
+
+const char *Settings::iniKey(SettingId id) { return kIniKeys[id]; }
+
+// kSettingDescs is indexed by SettingId and must stay row-for-row aligned with
+// SUSAMUNE_SETTING_LIST. Adding a list row without a descriptor row (or vice
+// versa) fails here rather than silently shifting every setting's meaning.
+static_assert(sizeof(kSettingDescs) / sizeof(kSettingDescs[0]) == SETTING_COUNT,
+              "kSettingDescs must have one row per SUSAMUNE_SETTING_LIST entry");
+static_assert(SETTING_COUNT <= SUSAMUNE_CFG_MAX_SETTINGS,
+              "SETTING_COUNT exceeds the MEM2 handoff block's values[] capacity");

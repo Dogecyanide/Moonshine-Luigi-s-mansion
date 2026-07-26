@@ -57,6 +57,21 @@ int strLen(const char *s) {
     return n;
 }
 
+// Write `v` in decimal at `out` (no terminator) and return the digit count.
+// The mod links no standard library, so this stands in for sprintf("%u").
+int fmtUInt(char *out, u32 v) {
+    char rev[10];
+    int  n = 0;
+    do {
+        rev[n++] = (char)('0' + (v % 10));
+        v /= 10;
+    } while (v);
+    for (int i = 0; i < n; i++) {
+        out[i] = rev[n - 1 - i];
+    }
+    return n;
+}
+
 // -------- palette (built inline so nothing lives in static storage) -------
 inline Color cBackdrop()   { return col(6, 8, 14, 150); }    // full-screen dim
 inline Color cPanel()      { return col(24, 28, 40, 240); }  // menu body
@@ -370,6 +385,9 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mCurTab      = 0;
     mNumTabs     = 0;
     mTabScrollPx = 0;
+    mToastBuf[0] = '\0';
+    mToastFrames = 0;
+    mSaveWatch   = false;
 
     // Cache font metrics. J2DTextBox::draw(x, y) places the text *baseline* at
     // y (glyphs render upward from it: top = y - ascent*size/height). drawText
@@ -443,6 +461,90 @@ void Menu::switchTab(int dir) {
     mCurTab = wrap(mCurTab + dir, mNumTabs);
 }
 
+// =====================================================================
+// Toast + settings auto-save
+// =====================================================================
+
+void Menu::toast(const char *msg) {
+    int i = 0;
+    for (; msg[i] && i < (int)sizeof(mToastBuf) - 1; i++) {
+        mToastBuf[i] = msg[i];
+    }
+    mToastBuf[i] = '\0';
+    mToastFrames = kToastFrames;
+}
+
+void Menu::drawToast() {
+    if (mToastFrames <= 0 || mToastBuf[0] == '\0') {
+        return;
+    }
+
+    const int sz   = 16;
+    const int padX = 10;
+    const int padY = 6;
+    const int x    = 20;
+    const int y    = 412;
+    const int w    = textWidth(mToastBuf, sz) + padX * 2;
+    const int h    = sz + padY * 2;
+
+    // Background first: the text is drawn over gameplay with the menu closed,
+    // so without a panel behind it it is unreadable on a bright stage.
+    fillBox(x, y, w, h, col(0, 0, 0, 200));
+    fillBox(x, y, 3, h, cAccent());  // accent edge, matching the menu panel
+    drawText(mToastBuf, x + padX, y + padY, sz, sz, col(255, 255, 255, 255));
+}
+
+void Menu::requestSettingsSave() {
+    gSettings.save();
+    if (gSettings.saveState() == SETTINGS_SAVE_UNSUPPORTED) {
+        // Emulator build, or booted without the susamune launcher.
+        toast("Settings not saved: no launcher");
+        return;
+    }
+    mSaveWatch = true;
+    toast("Saving settings...");
+}
+
+void Menu::pollSettingsSave() {
+    if (!mSaveWatch) {
+        return;
+    }
+
+    SettingsSaveState st = gSettings.pollSave();
+    if (st == SETTINGS_SAVE_PENDING) {
+        // The kernel only services the doorbell between disc reads, so hold
+        // the "saving" message up rather than letting it time out on screen.
+        mToastFrames = kToastFrames;
+        return;
+    }
+
+    mSaveWatch = false;
+    switch (st) {
+    case SETTINGS_SAVE_OK:
+        toast("Settings saved");
+        break;
+    case SETTINGS_SAVE_ERROR: {
+        // FatFS FRESULT, so the failure can be looked up (7 = write protected,
+        // 9 = invalid object, ...).
+        char buf[48];
+        int  n = 0;
+        for (const char *p = "Save failed (fs "; *p; p++) {
+            buf[n++] = *p;
+        }
+        n += fmtUInt(buf + n, gSettings.lastError());
+        buf[n++] = ')';
+        buf[n]   = '\0';
+        toast(buf);
+        break;
+    }
+    case SETTINGS_SAVE_TIMEOUT:
+        toast("Save timed out: launcher too old?");
+        break;
+    default:
+        break;
+    }
+}
+
 void Menu::drawTabStrip(int x, int y, int w) {
     const int gap   = 20;    // space between tabs
     const int inner = 12;    // highlight padding around active tab text
@@ -504,8 +606,20 @@ void Menu::update(TMarioGamePad *pad) {
     u32 input = pad->mButtons.mInput;
     u32 rapid = pad->mButtons.mRapidInput;
 
+    // Toast bookkeeping runs whether or not the menu is open -- the save it
+    // reports is normally started by the menu closing.
+    if (mToastFrames > 0) {
+        mToastFrames--;
+    }
+    pollSettingsSave();
+
     if ((input & TMarioGamePad::Y) && (rapid & TMarioGamePad::START)) {
         mShown = !mShown;
+        // Closing with edits pending writes them back to the SD card. Gated on
+        // dirty() so merely opening and closing the menu never touches storage.
+        if (!mShown && gSettings.dirty()) {
+            requestSettingsSave();
+        }
         return;
     }
     if (!mShown) {
@@ -525,6 +639,7 @@ void Menu::update(TMarioGamePad *pad) {
 void Menu::draw(J2DOrthoGraph *ortho) {
     mOrtho = ortho;  // used by fillBox() to re-enter 2D state
     if (!mShown) {
+        drawToast();  // still visible with the menu closed
         return;
     }
 
@@ -549,6 +664,9 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     drawText(BTN_L "/" BTN_R " Tabs    " BTN_C " Move    " BTN_A " Select    "
              BTN_Y SYM_AMP "Start Close",
              PANEL_X + PAD, FOOTER_Y, FOOT_SZ, FOOT_SZ, cFooter());
+
+    // Last, so it sits above the panel rather than under the backdrop.
+    drawToast();
 }
 
 // =====================================================================

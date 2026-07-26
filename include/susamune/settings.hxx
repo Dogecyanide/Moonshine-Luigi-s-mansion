@@ -3,6 +3,8 @@
 
 #include <Dolphin/types.h>
 
+#include "susamune/settings_list.h"
+
 // =====================================================================
 // settings.hxx
 //
@@ -10,50 +12,30 @@
 // menu that edits them (menu.cpp) and of any feature that reads them
 // (e.g. savestate.cpp). A setting is one entry in a static descriptor
 // table plus one byte of live value; everything else -- how the menu
-// renders it, how a feature queries it, how it will one day serialise to
-// the memory card / SD card -- is driven off that table so adding a
+// renders it, how a feature queries it, how it serialises to
+// susamune.ini on the SD card -- is driven off that table so adding a
 // setting is a one-line change.
+//
+// Persistence (console only) is a two-step handoff with the Nintendont
+// kernel; see susamune_cfg.h for the protocol and settings.cpp for the
+// implementation. Values live in this BSS struct during gameplay, not in
+// the MEM2 handoff block, so every read is a plain cached MEM1 load with
+// no coherency rules -- features.cpp reads settings every frame.
 // =====================================================================
 
-// The full set of settings. Add a value here and a matching row in
-// kSettingDescs (settings.cpp); nothing else needs to change. The enum order
-// controls the values[] layout and the within-category display order in the
-// menu (which filters by category), so keep each category's entries grouped.
+// The full set of settings. Add a row to SUSAMUNE_SETTING_LIST
+// (settings_list.h) and a matching row in kSettingDescs (settings.cpp);
+// nothing else needs to change. The list order controls the values[] layout
+// -- which is also the on-disc layout, so it must stay append-only -- and the
+// within-category display order in the menu (which filters by category), so
+// keep each category's entries grouped.
+#define SUSAMUNE_SETTING_ENUM(id, key) id,
 enum SettingId {
-    // -- Savestate --
-    SETTING_SAVE_RNG_STATE,  // savestates rewind the libc RNG seed on load
-
-    // -- Quality-of-life toggles (ported gecko codes; see features.cpp) --
-    SETTING_INFINITE_LIVES,
-    SETTING_UNLOCK_NOZZLES,
-    SETTING_UNLOCK_YOSHI,
-    SETTING_ANY_FRUIT_YOSHI,
-    SETTING_INFINITE_JUICE,
-    SETTING_EXIT_AREA_EVERYWHERE,
-    SETTING_FMV_SKIPS,
-    SETTING_RESPAWN_SHINES,
-    SETTING_FRUIT_NEVER_TIMEOUT,
-    SETTING_FREE_PAUSE,
-    SETTING_DISABLE_BLUE_COIN,
-    SETTING_DEATHLESS_BLOOPER,
-    SETTING_FAST_TEXT,      // DPad Functions: replace dialog with "!!!"
-    SETTING_FLUDD_SECRETS,  // CHOICE: Completed(default) / No FLUDD / All secrets
-
-    // -- Cosmetic toggles --
-    SETTING_MUTE_BGM,
-    SETTING_SHINE_OUTFIT,
-    SETTING_SHINY_SHINES,
-    SETTING_SHADOW_MARIO_HP,
-    SETTING_REPLACE_EPISODE_NAMES,
-
-    // -- Misc toggles --
-    SETTING_FAST_PIANTISSIMO,
-    SETTING_NEVER_PAUSE_IGT,
-    SETTING_FORCE_PLAZA_EVENTS,
-    SETTING_NOZZLE_LOCK,  // CHOICE: Unlocked(default) / Rocket / Turbo / Hover
+    SUSAMUNE_SETTING_LIST(SUSAMUNE_SETTING_ENUM)
 
     SETTING_COUNT
 };
+#undef SUSAMUNE_SETTING_ENUM
 
 enum SettingType {
     SETTING_BOOL,    // two states, rendered On / Off
@@ -80,9 +62,8 @@ struct SettingDesc {
     SettingCategory    category;    // menu tab it renders under
 };
 
-// The serialisable payload. POD so it can be blitted to/from a save file
-// wholesale once memory-card / SD persistence lands; magic + version let a
-// loader reject a stale or foreign blob (mirrors the savestate header).
+// The live payload, in the mod's BSS. POD; magic + version mirror the
+// savestate header so a stale blob is rejected rather than misread.
 struct SettingsData {
     u32 magic;
     u16 version;
@@ -90,11 +71,50 @@ struct SettingsData {
     u8  values[SETTING_COUNT];
 };
 
+// Progress of an in-flight save, for the on-screen toast. The write itself is
+// performed asynchronously by the Nintendont ARM kernel (the PPC cannot touch
+// the SD card), so a save is a request plus a poll, never a blocking call.
+enum SettingsSaveState {
+    SETTINGS_SAVE_IDLE,     // nothing in flight
+    SETTINGS_SAVE_PENDING,  // doorbell rung, waiting on the kernel
+    SETTINGS_SAVE_OK,       // kernel wrote susamune.ini
+    SETTINGS_SAVE_ERROR,    // kernel reported a FatFS error (see lastError)
+    SETTINGS_SAVE_TIMEOUT,  // kernel never answered (old/stock launcher?)
+    SETTINGS_SAVE_UNSUPPORTED,  // emulator build: no persistence backend
+};
+
 class Settings {
 public:
-    // Load compiled-in defaults. Call once at boot before anything reads a
-    // setting (values live in BSS, so they are zero until this runs).
+    // Install compiled-in defaults, then adopt any values the launcher
+    // persisted into the MEM2 handoff block. Call once at boot before
+    // anything reads a setting (values live in BSS, so they are zero until
+    // this runs) -- see onAppInit in main.cpp, which runs before
+    // TApplication::proc() and therefore before the logo/title sequence.
+    void init();
+
+    // Install compiled-in defaults only. init() calls this first; it is also
+    // the whole of init() on builds with no persistence backend.
     void resetDefaults();
+
+    // --- persistence ---
+
+    // Ask the launcher to write susamune.ini. Non-blocking: this stages the
+    // values into the MEM2 block and rings the doorbell. No-op (and reports
+    // SETTINGS_SAVE_UNSUPPORTED) when there is no backend. Clears dirty().
+    void save();
+
+    // Advance an in-flight save. Call once per frame; returns the current
+    // state, transitioning PENDING -> OK / ERROR / TIMEOUT.
+    SettingsSaveState pollSave();
+
+    SettingsSaveState saveState() const { return mSaveState; }
+
+    // FatFS FRESULT from the last failed save, for the toast text.
+    u32 lastError() const { return mLastError; }
+
+    // True when a value changed since the last save. The menu uses this to
+    // avoid touching the SD card when nothing was edited.
+    bool dirty() const { return mDirty; }
 
     u8   get(SettingId id) const { return mData.values[id]; }
     bool getBool(SettingId id) const { return mData.values[id] != 0; }
@@ -109,14 +129,17 @@ public:
 
     static const SettingDesc &desc(SettingId id);
 
-    // Future persistence (memory card / SD). The data is already a POD blob;
-    // these will stamp/verify magic+version and copy mData. Declared now so
-    // callers can be written against them.
-    // bool serialize(void *out, u32 cap) const;
-    // bool deserialize(const void *in, u32 len);
+    // Stable ini key for a setting (from settings_list.h). Exposed mainly so
+    // debug output can name a setting the same way the file does.
+    static const char *iniKey(SettingId id);
 
 private:
-    SettingsData mData;
+    SettingsData      mData;
+    bool              mDirty;
+    SettingsSaveState mSaveState;
+    u32               mLastError;
+    u32               mSaveSeq;      // the sequence number we are waiting on
+    u32               mSaveWaitFrames;
 };
 
 // Single global instance. POD (no virtuals / no ctor), so it lives in BSS

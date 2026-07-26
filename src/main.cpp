@@ -31,6 +31,20 @@ extern "C" void* getArenaLo() {
     return (void*)(*(volatile u32*)SUSAMUNE_ADDR_OS_ARENA_LO + kArenaReserve);
 }
 
+// Replaces the `bl TApplication::initialize` in main() (see patches.py). main()
+// is only initialize(); proc(); finalize(), so this is the last point before
+// the game's app-state machine starts running -- the logo, the progressive-mode
+// prompt, the title screen and gameplay all live inside proc(). Settings have
+// to be live by now: featuresApply() runs from onUpdate, which is hooked into
+// gameLoop(), and proc() calls gameLoop() for the logo and title states too --
+// so initialising settings any later (as onSetup used to) left every feature
+// reading zeroed BSS for the whole boot sequence. Codes that patch the boot
+// path itself, like Intro Skip, need it earlier still.
+extern "C" void onAppInit(TApplication* app) {
+    app->initialize();
+    gSettings.init();
+}
+
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     u8 state = director->updateGameMode();
 
@@ -73,9 +87,7 @@ extern "C" void onSetup(TMarDirector* director) {
     
     if (inited) return; else inited = true;
 
-    // Install compiled-in setting defaults before anything reads them
-    // (savestate.cpp gates the RNG-seed snapshot on a setting).
-    gSettings.resetDefaults();
+    // Settings are already initialised, much earlier, by onAppInit.
 
     JKRHeap *oldHeap = JKRHeap::sSystemHeap->becomeCurrentHeap();
 #if ENABLE_MENU

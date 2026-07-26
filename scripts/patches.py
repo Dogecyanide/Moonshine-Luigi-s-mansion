@@ -14,6 +14,16 @@ patches = [
     {'jp': 0x800ece3c, 'us': 0x802998b8, 'pal': 0x80291750, 'sym': 'onSetup', 'type': PatchType.BL},
     # gameLoop__12TApplicationFv + 0x3bc: THPPlayerDrawDone() call.
     {'jp': 0x800f9d10, 'us': 0x802a630c, 'pal': 0x8029e21c, 'sym': 'afterDraw', 'type': PatchType.BL},
+    # main + 0x1c: the gpApplication.initialize() call. main() is just
+    # initialize(); proc(); finalize(), and everything the game does -- the
+    # Nintendo logo, the progressive-mode prompt, the title screen, gameplay --
+    # happens inside proc(). Hooking the initialize() call gives us the earliest
+    # point at which the heap and gamepads exist but no app state has run yet,
+    # which is where settings must be live: codes like Intro Skip patch
+    # TGCLogoDir::direct / TApplication::proc itself and so take effect before
+    # the first gameLoop(). main is at 0x80005600 with size 0x44 in all three
+    # region maps, so the call site is main+0x1c everywhere.
+    {'jp': 0x8000561c, 'us': 0x8000561c, 'pal': 0x8000561c, 'sym': 'onAppInit', 'type': PatchType.BL},
 #   {'jp': 0x800fa110, 'us': ..., 'pal': ..., 'sym': 'onFinishAppState', 'type': PatchType.BL},
     # insert NOPs to speed up boot process
     # initialize__12TApplicationFv + 0x2c / +0x40.
