@@ -56,6 +56,7 @@
 
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
+#include "susamune/binds.hxx"
 #include "susamune/mem2_map.h"
 #include "susamune/settings.hxx"
 
@@ -640,15 +641,10 @@ bool SavestateManager::loadState() {
     return true;
 }
 
-void SavestateManager::updateHook(TMarioGamePad *controller) {
-    if (!controller) return;
-
-    const u32 ri = controller->mButtons.mRapidInput;
-
-    // mRapidInput is rising-edge per frame -- one trigger per press.
-    if (ri & JUTGamePad::DPAD_LEFT) {
+void SavestateManager::updateHook() {
+    if (gBinds.wasPressed(BIND_SAVESTATE_SAVE)) {
         saveState();
-    } else if (ri & JUTGamePad::DPAD_RIGHT) {
+    } else if (gBinds.wasPressed(BIND_SAVESTATE_LOAD)) {
         // TApplication still runs the fader and gpMSound->mainLoop(), then
         // submits the rest of the frame after this hook returns. Restoring here
         // made those systems consume half-live/half-restored state. Defer the

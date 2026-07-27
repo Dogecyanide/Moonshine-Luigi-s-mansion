@@ -27,6 +27,13 @@ set(CMAKE_CXX_COMPILER_WORKS TRUE)
 
 project(susamune CXX)
 
+# Header dependency tracking. The compiler is forced above and its check is
+# skipped, so CMake never identifies it and leaves CMAKE_DEPFILE_FLAGS_CXX
+# empty -- the Ninja rule asks for a depfile that the compile command is then
+# never told to write, and *editing a header rebuilds nothing*. Spell the flags
+# out (the fork is clang, so GCC-style).
+set(CMAKE_DEPFILE_FLAGS_CXX "-MD -MT <DEP_TARGET> -MF <DEP_FILE>")
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(CMAKE_GENERATOR MATCHES "Visual Studio")
@@ -88,6 +95,10 @@ set(SHARED_FLAGS
     -Os
     -fno-exceptions
     -fno-rtti
+    # `s8` in include/ is a typedef for plain `char`, which is unsigned on this
+    # target; the game was built by CodeWarrior with `-char signed` (see the
+    # decomp's configure.py), so its structs mean the signed byte.
+    -fsigned-char
     -ffast-math
     -fpermissive
     -fno-unwind-tables

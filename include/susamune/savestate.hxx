@@ -13,7 +13,7 @@ public:
     // Called once per frame from main.cpp's onUpdate hook. Polls the d-pad
     // and triggers saves. Loads are queued until the post-render hook so the
     // current frame cannot consume a mixture of live and restored state.
-    void updateHook(TMarioGamePad *controller);
+    void updateHook();
 
     // Called after the game's THPPlayerDrawDone()/GXDrawDone barrier. A queued
     // load is restored here, after director, fader, audio, and rendering work

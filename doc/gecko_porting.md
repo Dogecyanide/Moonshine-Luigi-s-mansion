@@ -108,12 +108,17 @@ the original is overbuilt.
    state. Implemented via `kAsmHooks` in `features.cpp` (reproduce the asm
    verbatim in a mod cave; toggle a branch at the site — see "Class B: asm
    hooks" below). Use this only when the asm is short and opaque; prefer C.
-3. **Class C — multi-state options** carved out of a big multi-feature code
+3. **Bind-driven actions** — codes that *do* something when a button
+   combination is pressed rather than toggling state. The behaviour is written
+   as C in `actions.cpp`; the combo comes from a configurable bind
+   (`binds.*`) instead of the fixed one the gecko hardcodes. See "Bind-driven
+   actions" below.
+4. **Class C — multi-state options** carved out of a big multi-feature code
    (DPad Functions, Nozzle Lock). These use the gecko VM to store a mode byte
    and apply different writes per mode. Implemented as `kChoiceFeatures` /
    plain patches in `features.cpp` (Nozzle Lock, FLUDD-in-secrets, Fast Text) —
    see "Class C: multi-state options" below.
-4. **Reimplemented in C** — no gecko bytes at all; the behaviour is written as
+5. **Reimplemented in C** — no gecko bytes at all; the behaviour is written as
    mod logic driven by a setting. See "Reimplemented in C" below.
 
 ## Class A: the `features.cpp` mechanism
@@ -179,7 +184,8 @@ in an existing category needs **no menu change** — just the settings row. A ne
 category means a new enum value + one `mTabs[…] = new (buf) CategorySettingsTab(
 "Title", SETTING_CAT_…)` line and a static buffer next to the others.
 
-Current tabs: `Warps`, `Stages`, `QoL`, `Cosmetic`, `Misc`, `Savestate`.
+Current tabs: `Warps`, `Stages`, `QoL`, `Cosmetic`, `Misc`, `Savestate`,
+`Binds`.
 
 ## Class B: asm hooks (`C2` codes)
 
@@ -361,9 +367,160 @@ Each does one necessary thing, and dropping any of them shows:
 - The debounce is required *because* collision comes back: without it Mario
   re-enters the grab on the next frame while still standing in the shine.
 
-Upstream keeps the touch timestamp at a fixed scratch address; we own a
-variable instead, and the cave's `lis`/`ori` pair is rewritten at init to point
-at it (`slotLis` in `AsmHook`).
+The touch timestamp sits at a fixed scratch address
+(`SUSAMUNE_ADDR_SHINE_TOUCH_FRAME`), as upstream does. A cave has no way to
+find a mod global, so the alternative is patching the address into every
+`lis`/`ori` that references it at init -- more machinery than a fixed word in
+the scratch region is worth. See `addresses.hxx` for what else lives there.
+
+## Bind-driven actions (`binds.*` + `actions.cpp`)
+
+Several codes are not toggles: they act when a button combination is pressed.
+Upstream hardcodes the combination; susamune makes it configurable.
+
+### The bind subsystem
+
+`binds.*` is a deliberate mirror of `settings.*`, so the two read the same way:
+
+- one row in `SUSAMUNE_BIND_LIST` (`include/susamune/binds_list.h`) —
+  enumerator + stable ini key, shared with the ARM kernel, **append-only**
+  because the order is the persisted layout;
+- one row in `kBindDescs` (`binds.cpp`) — menu label + default combo;
+- one `u16` of live value in `gBinds`.
+
+A bind is a mask of at most four GameCube button bits, drawn from
+`SUSAMUNE_BIND_BUTTON_LIST` (A/B/X/Y/L/R/Z/Start + the four d-pad directions —
+`0x1F7F`).
+
+Matching is **exact equality** over those bits: the buttons held must be the
+bind's and nothing else. That is what almost every gecko code does, through the
+gecko VM (`28400D50 0000VVVV` with a zero mask — Fast Forward, DPad Functions,
+Mario/Coin Count Savestate) or a plain `cmplwi` (Instant Restart's `0x208`, the
+Red Coin / QF Time / In-Game Time savestates' `1` and `2`). Two actions bound to
+the same combo both fire; nothing arbitrates.
+
+A few codes want the looser rule instead — Pattern Selector tests a bare
+`andi. r0,r0,0x40`, and Spawn Yoshi (`rlwinm r0,r4,0,16,27`) and Manual Attempt
+Counter (`andi. r0,r0,0xFFF0`) mask the d-pad nibble out before comparing. That
+is what `isHeldSubset()` / `wasPressedSubset()` are for.
+
+Input is read from `JUTGamePad::mPadStatus[0]` — the raw pad sample — not from
+the game's `TMarioGamePad`. That is the same place the gecko codes read, and it
+keeps binds alive while the game has the player's pad disabled (dialogue,
+cutscenes), which is exactly when fast-forward is wanted.
+
+`gBinds.update()` runs once per frame from `onUpdate`, **before**
+`director->direct()` — `onUpdateGameMode` runs inside it and asks whether the
+menu bind fired this frame, to swallow the pause the menu combo's Start would
+otherwise trigger.
+
+Every query reports false for an unbound bind, while the recorder is running,
+and from then until the pad is released — a four-button combo commits while
+still held, and would otherwise immediately fire what it had just been bound to.
+Binds are **not** silenced while the menu is open, since the menu toggle is
+itself a bind.
+
+**Recording.** `A` on a row in the menu's Binds tab arms `gBinds`' recorder.
+It waits for the pad to go idle (the `A` that started it is still down), then
+accumulates held buttons and commits as soon as either a held button is
+released or four are down. Only the C-stick is watched by the menu meanwhile —
+every real button is a candidate for the combo — so the tab reports
+`grabsInput()` and `Menu::update` hands it the pad exclusively, suppressing tab
+switching and the `Y`+`Start` close combo. C-stick in any direction cancels;
+C-stick left on an idle row clears a bind to "none".
+
+**Persistence** rides on the settings handoff: `SusamuneCfg` gained
+`binds[]` + `bindCount` and susamune.ini gained a `[binds]` section, written as
+`+`-joined tokens (`regrab_object = X+DUp`) from the shared button list. A
+launcher built before binds existed leaves `bindCount` zero — it memsets only
+the part of the block it knows about — which reads as "nothing persisted, keep
+the defaults", so no version bump was needed.
+
+### Regrab Last Held Object (DPad Functions, mode bit `0x408`)
+
+```
+48000000 8040A398   ; pointer = gpMarioAddress
+1400007C 00000383   ; *(u32*)(pointer + 0x7C) = 0x383
+```
+
+`TMario+0x7C` is `mState` and `0x383` is `MARIO_STATUS_TAKE`, so the whole code
+is "force Mario into the pick-up action" — `mHeldObject` survives a throw, so
+re-entering TAKE re-attaches whatever he last carried. One C assignment.
+
+Upstream re-writes the word every frame the combo is held, pinning Mario in
+TAKE for as long as you hold it; ours fires on the press edge, which is
+identical for a tap (`mState` is dispatched on the following frame) without
+that side effect.
+
+### Spawn Yoshi
+
+Two `C2` injections upstream.
+
+The first, at `TMario::checkCollision+0x44`, paints the requested colour onto
+`mario->mYoshi`, refills its juice, and branches into the middle of that
+function's existing "Mario landed on Yoshi" path at `checkCollision+0x1C0` —
+past the part that would teleport Mario onto the (unhatched, positionless)
+Yoshi. What is left of that path is six lines, and `spawnYoshi()` in
+`actions.cpp` just *is* those six lines, with no patch at all:
+
+```c
+mModelAngleY = mAngle.y;
+if (hasFludd) { stash nozzle + water level for the dismount }
+mYoshi->ride();
+hasFludd = true;                        // Yoshi's juice runs through the FLUDD
+mFludd->changeNozzle(Yoshi, true);
+changePlayerStatus(MARIO_STATUS_WAIT, 0, false);
+```
+
+The colour ids come from the gecko's `rlwnm r0, 0x63000000, r4, 30, 31` lookup
+and match `TYoshi::Color`: green 0, orange 1, purple 2, pink 3. The gate on
+`mState & 0x1000` is `checkCollision`'s own early-out, kept so the action can't
+fire during a cutscene.
+
+The second injection, at `TEggYoshi::control+0x1C`, is the one thing a
+per-frame hook cannot do: it runs **once per egg in the stage**, making the
+level's egg vanish and remembering it on the Yoshi (`TYoshi::mEgg`) so the egg
+is restored via `startFruit()` when the Yoshi expires. There is no global to
+enumerate eggs from, so we keep an injection there — but as a **ten-word
+trampoline into C**, not transcribed asm: save LR, `mr r3,r31`, `bl
+susamuneOnEggYoshiControl`, restore, run the displaced original, branch back.
+Two things make that trampoline safe and cheap:
+
+- the site is the instruction *after* `bl TMapObjBase::control()`, so every
+  volatile register (and LR, CR, f0-f13) is dead there and the C callee may
+  clobber whatever it likes; `r31` is `this`.
+- it is spliced in only while a spawn is armed (`gEggKillFrames`), so the game
+  runs unpatched the rest of the time. The countdown exists because
+  `TEggYoshi::control` runs inside `director->direct()`, i.e. *before* the next
+  `actionsApply()`.
+
+### Fast Forward
+
+```
+020ECDE2 00000258   ; default
+28400D50 00000201   ; if buttons == B + DPad Left
+020ECDE2 00000960
+28400D51 00000202   ; else if buttons == B + DPad Right
+020ECDE2 000012C0
+```
+
+The patched halfword is the immediate of `li r3, 600` at
+`TMarDirector::direct+0x24` — the per-frame logic-tick budget the director
+spends before it renders — so 2400/4800 run 4x/8x the game logic per rendered
+frame. There is nothing to reimplement: this stays a masked halfword write,
+applied while the bind is **held** and restored (from the captured original) on
+release. Do not confuse it with Stage Intro Skip, which refills the same budget
+mid-loop.
+
+### Adding another bind-driven action
+
+1. Append a row to `SUSAMUNE_BIND_LIST` (`binds_list.h`) and a matching row to
+   `kBindDescs` (`binds.cpp`) with the default combo from the code's
+   `<description>`. Binds also drive the menu toggle and savestate save/load,
+   which are not gecko ports at all. The menu tab, the ini keys on both sides and the MEM2
+   layout all follow automatically.
+2. Write the behaviour in `actions.cpp` gated on `gBinds.wasPressed(...)` or
+   `gBinds.isHeld(...)`, and call it from `actionsApply()`.
 
 ## Codes ported so far
 
@@ -378,21 +535,23 @@ at it (`slotLis` in `AsmHook`).
   (Misc, 4-state).
 - **Reimplemented in C** — Intro Skip, Stage Intro Skip, No Shine Get Animation
   (Misc).
+- **Bind-driven actions** — Regrab Last Held Object, Spawn Yoshi (4 colours),
+  Fast Forward (4x / 8x). See "Bind-driven actions" above.
 
-All default Off / choice 0. See the per-feature comments in `features.cpp` for
-the exact gecko-line → patch/asm mapping.
+All toggles default Off / choice 0; binds default to the combinations their
+gecko originals hardcode. See the per-feature comments in `features.cpp` /
+`actions.cpp` for the exact gecko-line → patch/C mapping.
 
-This completes the "Simple On/Off Toggles or Select Options" list in
-`doc/gecko_codes.md`.
+This completes both the "Simple On/Off Toggles or Select Options" and the
+"Simple Actions/Binds" lists in `doc/gecko_codes.md`.
 
 ## Remaining
 
 - **DPad leftovers (not toggles).** The DPad Functions code also carries
-  *position save/load* (the `gpMarioPos`/`gpCamera` gecko-register blocks) and
-  *Regrab last held object* (`0x408`). Per `doc/gecko_codes.md` these belong
-  elsewhere — the former with the savestate / "Lite Savestate" work, the latter
-  as a configurable bind, not a menu toggle — so they are intentionally not
-  ported here.
+  *position save/load* (the `gpMarioPos`/`gpCamera` gecko-register blocks).
+  Per `doc/gecko_codes.md` that belongs with the savestate / "Lite Savestate"
+  work, so it is intentionally not ported here. (*Regrab last held object*,
+  the other leftover, is now a bind — see above.)
 - **Gecko-relocation caveat.** The launcher already relocates some absolute
   heap-address gecko codes past the mod's arena reservation
   (`PatchSusamuneGeckoCodes`, see AGENTS.md). Native ports don't need that —

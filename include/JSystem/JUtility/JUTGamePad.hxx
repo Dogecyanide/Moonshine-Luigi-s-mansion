@@ -108,6 +108,12 @@ public:
         static s32 sResetPattern;
     };
 
+    // The raw pad samples PADRead() fills in, one per port, before any of the
+    // per-pad processing (button repeat, the game's "disable input" states,
+    // stick-derived pseudo-buttons) happens. The mod's bind matching reads this
+    // directly -- see binds.cpp.
+    static PADStatus mPadStatus[4];
+
     CButton mButtons;      // _18
     CStick mControlStick;  // _48
     CStick mCStick;        // _58

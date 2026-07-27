@@ -11,6 +11,7 @@
 #include "susamune/settings.hxx"
 
 #include "Dolphin/OS.h"  // DCInvalidateRange, DCStoreRange
+#include "susamune/binds.hxx"
 #include "susamune/susamune_cfg.h"
 
 namespace {
@@ -90,6 +91,11 @@ const u32 kSaveTimeoutFrames = 300;  // ~5s at 60Hz
 Settings gSettings;
 
 void Settings::resetDefaults() {
+    // Binds ride along on the same handoff block and the same doorbell, so
+    // they are reset, loaded and staged wherever settings are. Their table and
+    // recorder live in binds.* -- see binds.hxx.
+    gBinds.resetDefaults();
+
     mData.magic   = kSettingsMagic;
     mData.version = kSettingsVersion;
     mData.count   = SETTING_COUNT;
@@ -119,6 +125,7 @@ void Settings::init() { resetDefaults(); }
 void Settings::save() {
     mSaveState = SETTINGS_SAVE_UNSUPPORTED;
     mDirty     = false;
+    gBinds.clearDirty();
 }
 
 SettingsSaveState Settings::pollSave() { return mSaveState; }
@@ -158,6 +165,21 @@ void Settings::init() {
         set((SettingId)i, v);
     }
 
+    // Binds, same deal. bindCount is 0 on a launcher built before binds
+    // existed (it zeroes only the part of the block it knows), which leaves
+    // every compiled-in default in place.
+    u16 nb = cfg->bindCount;
+    if (nb > BIND_COUNT) {
+        nb = BIND_COUNT;
+    }
+    for (u16 i = 0; i < nb; i++) {
+        u16 m = cfg->binds[i];
+        if (m != SUSAMUNE_CFG_BIND_UNSET) {
+            gBinds.adopt(m, (BindId)i);
+        }
+    }
+    gBinds.clearDirty();
+
     // set() marks dirty; adopting persisted values is not a user edit.
     mDirty     = false;
     mSaveSeq   = cfg->saveSeq;
@@ -178,6 +200,7 @@ void Settings::save() {
 
     if (mSaveState == SETTINGS_SAVE_UNSUPPORTED) {
         mDirty = false;
+        gBinds.clearDirty();
         return;
     }
 
@@ -186,9 +209,18 @@ void Settings::save() {
     }
     cfg->count = SETTING_COUNT;
 
+    u16 staged[BIND_COUNT];
+    gBinds.stageInto(staged);
+    for (int i = 0; i < BIND_COUNT; i++) {
+        cfg->binds[i] = staged[i];
+    }
+    cfg->bindCount = BIND_COUNT;
+    gBinds.clearDirty();
+
     // Publish the payload before the doorbell, so the kernel can never see a
-    // bumped saveSeq alongside a half-written values[].
-    DCStoreRange((void *)cfg->values, sizeof(cfg->values));
+    // bumped saveSeq alongside a half-written values[]/binds[]. Both live in
+    // the same mod-owned run of cache lines starting at values[].
+    DCStoreRange((void *)cfg->values, sizeof(cfg->values) + sizeof(cfg->binds));
 
     mSaveSeq     = cfg->saveSeq + 1;
     cfg->saveSeq = mSaveSeq;
@@ -269,3 +301,5 @@ static_assert(sizeof(kSettingDescs) / sizeof(kSettingDescs[0]) == SETTING_COUNT,
               "kSettingDescs must have one row per SUSAMUNE_SETTING_LIST entry");
 static_assert(SETTING_COUNT <= SUSAMUNE_CFG_MAX_SETTINGS,
               "SETTING_COUNT exceeds the MEM2 handoff block's values[] capacity");
+static_assert(BIND_COUNT <= SUSAMUNE_CFG_MAX_BINDS,
+              "BIND_COUNT exceeds the MEM2 handoff block's binds[] capacity");

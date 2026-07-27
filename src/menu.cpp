@@ -12,6 +12,7 @@
 // =====================================================================
 
 #include "susamune/menu.hxx"
+#include "susamune/binds.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/warp.hxx"
 
@@ -115,6 +116,10 @@ public:
     virtual void update(Menu *menu, TMarioGamePad *pad) = 0;
     // Render into the content rect [x, x+w) x [y, y+h).
     virtual void draw(Menu *menu, int x, int y, int w, int h) = 0;
+    // While true, Menu::update hands the pad to this tab alone: no tab
+    // switching, no close combo. The binds tab needs it, since every button
+    // it might record is also a menu control.
+    virtual bool grabsInput() const { return false; }
 };
 
 namespace {
@@ -363,6 +368,109 @@ private:
     int             mSel;
 };
 
+// ---------------------------------------------------------------------
+// Binds tab
+//
+// One row per BindId. A on a row arms gBinds' recorder, which watches the
+// raw pad and commits a combo when a held button comes back up (or when
+// four are down). All of the recorder's logic is in binds.cpp; this tab
+// only starts it, reports it, and takes the pad away from the rest of the
+// menu while it runs -- otherwise pressing L to record would switch tabs
+// and Y+Start would close the menu.
+// ---------------------------------------------------------------------
+class BindsTab : public MenuTab {
+public:
+    BindsTab() : mSel(0) {}
+
+    const char *title() const override { return "Binds"; }
+
+    bool grabsInput() const override { return gBinds.recording(); }
+
+    void update(Menu *menu, TMarioGamePad *pad) override {
+        u32 rapid = pad->mButtons.mRapidInput;
+
+        if (gBinds.recording()) {
+            // Only the C-stick is safe to react to here: every real button is
+            // a candidate for the combo being recorded.
+            if (rapid & (TMarioGamePad::CSTICK_LEFT | TMarioGamePad::CSTICK_RIGHT |
+                         TMarioGamePad::CSTICK_UP | TMarioGamePad::CSTICK_DOWN)) {
+                gBinds.cancelRecord();
+            }
+            return;
+        }
+
+        if (rapid & TMarioGamePad::CSTICK_UP) {
+            mSel = wrap(mSel - 1, BIND_COUNT);
+        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+            mSel = wrap(mSel + 1, BIND_COUNT);
+        }
+        if (rapid & TMarioGamePad::A) {
+            gBinds.beginRecord((BindId)mSel);
+        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            gBinds.set((BindId)mSel, 0);  // clear
+        }
+    }
+
+    void draw(Menu *menu, int x, int y, int w, int h) override {
+        // Last line of the content area is this tab's own hint: its controls
+        // differ enough from the rest of the menu to be worth spelling out.
+        const int hintY = y + h - FOOT_SZ;
+        h -= ROW_H;
+
+        int maxRows = h / ROW_H;
+        int start   = listScrollStart(mSel, BIND_COUNT, maxRows);
+        int end     = start + maxRows;
+        if (end > BIND_COUNT) {
+            end = BIND_COUNT;
+        }
+
+        char text[kBindTextMax];
+        int  ry = y;
+        for (int i = start; i < end; i++) {
+            BindId id       = (BindId)i;
+            bool   selected = (i == mSel);
+            if (selected) {
+                drawRowHighlight(menu, x, ry, w, ROW_H);
+            }
+            menu->drawText(Binds::desc(id).name, x + 4, ry, ROW_SZ, ROW_SZ,
+                           selected ? cRowSel() : cRow());
+
+            const char *val;
+            Color       valCol = cValue();
+            if (gBinds.recording() && gBinds.recordTarget() == id) {
+                if (gBinds.recordPreview() != 0) {
+                    Binds::format(gBinds.recordPreview(), text);
+                    val = text;
+                } else {
+                    val = "press buttons...";
+                }
+                valCol = cAccent();
+            } else {
+                Binds::format(gBinds.get(id), text);
+                val = text;
+            }
+            int vx = x + w - Menu::textWidth(val, ROW_SZ) - 8;
+            menu->drawText(val, vx, ry, ROW_SZ, ROW_SZ, valCol);
+            ry += ROW_H;
+        }
+
+        if (start > 0) {
+            menu->drawText("^", x + w - 12, y, ROW_SZ, ROW_SZ, cRowDim());
+        }
+        if (end < BIND_COUNT) {
+            menu->drawText("v", x + w - 12, y + h - ROW_H, ROW_SZ, ROW_SZ, cRowDim());
+        }
+
+        menu->drawText(gBinds.recording()
+                           ? "Release a button to set, or " BTN_C " to cancel"
+                           : BTN_A " Set bind    " BTN_C "-Left Clear",
+                       x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+private:
+    int mSel;
+};
+
 // =====================================================================
 // Menu
 // =====================================================================
@@ -377,6 +485,7 @@ u8 sQolBuf[sizeof(CategorySettingsTab)]        __attribute__((aligned(8)));
 u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
 u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
 u8 sSavestateBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
+u8 sBindsBuf[sizeof(BindsTab)]                 __attribute__((aligned(8)));
 }  // namespace
 
 Menu::Menu() : mText(gpSystemFont->mFont, " ") {
@@ -413,6 +522,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sCosmeticBuf) CategorySettingsTab("Cosmetic", SETTING_CAT_COSMETIC);
     mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab("Misc", SETTING_CAT_MISC);
     mTabs[mNumTabs++] = new (sSavestateBuf) CategorySettingsTab("Savestate", SETTING_CAT_SAVESTATE);
+    mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
 }
 
 int Menu::textWidth(const char *s, int sizeX) {
@@ -603,7 +713,6 @@ void Menu::drawTabStrip(int x, int y, int w) {
 }
 
 void Menu::update(TMarioGamePad *pad) {
-    u32 input = pad->mButtons.mInput;
     u32 rapid = pad->mButtons.mRapidInput;
 
     // Toast bookkeeping runs whether or not the menu is open -- the save it
@@ -613,11 +722,18 @@ void Menu::update(TMarioGamePad *pad) {
     }
     pollSettingsSave();
 
-    if ((input & TMarioGamePad::Y) && (rapid & TMarioGamePad::START)) {
+    // A tab recording a button combo owns the pad outright: the close combo and
+    // the tab-switch buttons are all bindable, so nothing else may look at them.
+    if (mShown && mTabs[mCurTab]->grabsInput()) {
+        mTabs[mCurTab]->update(this, pad);
+        return;
+    }
+
+    if (gBinds.wasPressed(BIND_MENU_TOGGLE)) {
         mShown = !mShown;
         // Closing with edits pending writes them back to the SD card. Gated on
         // dirty() so merely opening and closing the menu never touches storage.
-        if (!mShown && gSettings.dirty()) {
+        if (!mShown && (gSettings.dirty() || gBinds.dirty())) {
             requestSettingsSave();
         }
         return;
@@ -661,9 +777,21 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     int ch = FOOTER_Y - CONTENT_Y - 8;
     mTabs[mCurTab]->draw(this, cx, cy, cw, ch);
 
-    drawText(BTN_L "/" BTN_R " Tabs    " BTN_C " Move    " BTN_A " Select    "
-             BTN_Y SYM_AMP "Start Close",
-             PANEL_X + PAD, FOOTER_Y, FOOT_SZ, FOOT_SZ, cFooter());
+    // The close hint names the live menu bind rather than a fixed combo, since
+    // it is user-configurable (and re-bindable to something unguessable).
+    {
+        const char *hint = BTN_L "/" BTN_R " Tabs    " BTN_C " Move    "
+                           BTN_A " Select    ";
+        int hx = PANEL_X + PAD;
+        drawText(hint, hx, FOOTER_Y, FOOT_SZ, FOOT_SZ, cFooter());
+        hx += textWidth(hint, FOOT_SZ);
+
+        char combo[kBindTextMax];
+        Binds::format(gBinds.get(BIND_MENU_TOGGLE), combo);
+        drawText(combo, hx, FOOTER_Y, FOOT_SZ, FOOT_SZ, cFooter());
+        hx += textWidth(combo, FOOT_SZ);
+        drawText(" Close", hx, FOOTER_Y, FOOT_SZ, FOOT_SZ, cFooter());
+    }
 
     // Last, so it sits above the panel rather than under the backdrop.
     drawToast();

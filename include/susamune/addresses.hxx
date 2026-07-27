@@ -82,4 +82,23 @@
 #define SUSAMUNE_ADDR_QF_TIMER_RESET \
     SUSAMUNE_MEM1_ADDR(0x817f00b3u, 0x817f00b3u, 0x817f00b3u)
 
+// Scratch for the mod's asm caves. A cave can only reach a *fixed* address --
+// it has no way to find a mod global -- so this is the top 16 bytes of the
+// mod's own reserved arena window, [arena_lo, arena_lo + mod_region_size) from
+// scripts/patches.py, which getArenaLo() keeps the game's heap out of. The
+// blob starts at arena_lo and is far short of it (~0x6050 of 0x8000); if it
+// ever grows into this, the manifest's size check is the thing to tighten.
+//
+// Do NOT put mod scratch in the practice codes' region at 0x817f0000+: that
+// sits ABOVE __ArenaHi (0x81700000), where the apploader's FST and, on
+// console, Nintendont's cheat/code-handler area live. It is only free when a
+// .gct and its handler have been loaded and have lowered the arena top --
+// susamune reserves nothing there.
+#define SUSAMUNE_ADDR_MOD_SCRATCH \
+    SUSAMUNE_MEM1_ADDR(0x8042e010u, 0x804317f0u, 0x80428d50u)
+
+// One word: the frame of the last TShine::touchPlayer, for No Shine Get
+// Animation's debounce (features.cpp).
+#define SUSAMUNE_ADDR_SHINE_TOUCH_FRAME (SUSAMUNE_ADDR_MOD_SCRATCH + 0x0u)
+
 #endif // SUSAMUNE_ADDRESSES_HXX

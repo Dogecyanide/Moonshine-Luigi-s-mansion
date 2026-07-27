@@ -12,6 +12,8 @@
 #include "susamune/menu.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/features.hxx"
+#include "susamune/actions.hxx"
+#include "susamune/binds.hxx"
 #include "susamune/warp.hxx"
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
@@ -75,10 +77,11 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     u8 state = director->updateGameMode();
 
 #if ENABLE_MENU
-    auto controller = gpApplication.mGamePads[0];
-
-    // changing to pause menu state, and Y is held? don't pause
-    if (director->mCurState != state && state == 0x5 && (controller->mButtons.mInput & TMarioGamePad::Y)) {
+    // Opening the menu must not also pause the game. The default menu bind
+    // includes Start, which is what the director is reacting to here, so
+    // swallow the transition into the pause state on the frame it fires.
+    if (director->mCurState != state && state == 0x5 &&
+        gBinds.wasPressed(BIND_MENU_TOGGLE)) {
         state = director->mCurState;
     }
 
@@ -106,7 +109,6 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 //     rumble->init();
 // }
 
-// TODO: maybe this isnt really the init hook we want.. this runs every time a stage loads
 extern "C" void onSetup(TMarDirector* director) {
     static bool inited = false;
     director->setupObjects();
@@ -133,14 +135,21 @@ extern "C" void onSetup(TMarDirector* director) {
 
 
 extern "C" s32 onUpdate(JDrama::TDirector* director) {
+    // Sample the pad before direct(), not after: onUpdateGameMode runs inside
+    // it and asks whether the menu bind was pressed this frame, which would
+    // otherwise be answered from the previous frame's sample.
+    gBinds.update();
+
     int state = director->direct();
 
     // Apply/restore the toggled memory-patch features (ported gecko codes).
     // Runs every frame like the gecko handler; no-ops when nothing changed.
     featuresApply();
 
+    actionsApply();
+
     if (gSavestateMgr) {
-        gSavestateMgr->updateHook(gpApplication.mGamePads[0]);
+        gSavestateMgr->updateHook();
     }
 #if ENABLE_MENU
     if (gMenu) {

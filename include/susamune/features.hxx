@@ -18,4 +18,16 @@ void featuresApply();
 // Reset per-stage feature state. Call on every stage load (from onSetup).
 void featuresOnStageLoad();
 
+// --- shared patch primitives (also used by actions.cpp) ---
+
+// Write one instruction word into the running game and make it visible to the
+// core: flush the store out of the data cache, drop any stale copy from the
+// instruction cache. Mandatory on console; a no-op on Dolphin, which does not
+// emulate the instruction cache.
+void writeGameCode(u32 addr, u32 word);
+
+// Encode a PPC `b` (no link) from `from` to `to` -- the same math the gecko
+// code handler uses for C2/C6 (launcher/codehandler/codehandler.s, _hook1).
+u32 branchWord(u32 from, u32 to);
+
 #endif  // _SUSAMUNE_FEATURES_HXX

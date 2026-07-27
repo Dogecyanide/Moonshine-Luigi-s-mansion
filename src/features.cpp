@@ -247,22 +247,6 @@ struct PatchState {
 };
 PatchState gPatchState[kMaxPatches];
 
-// Write one instruction word and make it visible to the core: flush the store
-// out of the data cache, drop any stale copy from the instruction cache. This
-// self-modifying-code dance is a no-op on Dolphin (it doesn't emulate icache)
-// but mandatory on console.
-void writeCode(u32 addr, u32 word) {
-    *reinterpret_cast<volatile u32 *>(addr) = word;
-    DCFlushRange(reinterpret_cast<void *>(addr), 4);
-    ICInvalidateRange(reinterpret_cast<void *>(addr), 4);
-}
-
-// Encode a PPC `b` (no link) from `from` to `to`, the same math the gecko code
-// handler uses for C2/C6 (see launcher/codehandler/codehandler.s _hook1).
-u32 branchWord(u32 from, u32 to) {
-    return 0x48000000u | ((to - from) & 0x03FFFFFCu);
-}
-
 // =====================================================================
 // Asm-hook features: ports of the gecko C2 ("insert asm") codes.
 //
@@ -342,7 +326,7 @@ u32 gCaveFreePause[] = {
 // Load() below. Translated:
 //
 //   winDemo, phase 0, "landed" branch:
-//     +0x88  gpMarDirector->fireGetStar(shine)   -> gLastShineTouch = dir->unk58
+//     +0x88  gpMarDirector->fireGetStar(shine)   -> touch frame = dir->unk58
 //     +0xA4  shine->receiveMessage(mario, TAKE)  -> shine->unk64 &= ~1
 //     +0xAC  mario->mSubState = 1                -> mState = IDLE, mSubState = 0
 //   TShine::touchPlayer entry:
@@ -356,13 +340,15 @@ u32 gCaveFreePause[] = {
 // needs the 4-frame debounce -- without it Mario re-enters the grab on the very
 // next frame while still standing in the shine.
 //
-// gLastShineTouch replaces the upstream code's fixed scratch address: the two
-// words marked below are rewritten at init to point at it (see kSlotLis).
-u32 gLastShineTouch;
+// The touch timestamp lives at a fixed scratch address (addresses.hxx) rather
+// than in a mod global: a cave has no way to find one, so a global would have
+// to be patched into every lis/ori that references it.
+#define SHINE_TOUCH_LIS (0x3D800000u | (SUSAMUNE_ADDR_SHINE_TOUCH_FRAME >> 16))
+#define SHINE_TOUCH_ORI (0x618C0000u | (SUSAMUNE_ADDR_SHINE_TOUCH_FRAME & 0xFFFFu))
 
 // winDemo+0x88, replacing `bl fireGetStar` (r3 = gpMarDirector).
 u32 gCaveShineNoFire[] = {
-    0x3D800000u, 0x618C0000u,  // [slot] lis/ori r12, &gLastShineTouch
+    SHINE_TOUCH_LIS, SHINE_TOUCH_ORI,  // lis/ori r12, &touch frame
     0x81630058u,               // lwz r11, 0x58(r3)   director->unk58 (frame)
     0x916C0000u,               // stw r11, 0(r12)
     0x00000000u,
@@ -371,7 +357,7 @@ u32 gCaveShineNoFire[] = {
 // TShine::touchPlayer entry, replacing `mflr r0`. Safe to return from here:
 // nothing has been pushed yet, so LR still holds the caller's return address.
 u32 gCaveShineTouch[] = {
-    0x3D800000u, 0x618C0000u,  // [slot] lis/ori r12, &gLastShineTouch
+    SHINE_TOUCH_LIS, SHINE_TOUCH_ORI,  // lis/ori r12, &touch frame
     0x800C0000u,               // lwz r0, 0(r12)      last touch frame
     SUSAMUNE_MEM1_ADDR(0x816D97E8u, 0x816D9FB8u, 0x816D9EE0u),  // lwz r11,gpMarDirector(r13)
     0x816B0058u,               // lwz r11, 0x58(r11)  current frame
@@ -382,6 +368,8 @@ u32 gCaveShineTouch[] = {
     0x7C0802A6u,               // mflr r0             (displaced original)
     0x00000000u,
 };
+#undef SHINE_TOUCH_LIS
+#undef SHINE_TOUCH_ORI
 
 // winDemo+0xA4, replacing the `receiveMessage(mario, TAKE)` call (r3 = shine).
 u32 gCaveShineKeep[] = {
@@ -472,20 +460,11 @@ struct AsmHook {
     u32       site;   // game address whose instruction becomes b->cave
     u32      *cave;    // asm block; its trailing word is patched to b->site+4
     u8        n;       // word count of cave
-    // Index of a `lis r12, 0 / ori r12, r12, 0` pair to rewrite at init so it
-    // materialises &gLastShineTouch (upstream hardcodes a scratch address; we
-    // own our storage instead). kNoSlot when the cave needs no such fixup.
-    s8        slotLis;
 };
-
-const s8 kNoSlot = -1;
 
 #define HOOK(id, jp, us, pal, caveArr) \
     { id, SUSAMUNE_MEM1_ADDR(jp, us, pal), caveArr, \
-      (u8)(sizeof(caveArr) / sizeof(u32)), kNoSlot }
-#define HOOK_SLOT(id, jp, us, pal, caveArr, lisIdx) \
-    { id, SUSAMUNE_MEM1_ADDR(jp, us, pal), caveArr, \
-      (u8)(sizeof(caveArr) / sizeof(u32)), (lisIdx) }
+      (u8)(sizeof(caveArr) / sizeof(u32)) }
 
 const AsmHook kAsmHooks[] = {
     HOOK(SETTING_FAST_PIANTISSIMO, 0x80256A14u, 0x80043064u, 0x80042EDCu,
@@ -503,10 +482,10 @@ const AsmHook kAsmHooks[] = {
     HOOK(SETTING_FORCE_PLAZA_EVENTS, 0x8010C41Cu, 0x802B7764u, 0x802AF734u,
          gCaveForcePlaza),
     // No Shine Get Animation: four sites, all gated on the one setting.
-    HOOK_SLOT(SETTING_NO_SHINE_ANIM, 0x80120540u, 0x80241400u, 0x8023918Cu,
-              gCaveShineNoFire, 0),
-    HOOK_SLOT(SETTING_NO_SHINE_ANIM, 0x80195304u, 0x801BD334u, 0x801B51ECu,
-              gCaveShineTouch, 0),
+    HOOK(SETTING_NO_SHINE_ANIM, 0x80120540u, 0x80241400u, 0x8023918Cu,
+         gCaveShineNoFire),
+    HOOK(SETTING_NO_SHINE_ANIM, 0x80195304u, 0x801BD334u, 0x801B51ECu,
+         gCaveShineTouch),
     HOOK(SETTING_NO_SHINE_ANIM, 0x8012055Cu, 0x8024141Cu, 0x802391A8u,
          gCaveShineKeep),
     HOOK(SETTING_NO_SHINE_ANIM, 0x80120564u, 0x80241424u, 0x802391B0u,
@@ -548,7 +527,7 @@ void applyPatches() {
 
             u32 want = on ? ((s.orig & ~p.mask) | p.value) : s.orig;
             if (want != s.last) {
-                writeCode(p.addr, want);
+                writeGameCode(p.addr, want);
                 s.last = want;
             }
         }
@@ -567,12 +546,6 @@ void applyHooks() {
             u32 backAddr    = reinterpret_cast<u32>(&h.cave[h.n - 1]);
             h.cave[h.n - 1] = branchWord(backAddr, h.site + 4);
 
-            // Materialise &gLastShineTouch into the cave's lis/ori pair.
-            if (h.slotLis >= 0) {
-                u32 slot = reinterpret_cast<u32>(&gLastShineTouch);
-                h.cave[h.slotLis]     = 0x3D800000u | (slot >> 16);      // lis r12
-                h.cave[h.slotLis + 1] = 0x618C0000u | (slot & 0xFFFFu);  // ori r12
-            }
             DCFlushRange(h.cave, h.n * 4);
             ICInvalidateRange(h.cave, h.n * 4);
 
@@ -584,7 +557,7 @@ void applyHooks() {
 
         u32 want = gSettings.getBool(h.id) ? s.onWord : s.orig;
         if (want != s.last) {
-            writeCode(h.site, want);
+            writeGameCode(h.site, want);
             s.last = want;
         }
     }
@@ -663,7 +636,7 @@ void applyChoices() {
             u32 want = (c == 0) ? s.orig
                                 : ((s.orig & ~p.mask) | p.vals[c - 1]);
             if (want != s.last) {
-                writeCode(p.addr, want);
+                writeGameCode(p.addr, want);
                 s.last = want;
             }
         }
@@ -671,6 +644,16 @@ void applyChoices() {
 }
 
 }  // namespace
+
+void writeGameCode(u32 addr, u32 word) {
+    *reinterpret_cast<volatile u32 *>(addr) = word;
+    DCFlushRange(reinterpret_cast<void *>(addr), 4);
+    ICInvalidateRange(reinterpret_cast<void *>(addr), 4);
+}
+
+u32 branchWord(u32 from, u32 to) {
+    return 0x48000000u | ((to - from) & 0x03FFFFFCu);
+}
 
 void featuresApply() {
     applyPatches();
@@ -682,5 +665,5 @@ void featuresOnStageLoad() {
     // Upstream clears its shine-touch timestamp from a hook in setupObjects;
     // ours lives here. Without it a stale frame number carries into the next
     // stage and can swallow the first shine touch.
-    gLastShineTouch = 0;
+    *reinterpret_cast<volatile u32 *>(SUSAMUNE_ADDR_SHINE_TOUCH_FRAME) = 0;
 }

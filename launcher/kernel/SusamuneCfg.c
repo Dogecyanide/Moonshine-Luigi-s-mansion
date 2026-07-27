@@ -12,11 +12,14 @@ block described in susamune_cfg.h:
            SusamuneCfgService() notices, rewrites the ini, and answers through
            status + ackSeq.
 
-The ini is plain text with two sections. [settings] holds the in-game options,
-keyed by the stable names in settings_list.h -- shared with the mod, so the key
-table here cannot drift from the mod's SettingId order. [nintendont] is
-reserved for launcher options (ISO path and friends) that will eventually
-replace the loader's command-line flags; it is recognised but has no keys yet.
+The ini is plain text with three sections. [settings] holds the in-game
+options, keyed by the stable names in settings_list.h -- shared with the mod,
+so the key table here cannot drift from the mod's SettingId order. [binds]
+holds one button combination per configurable action, keyed by binds_list.h and
+written as `+`-joined button tokens ("X+DUp") from the same shared list.
+[nintendont] is reserved for launcher options (ISO path and friends) that will
+eventually replace the loader's command-line flags; it is recognised but has no
+keys yet.
 
 NOTE: a save rewrites the whole file, so hand-added keys the launcher does not
 recognise are dropped. Nothing is lost today because [nintendont] is empty.
@@ -38,6 +41,22 @@ static const char *const SettingKeys[] = { SUSAMUNE_SETTING_LIST(SUSAMUNE_SETTIN
 #undef SUSAMUNE_SETTING_KEY
 
 #define SETTING_KEY_COUNT ((u32)(sizeof(SettingKeys) / sizeof(SettingKeys[0])))
+
+// Same, for the [binds] section.
+#define SUSAMUNE_BIND_KEY(id, key) key,
+static const char *const BindKeys[] = { SUSAMUNE_BIND_LIST(SUSAMUNE_BIND_KEY) };
+#undef SUSAMUNE_BIND_KEY
+
+#define BIND_KEY_COUNT ((u32)(sizeof(BindKeys) / sizeof(BindKeys[0])))
+
+// Button bit <-> token, from the list the mod renders combos with, so the
+// spelling in the file matches the spelling in the menu.
+struct BindButton { u16 bit; const char *token; };
+#define SUSAMUNE_BIND_BUTTON_ROW(bit, token) { (u16)(bit), token },
+static const struct BindButton BindButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_BIND_BUTTON_ROW) };
+#undef SUSAMUNE_BIND_BUTTON_ROW
+
+#define BIND_BUTTON_COUNT ((u32)(sizeof(BindButtons) / sizeof(BindButtons[0])))
 
 // Enough for the whole file: ~24 keys at well under 40 bytes each, plus the
 // section headers and comment banner.
@@ -112,10 +131,89 @@ static s32 FindSettingKey(const char *key)
 	return -1;
 }
 
+static s32 FindBindKey(const char *key)
+{
+	u32 i;
+
+	for (i = 0; i < BIND_KEY_COUNT; i++)
+	{
+		if (strcmp(key, BindKeys[i]) == 0)
+			return (s32)i;
+	}
+	return -1;
+}
+
+static char LowerChar(char c)
+{
+	return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+// Length-delimited, case-insensitive compare against a NUL-terminated token,
+// so the file may spell buttons "dup" or "DUp" interchangeably.
+static bool TokenEquals(const char *s, u32 len, const char *token)
+{
+	u32 i;
+
+	for (i = 0; i < len; i++)
+	{
+		if (token[i] == '\0' || LowerChar(s[i]) != LowerChar(token[i]))
+			return false;
+	}
+	return token[len] == '\0';
+}
+
+// Parse "X+DUp" into a button mask. Returns false on any unrecognised token, so
+// a typo leaves the mod's compiled-in default in place rather than silently
+// producing a half-bind. The literal "none" (and an empty value) is a valid
+// unbound entry.
+static bool ParseBindMask(const char *s, u16 *out)
+{
+	u16 mask = 0;
+
+	if (*s == '\0' || TokenEquals(s, (u32)strlen(s), SUSAMUNE_BIND_NONE_TOKEN))
+	{
+		*out = 0;
+		return true;
+	}
+
+	while (*s)
+	{
+		const char *end = s;
+		u32         len;
+		u32         i;
+		bool        found = false;
+
+		while (*end && *end != SUSAMUNE_BIND_SEPARATOR)
+			end++;
+		len = (u32)(end - s);
+
+		for (i = 0; i < BIND_BUTTON_COUNT; i++)
+		{
+			if (TokenEquals(s, len, BindButtons[i].token))
+			{
+				mask |= BindButtons[i].bit;
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			return false;
+
+		s = (*end == SUSAMUNE_BIND_SEPARATOR) ? end + 1 : end;
+	}
+
+	*out = mask;
+	return true;
+}
+
+// Which section the parser is currently inside. Keys outside a known section
+// (i.e. [nintendont]) are not ours yet.
+enum IniSection { SECTION_OTHER, SECTION_SETTINGS, SECTION_BINDS };
+
 static void ParseIni(char *text, struct SusamuneCfg *cfg)
 {
 	char *line = text;
-	bool inSettings = false;
+	enum IniSection section = SECTION_OTHER;
 
 	while (*line)
 	{
@@ -123,6 +221,7 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 		char *eq;
 		s32   idx;
 		u8    value;
+		u16   mask;
 
 		// Split off this line.
 		next = strchr(line, '\n');
@@ -144,8 +243,15 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 			char *close = strchr(line, ']');
 			if (close)
 			{
+				char *name;
 				*close = '\0';
-				inSettings = (strcmp(Trim(line + 1), SUSAMUNE_INI_SECTION_SETTINGS) == 0);
+				name = Trim(line + 1);
+				if (strcmp(name, SUSAMUNE_INI_SECTION_SETTINGS) == 0)
+					section = SECTION_SETTINGS;
+				else if (strcmp(name, SUSAMUNE_INI_SECTION_BINDS) == 0)
+					section = SECTION_BINDS;
+				else
+					section = SECTION_OTHER;
 			}
 			line = next;
 			continue;
@@ -159,16 +265,18 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 		}
 		*eq = '\0';
 
-		// Keys outside [settings] (i.e. [nintendont]) are not ours yet.
-		if (!inSettings)
+		if (section == SECTION_SETTINGS)
 		{
-			line = next;
-			continue;
+			idx = FindSettingKey(Trim(line));
+			if (idx >= 0 && ParseU8(Trim(eq + 1), &value))
+				cfg->values[idx] = value;
 		}
-
-		idx = FindSettingKey(Trim(line));
-		if (idx >= 0 && ParseU8(Trim(eq + 1), &value))
-			cfg->values[idx] = value;
+		else if (section == SECTION_BINDS)
+		{
+			idx = FindBindKey(Trim(line));
+			if (idx >= 0 && ParseBindMask(Trim(eq + 1), &mask))
+				cfg->binds[idx] = (u16)(mask & SUSAMUNE_BIND_BUTTON_MASK);
+		}
 
 		line = next;
 	}
@@ -178,20 +286,57 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 // Serialisation
 // ---------------------------------------------------------------------
 
+// Render a bind mask as "X+DUp", or the "none" token when it has no buttons.
+static u32 FormatBindMask(char *buf, u16 mask)
+{
+	u32 n = 0;
+	u32 i;
+
+	for (i = 0; i < BIND_BUTTON_COUNT; i++)
+	{
+		const char *p;
+
+		if (!(mask & BindButtons[i].bit))
+			continue;
+		if (n > 0)
+			buf[n++] = SUSAMUNE_BIND_SEPARATOR;
+		for (p = BindButtons[i].token; *p; p++)
+			buf[n++] = *p;
+	}
+
+	if (n == 0)
+	{
+		const char *p;
+		for (p = SUSAMUNE_BIND_NONE_TOKEN; *p; p++)
+			buf[n++] = *p;
+	}
+
+	buf[n] = '\0';
+	return n;
+}
+
 static u32 WriteIniText(char *buf, u32 cap, const struct SusamuneCfg *cfg)
 {
 	u32 n = 0;
 	u32 i;
 	u32 count = cfg->count;
+	u32 bindCount = cfg->bindCount;
+	char combo[64];
 
 	if (count > SETTING_KEY_COUNT)
 		count = SETTING_KEY_COUNT;
+	if (bindCount > BIND_KEY_COUNT)
+		bindCount = BIND_KEY_COUNT;
 
 	n += (u32)_sprintf(buf + n,
 	                   "; susamune settings\r\n"
 	                   "; Written by the susamune launcher. Values are edited in-game\r\n"
 	                   "; from the mod menu; this file is rewritten whenever the menu is\r\n"
 	                   "; closed with changes pending, so comments added here are lost.\r\n"
+	                   ";\r\n"
+	                   "; [binds] values are button combinations like Y+Start, or none.\r\n"
+	                   "; menu_toggle is what opens the mod menu -- if you rebind it to\r\n"
+	                   "; something you cannot reproduce, set it back here.\r\n"
 	                   "\r\n"
 	                   "[" SUSAMUNE_INI_SECTION_NINTENDONT "]\r\n"
 	                   "\r\n"
@@ -204,6 +349,19 @@ static u32 WriteIniText(char *buf, u32 cap, const struct SusamuneCfg *cfg)
 		if (n + 64 > cap)
 			break;
 		n += (u32)_sprintf(buf + n, "%s = %u\r\n", SettingKeys[i], cfg->values[i]);
+	}
+
+	if (n + 64 <= cap)
+		n += (u32)_sprintf(buf + n, "\r\n[" SUSAMUNE_INI_SECTION_BINDS "]\r\n");
+
+	for (i = 0; i < bindCount; i++)
+	{
+		if (cfg->binds[i] == SUSAMUNE_CFG_BIND_UNSET)
+			continue;
+		if (n + 96 > cap)
+			break;
+		FormatBindMask(combo, cfg->binds[i]);
+		n += (u32)_sprintf(buf + n, "%s = %s\r\n", BindKeys[i], combo);
 	}
 
 	return n;
@@ -253,10 +411,13 @@ void SusamuneCfgInit(void)
 	memset(cfg, 0, sizeof(struct SusamuneCfg));
 	for (i = 0; i < SUSAMUNE_CFG_MAX_SETTINGS; i++)
 		cfg->values[i] = SUSAMUNE_CFG_UNSET;
+	for (i = 0; i < SUSAMUNE_CFG_MAX_BINDS; i++)
+		cfg->binds[i] = SUSAMUNE_CFG_BIND_UNSET;
 
-	cfg->magic   = SUSAMUNE_CFG_MAGIC;
-	cfg->version = SUSAMUNE_CFG_VERSION;
-	cfg->count   = (u16)SETTING_KEY_COUNT;
+	cfg->magic     = SUSAMUNE_CFG_MAGIC;
+	cfg->version   = SUSAMUNE_CFG_VERSION;
+	cfg->count     = (u16)SETTING_KEY_COUNT;
+	cfg->bindCount = (u16)BIND_KEY_COUNT;
 
 	ret = f_open_char(&f, SUSAMUNE_INI_PATH, FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)
