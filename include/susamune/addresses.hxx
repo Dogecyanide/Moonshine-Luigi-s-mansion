@@ -85,6 +85,16 @@
 #define SUSAMUNE_SCRATCH 0x40u // idk
 #define SUSAMUNE_MOD_BLOB_MAX_SIZE (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
 
+// The mod links at __ArenaLo, but OSInit hands the debug stack back to the
+// arena when no debug monitor is present (BI2DebugFlag < 2), leaving the
+// runtime __OSArenaLo at ALIGN32(_stack_addr) -- exactly this much BELOW
+// __ArenaLo in all three regions. getArenaLo() reserves from the runtime
+// value, so it must cover this gap as well as the region itself, or the root
+// heap starts 0x2000 INTO the blob. link_mod.py re-checks the gap per region.
+#define SUSAMUNE_DEBUG_STACK_SIZE 0x2000u
+#define SUSAMUNE_ARENA_RESERVE_SIZE \
+    (SUSAMUNE_MOD_REGION_SIZE + SUSAMUNE_DEBUG_STACK_SIZE)
+
 // This is an optional Quick-Freeze practice-code heap flag, not a game-map symbol.
 #define SUSAMUNE_ADDR_QF_TIMER_RESET \
     SUSAMUNE_MEM1_ADDR(0x817f00b3u, 0x817f00b3u, 0x817f00b3u)
@@ -93,8 +103,9 @@
 // it has no way to find a mod global -- so this is the top 16 bytes of the
 // mod's own reserved arena window, [arena_lo, arena_lo + mod_region_size) from
 // scripts/patches.py, which getArenaLo() keeps the game's heap out of. The
-// blob starts at arena_lo and is far short of it (~0x6050 of 0x8000); if it
-// ever grows into this, the manifest's size check is the thing to tighten.
+// blob starts at arena_lo; link_mod.py enforces mod_blob_max_size (this
+// address minus the base) on every build and prints the section layout, so
+// growing into this is a build failure rather than silent corruption.
 //
 // Do NOT put mod scratch in the practice codes' region at 0x817f0000+: that
 // sits ABOVE __ArenaHi (0x81700000), where the apploader's FST and, on

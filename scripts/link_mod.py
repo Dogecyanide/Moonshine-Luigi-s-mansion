@@ -1,9 +1,36 @@
 import argparse
 import os
+import re
 from pathlib import Path
 
 from dol_c_kit import Project
 import patches
+
+
+def check_arena_reserve(linker_script, base):
+    """Verify the debug-stack gap this build's arena reserve assumes.
+
+    OSInit lowers __OSArenaLo to ALIGN32(_stack_addr) when no debug monitor is
+    present, so the reserve has to span that gap plus the mod region. If a
+    region's map disagrees, the heap would silently overlap the blob.
+    """
+    text = Path(linker_script).read_text()
+    syms = {}
+    for name in ("_stack_addr", "__ArenaLo"):
+        m = re.search(r"^{} = (0x[0-9a-fA-F]+);".format(re.escape(name)), text, re.M)
+        if not m:
+            raise RuntimeError("{} not found in {}".format(name, linker_script))
+        syms[name] = int(m.group(1), 16)
+
+    if syms["__ArenaLo"] != base:
+        raise RuntimeError("link base {:#x} is not __ArenaLo {:#x}".format(base, syms["__ArenaLo"]))
+
+    gap = syms["__ArenaLo"] - ((syms["_stack_addr"] + 0x1F) & ~0x1F)
+    if gap != patches.debug_stack_size:
+        raise RuntimeError(
+            "debug stack gap is {:#x} (__ArenaLo {:#x}, _stack_addr {:#x}) but "
+            "patches.debug_stack_size is {:#x}".format(
+                gap, syms["__ArenaLo"], syms["_stack_addr"], patches.debug_stack_size))
 
 
 def main():
@@ -14,6 +41,7 @@ def main():
     ap.add_argument("--vers", default="jp", choices=["jp", "us", "pal"])
     ap.add_argument("--out", required=True, help="Output file")
     ap.add_argument("--in-dol", help="Input main.dol (required for patch_dol)")
+    ap.add_argument("--print-commands", action="store_true", help="Echo the raw compiler/linker argv")
     ap.add_argument("mode", choices=["patch_dol", "gecko", "launcher"])
     args = ap.parse_args()
 
@@ -31,12 +59,16 @@ def main():
     if base is None:
         raise ValueError(f"Base address unset for version {args.vers}!")
 
+    check_arena_reserve(linker_script, base)
+
     p = Project()
     p.project_name = "susamune"
     p.verbose = True
+    p.print_commands = args.print_commands
     p.obj_dir = ""
     p.kuribo_compiler_home = args.kuribo_home
     p.base_addr = base
+    p.blob_max_size = patches.mod_blob_max_size
     p.add_linker_script_file(str(linker_script))
     p.add_obj_file(obj.name)
 
@@ -63,7 +95,7 @@ def main():
             "region": patches.region[args.vers],
             "disc_name": patches.disc_name[args.vers],
         }
-        p.build_launcher_manifest(str(out), meta=meta, max_size=patches.mod_region_size)
+        p.build_launcher_manifest(str(out), meta=meta, region_reserve=patches.arena_reserve)
 
 
 if __name__ == "__main__":

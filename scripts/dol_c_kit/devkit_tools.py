@@ -368,8 +368,20 @@ class Project(object):
         self.obj_files = []
         self.linker_script_files = []
 
-        self.code_pad = -1 
-        
+        self.code_pad = -1
+
+        # Ceiling for the linked blob, checked by every build_* mode. The blob
+        # is copied to base_addr as one contiguous image, so this is what keeps
+        # it out of whatever follows the reserved region.
+        self.blob_max_size = None
+        # Filled in by __process_project: (name, addr, size) per SHF_ALLOC
+        # section, in address order.
+        self.section_layout = []
+        self.blob_size = 0
+        # Raw compiler/assembler/linker argv dumps. Separate from `verbose`,
+        # which also controls the hook summary.
+        self.print_commands = False
+
         if self.compiler == Compiler.KuriboClang:
             # unsupported
             self.c_flags = []
@@ -490,7 +502,8 @@ class Project(object):
                 datablob += f.read()
                 while (len(datablob) % 4) != 0 or (len(datablob) < self.code_pad):
                     datablob += b'\x00'
-        
+        self.__check_blob_size(len(datablob))
+
         for gecko_code in self.gecko_codetable:
             status = "ENABLED" if gecko_code.is_enabled() else "DISABLED"
             if gecko_code.is_enabled() == True:
@@ -555,7 +568,8 @@ class Project(object):
             if self.build_project() == True:
                 with open(self.obj_dir+self.project_name+".bin", "rb") as bin:
                     datablob += bin.read()
-            
+            self.__check_blob_size(len(datablob))
+
             f.write("[Gecko]\n")
             # Everything gets shoved into a large Gecko Code named after the project
             f.write("${}\n".format(self.project_name))
@@ -578,7 +592,7 @@ class Project(object):
                 if self.verbose:
                     print(hook.dump_info())
     
-    def build_launcher_manifest(self, manifest_path, meta=None, max_size=None):
+    def build_launcher_manifest(self, manifest_path, meta=None, region_reserve=None):
         # Emit the mod as a self-contained JSON manifest for a runtime loader:
         # the base address, the code blob, and the concrete (addr, word) writes
         # that realise every hook. Nintendont copies the blob to base_addr and
@@ -591,8 +605,7 @@ class Project(object):
         while (len(datablob) % 4) != 0:
             datablob += b'\x00'
 
-        if max_size is not None and len(datablob) > max_size:
-            raise RuntimeError("mod is {} bytes but only {} are reserved".format(len(datablob), max_size))
+        self.__check_blob_size(len(datablob))
 
         writes = []
         for hook in self.hooks:
@@ -608,7 +621,7 @@ class Project(object):
             # bottom-anchored heap allocation shifts up by once the mod is
             # active. The launcher needs it to relocate hardcoded-heap-address
             # Gecko codes (see PatchSusamuneGeckoCodes in Patch.c).
-            "region_reserve": max_size if max_size is not None else 0,
+            "region_reserve": region_reserve if region_reserve is not None else 0,
             "code": datablob.hex(),
             "writes": [[addr & 0xFFFFFFFF, val & 0xFFFFFFFF] for addr, val in writes],
         }
@@ -706,7 +719,7 @@ class Project(object):
                 args.append(flag)
         for flag in flags:
             args.append(flag)
-        if self.verbose:
+        if self.print_commands:
             print(args)
         subprocess.call(args)
         self.obj_files.append((infile+".o", True))
@@ -723,7 +736,7 @@ class Project(object):
                 args.append(flag)
         for flag in flags:
             args.append(flag)
-        if self.verbose:
+        if self.print_commands:
             print(args)
         subprocess.call(args)
         self.obj_files.append((infile+".o", True))
@@ -740,12 +753,41 @@ class Project(object):
                 args.append(flag)
         for flag in flags:
             args.append(flag)
-        if self.verbose:
+        if self.print_commands:
             print(args)
         subprocess.call(args)
         self.obj_files.append((infile+".o", True))
         return True
     
+    def __report_layout(self):
+        # Printed on every link so blob growth is visible in normal build output
+        # rather than only when the ceiling is hit.
+        # Grouped by top-level section: -ffunction-sections gives one section
+        # per function, and susamune.map already has that breakdown.
+        groups = []
+        for name, addr, size in self.section_layout:
+            parts = name.split(".")
+            group = "." + parts[1] if len(parts) > 1 else name
+            if groups and groups[-1][0] == group:
+                groups[-1][2] += size
+            else:
+                groups.append([group, addr, size])
+
+        print("{} blob layout (base {:#010x}):".format(self.project_name, self.base_addr))
+        for name, addr, size in groups:
+            print("  {:<10} {:#010x}  {:>6} ({:#7x})".format(name, addr, size, size))
+        print("  {:<10} {:#010x}  {:>6} ({:#7x})".format(
+            "TOTAL", self.base_addr + self.blob_size, self.blob_size, self.blob_size))
+        if self.blob_max_size is not None:
+            free = self.blob_max_size - self.blob_size
+            print("  limit {:#x}, {} bytes free ({:.1f}% used)".format(
+                self.blob_max_size, free, 100.0 * self.blob_size / self.blob_max_size))
+
+    def __check_blob_size(self, size):
+        if self.blob_max_size is not None and size > self.blob_max_size:
+            raise RuntimeError("mod blob is {:#x} bytes but the limit is {:#x} ({} bytes over)".format(
+                size, self.blob_max_size, size - self.blob_max_size))
+
     def __link_project(self):
         if self.base_addr == None:
             raise RuntimeError("Base address not set!  New code cannot be linked.")
@@ -768,7 +810,7 @@ class Project(object):
             args.extend(("-Map", self.obj_dir+self.project_name+".map"))
         for flag in self.linker_flags:
             args.append(flag)
-        if self.verbose:
+        if self.print_commands:
             print(args)
         subprocess.call(args)
         return True
@@ -776,13 +818,19 @@ class Project(object):
     def __process_project(self):
         with open(self.obj_dir+self.project_name+".o", 'rb') as f:
             elf = ELFFile(f)
+            self.section_layout = []
             with open(self.obj_dir+self.project_name+".bin", "wb") as bin:
                 for iter in elf.iter_sections():
                     # Filter out sections without SHF_ALLOC attribute
                     if iter.header["sh_flags"] & 0x2:
                         bin.seek(iter.header["sh_addr"] - self.base_addr)
                         bin.write(iter.data())
-            
+                        self.section_layout.append(
+                            (iter.name, iter.header["sh_addr"], iter.header["sh_size"]))
+            self.section_layout.sort(key=lambda s: s[1])
+            self.blob_size = os.path.getsize(self.obj_dir+self.project_name+".bin")
+            self.__report_layout()
+
             symtab = elf.get_section_by_name(".symtab")
             for iter in symtab.iter_symbols():
                 #print("{}   {}".format(iter.name, iter.entry))

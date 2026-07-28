@@ -51,6 +51,24 @@ arena_lo = {
 # SUSAMUNE_MOD_REGION_SIZE in addresses.hxx.
 mod_region_size = 0x8000
 
+# Tail of the region reserved for the asm caves' fixed-address scratch, which
+# the blob must not grow into. MUST match SUSAMUNE_SCRATCH in addresses.hxx.
+mod_scratch_size = 0x40
+
+# Ceiling enforced on the linked blob by every link_mod.py mode.
+mod_blob_max_size = mod_region_size - mod_scratch_size
+
+# OSInit returns the debug stack to the arena when no debug monitor is present
+# (BI2DebugFlag < 2), so the runtime __OSArenaLo is this far BELOW the
+# __ArenaLo the blob links at. Uniform across JP/US/PAL; link_mod.py verifies
+# it against _stack_addr/__ArenaLo in the map for the version being built.
+debug_stack_size = 0x2000
+
+# What getArenaLo() adds to __OSArenaLo, and therefore the amount every
+# bottom-anchored heap allocation shifts up by. MUST match
+# SUSAMUNE_ARENA_RESERVE_SIZE in addresses.hxx.
+arena_reserve = mod_region_size + debug_stack_size
+
 # Base address to link code against, i.e. where we insert the code.
 base_addr = {v: a for v, a in arena_lo.items()}
 

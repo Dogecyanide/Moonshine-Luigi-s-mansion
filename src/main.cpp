@@ -24,10 +24,15 @@ SavestateManager* gSavestateMgr = nullptr;
 // Replaces the game's OSGetArenaLo. The mod is linked into the bottom of the
 // heap arena; reporting the raised floor here keeps the root heap from
 // allocating over it. The top is avoided because the apploader keeps the FST
-// there. SUSAMUNE_MOD_REGION_SIZE must match scripts/patches.py.
+// there.
+//
+// The reserve is SUSAMUNE_ARENA_RESERVE_SIZE, not the region size: __OSArenaLo
+// sits a debug stack below the __ArenaLo the blob links at. Adding only the
+// region size puts the heap floor at MOD_BASE + 0x6000, inside the blob.
+// SUSAMUNE_ARENA_RESERVE_SIZE must match arena_reserve in scripts/patches.py.
 extern "C" void* getArenaLo() {
     return (void*)(*(volatile u32*)SUSAMUNE_ADDR_OS_ARENA_LO +
-                   SUSAMUNE_MOD_REGION_SIZE);
+                   SUSAMUNE_ARENA_RESERVE_SIZE);
 }
 
 // Replaces the `bl TApplication::initialize` in main() (see patches.py), the
