@@ -36,8 +36,8 @@ The mod is compiled + partial-linked into one relocatable object, then linked **
 
 Room for the blob is carved from the **bottom of the game's heap arena**, not the stack:
 
-- `getArenaLo` (`src/main.cpp`) is hooked onto `OSGetArenaLo` (`0x8008dcbc`, a `PatchType.B` in `patches.py`). It returns `__OSArenaLo + kArenaReserve`, so the root heap starts `kArenaReserve` bytes higher and `[__ArenaLo, __ArenaLo + mod_region_size)` is free for the mod's code + data.
-- `kArenaReserve` in `main.cpp` **must equal** `mod_region_size` in `patches.py` (currently `0x8000`).
+- `getArenaLo` (`src/main.cpp`) is hooked onto `OSGetArenaLo` (`0x8008dcbc`, a `PatchType.B` in `patches.py`). It returns `__OSArenaLo + SUSAMUNE_MOD_REGION_SIZE`, so the root heap starts that many bytes higher and `[__ArenaLo, __ArenaLo + mod_region_size)` is free for the mod's code + data.
+- `SUSAMUNE_MOD_REGION_SIZE` in `include/susamune/addresses.hxx` **must equal** `mod_region_size` in `patches.py` (currently `0x8000`).
 - We deliberately do **not** touch the top of the arena (the apploader stores the FST there — an earlier arena-*top* reservation overwrote the FST and crashed before the logo) and do **not** shrink the stack (that starved the scene-load stack → black screen).
 
 `scripts/patches.py` `patches[]` also installs the actual mod hooks (`onUpdate`, `onSetup`, `afterDraw`, `onUpdateGameMode`, `onAppInit`) plus a couple of boot-speedup NOPs. Every hook is realized as a concrete `(addr, word)` write in the generated manifest.

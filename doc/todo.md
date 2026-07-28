@@ -22,6 +22,7 @@
 - [ ] Switch everything to a single Clang compiler (based on the kuribo tree) that does PowerPC and ARM to simplify dependencies.
 - [ ] QFT doesnt pause on shine get grab when no shine get animation is on (maybe just my qft settings? probably not)
 - [ ] Chatgpt critical review that codes have been implemented accurately
+- [ ] whole debug text thing for savestates should be disabled when the ifdef flag is off not just the call to draw
 
 ### Bindings
 

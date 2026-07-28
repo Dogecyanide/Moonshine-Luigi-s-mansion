@@ -47,7 +47,8 @@ arena_lo = {
 }  # __ArenaLo, from maps/<vers>.map
 
 # Size of the carved region. Comes out of the ~19 MiB heap, so it can be
-# generous; the mod must fit within it. MUST match kArenaReserve in main.cpp.
+# generous; the mod must fit within it. MUST match
+# SUSAMUNE_MOD_REGION_SIZE in addresses.hxx.
 mod_region_size = 0x8000
 
 # Base address to link code against, i.e. where we insert the code.

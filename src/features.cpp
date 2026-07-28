@@ -237,15 +237,24 @@ const int kNumFeatures = (int)(sizeof(kFeatures) / sizeof(kFeatures[0]));
 
 // Per-patch mutable state, flattened across every feature in table order.
 // Captured lazily on first apply: `orig` is the retail word, `last` is the
-// word we most recently wrote (so we can skip untouched patches). Sized with
-// generous headroom; a compile-time check guards the bound.
-const int kMaxPatches = 64;
+// word we most recently wrote (so we can skip untouched patches).
+#define PATCH_COUNT(arr) (sizeof(arr) / sizeof((arr)[0]))
+const int kNumPatches =
+    PATCH_COUNT(kInfiniteLives) + PATCH_COUNT(kUnlockNozzles) +
+    PATCH_COUNT(kUnlockYoshi) + PATCH_COUNT(kAnyFruitYoshi) +
+    PATCH_COUNT(kInfiniteJuice) + PATCH_COUNT(kExitAreaEverywhere) +
+    PATCH_COUNT(kFmvSkips) + PATCH_COUNT(kRespawnShines) +
+    PATCH_COUNT(kFruitNeverTimeout) + PATCH_COUNT(kMuteBgm) +
+    PATCH_COUNT(kShineOutfit) + PATCH_COUNT(kShinyShines) +
+    PATCH_COUNT(kShadowMarioHp) + PATCH_COUNT(kFreePauseBranch) +
+    PATCH_COUNT(kBlueCoinNop) + PATCH_COUNT(kNeverPauseIgt) +
+    PATCH_COUNT(kForcePlaza) + PATCH_COUNT(kFastText);
 struct PatchState {
     u32  orig;
     u32  last;
     bool captured;
 };
-PatchState gPatchState[kMaxPatches];
+PatchState gPatchState[kNumPatches];
 
 // =====================================================================
 // Asm-hook features: ports of the gecko C2 ("insert asm") codes.
@@ -511,11 +520,11 @@ void applyPatches() {
     int idx = 0;
     for (int f = 0; f < kNumFeatures; f++) {
         const Feature &feat = kFeatures[f];
+        if (idx + feat.num > kNumPatches) {
+            return;
+        }
         bool on = gSettings.getBool(feat.id);
         for (int j = 0; j < feat.num; j++, idx++) {
-            if (idx >= kMaxPatches) {
-                return;  // table outgrew gPatchState; raise kMaxPatches.
-            }
             const Patch &p = feat.patches[j];
             PatchState  &s = gPatchState[idx];
 
@@ -612,18 +621,19 @@ const ChoiceFeature kChoiceFeatures[] = {
 const int kNumChoiceFeatures =
     (int)(sizeof(kChoiceFeatures) / sizeof(kChoiceFeatures[0]));
 
-const int kMaxChoicePatches = 16;
-PatchState gChoiceState[kMaxChoicePatches];
+const int kNumChoicePatches =
+    PATCH_COUNT(kNozzlePatches) + PATCH_COUNT(kFluddPatches);
+PatchState gChoiceState[kNumChoicePatches];
 
 void applyChoices() {
     int idx = 0;
     for (int f = 0; f < kNumChoiceFeatures; f++) {
         const ChoiceFeature &cf = kChoiceFeatures[f];
+        if (idx + cf.num > kNumChoicePatches) {
+            return;
+        }
         u8                   c  = gSettings.get(cf.id);
         for (int j = 0; j < cf.num; j++, idx++) {
-            if (idx >= kMaxChoicePatches) {
-                return;  // raise kMaxChoicePatches.
-            }
             const ChoicePatch &p = cf.patches[j];
             PatchState        &s = gChoiceState[idx];
 
@@ -654,6 +664,8 @@ void writeGameCode(u32 addr, u32 word) {
 u32 branchWord(u32 from, u32 to) {
     return 0x48000000u | ((to - from) & 0x03FFFFFCu);
 }
+
+#undef PATCH_COUNT
 
 void featuresApply() {
     applyPatches();

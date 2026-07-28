@@ -327,7 +327,7 @@ bool inLoadTransition() {
 // Backing store for the on-screen status text. Lives in the mod's BSS (not the
 // pressured system heap, and not the stage heap that gets freed between levels)
 // so J2DTextBox::mStrPtr can point at it permanently. See SavestateManager ctor.
-char sStatusBuf[32];
+char sStatusBuf[12];
 
 } // namespace
 

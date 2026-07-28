@@ -78,6 +78,13 @@
 #define SUSAMUNE_ADDR_APP_PROC_STAGE_CASE \
     SUSAMUNE_MEM1_ADDR(0x800f9ea4u, 0x802a64a0u, 0x8029e3c0u)
 
+// Arena window reserved for the injected mod.
+#define SUSAMUNE_ADDR_MOD_BASE \
+    SUSAMUNE_MEM1_ADDR(0x80426020u, 0x80429800u, 0x80420d60u)
+#define SUSAMUNE_MOD_REGION_SIZE 0x8000u
+#define SUSAMUNE_SCRATCH 0x40u // idk
+#define SUSAMUNE_MOD_BLOB_MAX_SIZE (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
+
 // This is an optional Quick-Freeze practice-code heap flag, not a game-map symbol.
 #define SUSAMUNE_ADDR_QF_TIMER_RESET \
     SUSAMUNE_MEM1_ADDR(0x817f00b3u, 0x817f00b3u, 0x817f00b3u)
@@ -95,7 +102,7 @@
 // .gct and its handler have been loaded and have lowered the arena top --
 // susamune reserves nothing there.
 #define SUSAMUNE_ADDR_MOD_SCRATCH \
-    SUSAMUNE_MEM1_ADDR(0x8042e010u, 0x804317f0u, 0x80428d50u)
+    (SUSAMUNE_ADDR_MOD_BASE + SUSAMUNE_MOD_BLOB_MAX_SIZE)
 
 // One word: the frame of the last TShine::touchPlayer, for No Shine Get
 // Animation's debounce (features.cpp).
