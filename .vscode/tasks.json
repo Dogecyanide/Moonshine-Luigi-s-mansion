@@ -4,7 +4,7 @@
         {
             "label": "Configure (Dolphin)",
             "type": "shell",
-            "command": "cmake --preset savestates_emu",
+            "command": "cmake --preset dev_emu",
             "options": {
                 "cwd": "${workspaceFolder}"
             },

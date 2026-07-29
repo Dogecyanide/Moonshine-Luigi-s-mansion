@@ -13,6 +13,7 @@
 
 #include "susamune/menu.hxx"
 #include "susamune/binds.hxx"
+#include "susamune/glyphs.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/util.hxx"
 #if ENABLE_DEBUG_WARPS
@@ -27,26 +28,6 @@
 #include "JKernel/JKRHeap.hxx"  // placement new (operator new(size_t, void*))
 
 // Objects are placement-new'd into BSS buffers so the menu needs no heap.
-
-// Controller-button icon glyphs in the system font (standard_fontEx.bfn). Each
-// is the glyph's 2-byte Shift-JIS code: J2DPrint sees the 0x81 lead byte, pulls
-// the trail byte, and maps the pair to the icon. Kept as individual string
-// literals so the \x escapes never run together (\x is greedy within a literal)
-// and so callers can concatenate them with text: BTN_A " Select".
-#define BTN_A "\x81\x97"
-#define BTN_B "\x81\x94"
-#define BTN_L "\x81\x83"
-#define BTN_R "\x81\x84"
-#define BTN_C "\x81\x93"  // C-stick
-
-// Full-width symbol glyphs. This font's ASCII->full-width remap is disabled
-// (its min map startCode is 0x20, not >=0x8000), so punctuation like '&' must
-// be given as its 2-byte code directly -- a plain ASCII '&' resolves to the
-// blank default glyph.
-#define SYM_LEFT "\x81\xa9"
-#define SYM_UP   "\x81\xaa"
-#define SYM_RIGHT "\x81\xa8"
-#define SYM_DOWN "\x81\xab"
 
 namespace {
 
@@ -121,10 +102,11 @@ protected:
     void drawScrollHints(Menu *menu, int x, int y, int w, int h, int start, int end,
                          int count) {
         if (start > 0) {
-            menu->drawText(SYM_UP, x + w - 12, y - ROW_H + 2, ROW_SZ, ROW_SZ, cRowDim());
+            menu->drawText(SUSAMUNE_GLYPH_UP, x + w - 12, y - ROW_H + 2,
+                           ROW_SZ, ROW_SZ, cRowDim());
         }
         if (end < count) {
-            menu->drawText(SYM_DOWN, x + w - 12, y + h - ROW_SZ,
+            menu->drawText(SUSAMUNE_GLYPH_DOWN, x + w - 12, y + h - ROW_SZ,
                            ROW_SZ, ROW_SZ, cRowDim());
         }
     }
@@ -485,8 +467,9 @@ public:
         drawScrollHints(menu, x, y, w, h, start, end, BIND_COUNT);
 
         menu->drawText(gBinds.recording()
-                           ? "Release a button to set, or " BTN_C " to cancel"
-                           : BTN_A " Set bind    " BTN_B " Clear",
+                           ? "Release a button to set, or " SUSAMUNE_GLYPH_C " to cancel"
+                           : SUSAMUNE_GLYPH_A " Set bind    "
+                             SUSAMUNE_GLYPH_B " Clear",
                        x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
     }
 
@@ -753,10 +736,10 @@ void Menu::drawTabStrip(int x, int y, int w) {
 
     // Scroll chevrons when tabs overflow either edge.
     if (mTabFirst > 0) {
-        drawText(SYM_LEFT, x - 2, y + 6, TAB_SZ, TAB_SZ, cAccent());
+        drawText(SUSAMUNE_GLYPH_LEFT, x - 2, y + 6, TAB_SZ, TAB_SZ, cAccent());
     }
     if (last < mNumTabs - 1) {
-        drawText(SYM_RIGHT, x + w - TAB_CHEV + 2, y + 6,
+        drawText(SUSAMUNE_GLYPH_RIGHT, x + w - TAB_CHEV + 2, y + 6,
                  TAB_SZ, TAB_SZ, cAccent());
     }
 }
@@ -834,8 +817,9 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     // The close hint names the live menu bind rather than a fixed combo, since
     // it is user-configurable (and re-bindable to something unguessable).
     {
-        const char *hint = BTN_L "/" BTN_R " Tabs    " BTN_C " Move    "
-                           BTN_A " Select    ";
+        const char *hint = SUSAMUNE_GLYPH_L "/" SUSAMUNE_GLYPH_R " Tabs    "
+                           SUSAMUNE_GLYPH_C " Move    "
+                           SUSAMUNE_GLYPH_A " Select    ";
         int hx = PANEL_X + PAD;
         drawText(hint, hx, FOOTER_Y, FOOT_SZ, FOOT_SZ, cFooter());
         hx += textWidth(hint, FOOT_SZ);

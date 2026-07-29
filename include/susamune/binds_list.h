@@ -32,26 +32,27 @@
     X(BIND_SAVESTATE_LOAD,     "savestate_load")
 
 // The bindable buttons, as (GameCube button bit, ini token, menu glyph). The
-// bits are the hardware PADStatus::mButton bits, which is also what
-// JUTGamePad::EButtons uses.
+// mod defines the regional glyph macros in glyphs.hxx; the launcher ignores
+// that field. The bits are the hardware PADStatus::mButton bits, which is also
+// what JUTGamePad::EButtons uses.
 //
 // Order matters twice over: it is the order buttons are listed in the menu
 // and in susamune.ini ("X+DUp"). The analog sticks are
 // deliberately absent; the menu reserves the C-stick for navigating while a
 // bind is being recorded.
 #define SUSAMUNE_BIND_BUTTON_LIST(X)                                          \
-    X(0x0100u, "A",      "\x81\x97")                                         \
-    X(0x0200u, "B",      "\x81\x94")                                         \
-    X(0x0400u, "X",      "\x81\x7b")                                         \
-    X(0x0800u, "Y",      "\x81\x8f")                                         \
-    X(0x0040u, "L",      "\x81\x83")                                         \
-    X(0x0020u, "R",      "\x81\x84")                                         \
-    X(0x0010u, "Z",      "\x81\x90")                                         \
+    X(0x0100u, "A",      SUSAMUNE_GLYPH_A)                                   \
+    X(0x0200u, "B",      SUSAMUNE_GLYPH_B)                                   \
+    X(0x0400u, "X",      SUSAMUNE_GLYPH_X)                                   \
+    X(0x0800u, "Y",      SUSAMUNE_GLYPH_Y)                                   \
+    X(0x0040u, "L",      SUSAMUNE_GLYPH_L)                                   \
+    X(0x0020u, "R",      SUSAMUNE_GLYPH_R)                                   \
+    X(0x0010u, "Z",      SUSAMUNE_GLYPH_Z)                                   \
     X(0x1000u, "Start",  "Start")                                             \
-    X(0x0001u, "DLeft",  "D" "\x81\xa9")                                     \
-    X(0x0004u, "DDown",  "D" "\x81\xab")                                     \
-    X(0x0008u, "DUp",    "D" "\x81\xaa")                                     \
-    X(0x0002u, "DRight", "D" "\x81\xa8")
+    X(0x0001u, "DLeft",  "D" SUSAMUNE_GLYPH_LEFT)                            \
+    X(0x0004u, "DDown",  "D" SUSAMUNE_GLYPH_DOWN)                            \
+    X(0x0008u, "DUp",    "D" SUSAMUNE_GLYPH_UP)                              \
+    X(0x0002u, "DRight", "D" SUSAMUNE_GLYPH_RIGHT)
 
 // Union of the bits above: everything a bind may contain. Input is masked with
 // this before comparing, so a bind matches on the bindable buttons only and

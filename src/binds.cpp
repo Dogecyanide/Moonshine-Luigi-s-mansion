@@ -9,6 +9,7 @@
 #include "susamune/binds.hxx"
 
 #include "JSystem/JUtility/JUTGamePad.hxx"
+#include "susamune/glyphs.hxx"
 #include "susamune/util.hxx"
 
 namespace {
@@ -31,8 +32,7 @@ const BindButton kButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_BIND_BUTTON_R
 
 const int kNumButtons = (int)(sizeof(kButtons) / sizeof(kButtons[0]));
 
-// standard_fontEx.bfn maps the Shift-JIS full-width ampersand to this glyph.
-const char kDisplaySeparator[] = "\x81\x95";
+const char kDisplaySeparator[] = SUSAMUNE_GLYPH_AMP;
 
 // Button bits, spelled with the JUTGamePad names so the defaults read like the
 // combos in doc/gecko_codes.md.
@@ -56,7 +56,7 @@ const BindDesc kBindDescs[BIND_COUNT] = {
     { "Spawn Yoshi: pink", (u16)(kY | kDDown) },
     { "Fast forward 4x", (u16)(kB | kDLeft) },
     { "Fast forward 8x", (u16)(kB | kDRght) },
-    { "Open \x81\x95 close menu", (u16)(kY | kStart) },
+    { "Open " SUSAMUNE_GLYPH_AMP " close menu", (u16)(kY | kStart) },
     { "Savestate: save", kDLeft },
     { "Savestate: load", kDRght },
 };

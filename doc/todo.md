@@ -23,7 +23,7 @@
 - [ ] Switch everything to a single Clang compiler (based on the kuribo tree) that does PowerPC and ARM to simplify dependencies.
 - [ ] QFT doesnt pause on shine get grab when no shine get animation is on (maybe just my qft settings? probably not)
 - [ ] Chatgpt critical review that codes have been implemented accurately
-- [ ] update readme its not just savestates anymore
+- [ ] update readme its not just savestates anymore. update credits to people who made the codes
 - [ ] sound fix (warspyking)
 
 ### Bindings
