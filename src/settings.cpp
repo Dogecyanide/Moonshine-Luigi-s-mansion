@@ -74,6 +74,9 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     { "Stage intro skip", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
     { "No shine get animation", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
     { "BGM slot counter", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
+
+    // Appended to preserve the persisted values[] layout.
+    { "Disable Z Menu", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_QOL },
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'

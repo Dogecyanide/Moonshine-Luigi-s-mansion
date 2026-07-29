@@ -194,6 +194,13 @@ const Patch kFastText[] = {
     FWORD(0x800E4888, 0x80291340, 0x802890CC, 0x60000000),
 };
 
+// Disable Z Menu: skip the updateGameMode path that opens the stock map.
+// Z remains available to mod binds and every other game input path.
+//   jp C60EB020->800EB02C / us C6297A64->80297A70 / pal C628F8FC->8028F908
+const Patch kDisableZMenu[] = {
+    FWORD(0x800EB020, 0x80297A64, 0x8028F8FC, 0x4800000C),
+};
+
 // Force Plaza Events: three "b +0x18" branches and two nops that reroute the
 // plaza-event setup; paired with the kForcePlazaAsm hook.
 //   jp 0410C4C8 / us 042B7810 / pal 042AF7E0 = 48000018 (b +0x18)
@@ -231,6 +238,7 @@ const Feature kFeatures[] = {
     FEAT(SETTING_NEVER_PAUSE_IGT, kNeverPauseIgt),
     FEAT(SETTING_FORCE_PLAZA_EVENTS, kForcePlaza),
     FEAT(SETTING_FAST_TEXT, kFastText),
+    FEAT(SETTING_DISABLE_Z_MENU, kDisableZMenu),
 };
 
 const int kNumFeatures = (int)(sizeof(kFeatures) / sizeof(kFeatures[0]));
