@@ -9,6 +9,7 @@
 #include "susamune/binds.hxx"
 
 #include "JSystem/JUtility/JUTGamePad.hxx"
+#include "susamune/util.hxx"
 
 namespace {
 
@@ -128,16 +129,6 @@ bool Binds::wasPressed(BindId id) const {
     return m != 0 && live() && mHeld == m && mPrevHeld != m;
 }
 
-bool Binds::isHeldSubset(BindId id) const {
-    u16 m = mMask[id];
-    return m != 0 && live() && (mHeld & m) == m;
-}
-
-bool Binds::wasPressedSubset(BindId id) const {
-    u16 m = mMask[id];
-    return m != 0 && live() && (mHeld & m) == m && (mPrevHeld & m) != m;
-}
-
 void Binds::update() {
     mPrevHeld = mHeld;
     mHeld = (u16)(JUTGamePad::mPadStatus[0].mButton & SUSAMUNE_BIND_BUTTON_MASK);
@@ -204,15 +195,11 @@ void Binds::format(u16 mask, char *out) {
         if (n > 0) {
             out[n++] = SUSAMUNE_BIND_SEPARATOR;
         }
-        for (const char *p = kButtons[i].token; *p; p++) {
-            out[n++] = *p;
-        }
+        n += Util::appendString(out + n, kButtons[i].token);
     }
 
     if (n == 0) {
-        for (const char *p = SUSAMUNE_BIND_NONE_TOKEN; *p; p++) {
-            out[n++] = *p;
-        }
+        n += Util::appendString(out + n, SUSAMUNE_BIND_NONE_TOKEN);
     }
     out[n] = '\0';
 }

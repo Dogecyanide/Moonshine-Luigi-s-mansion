@@ -82,8 +82,14 @@ public:
 
     // Same, but tolerating other buttons: true whenever the bind's buttons are
     // all down.
-    bool isHeldSubset(BindId id) const;
-    bool wasPressedSubset(BindId id) const;
+    bool isHeldSubset(BindId id) const {
+        u16 m = mMask[id];
+        return m != 0 && live() && (mHeld & m) == m;
+    }
+    bool wasPressedSubset(BindId id) const {
+        u16 m = mMask[id];
+        return m != 0 && live() && (mHeld & m) == m && (mPrevHeld & m) != m;
+    }
 
     // --- recording ---
     //

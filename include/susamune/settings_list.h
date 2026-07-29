@@ -54,6 +54,7 @@
     X(SETTING_NOZZLE_LOCK,          "nozzle_lock")                            \
     X(SETTING_INTRO_SKIP,           "intro_skip")                             \
     X(SETTING_STAGE_INTRO_SKIP,     "stage_intro_skip")                       \
-    X(SETTING_NO_SHINE_ANIM,        "no_shine_anim")
+    X(SETTING_NO_SHINE_ANIM,        "no_shine_anim")                         \
+    X(SETTING_SHOW_BGM_SLOTS,       "show_bgm_slots")
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

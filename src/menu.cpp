@@ -14,8 +14,10 @@
 #include "susamune/menu.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/util.hxx"
 #include "susamune/warp.hxx"
 
+#include "JSystem/JAudio/JASystem/JASTrackMgr.hxx"
 #include "J2D/J2DOrthoGraph.hxx"
 #include "J2D/J2DPane.hxx"  // J2DFillBox
 #include "J2D/J2DTextBox.hxx"
@@ -49,29 +51,6 @@ namespace {
 typedef JUtility::TColor Color;
 
 inline Color col(u8 r, u8 g, u8 b, u8 a) { return Color(r, g, b, a); }
-
-int strLen(const char *s) {
-    int n = 0;
-    while (s[n]) {
-        n++;
-    }
-    return n;
-}
-
-// Write `v` in decimal at `out` (no terminator) and return the digit count.
-// The mod links no standard library, so this stands in for sprintf("%u").
-int fmtUInt(char *out, u32 v) {
-    char rev[10];
-    int  n = 0;
-    do {
-        rev[n++] = (char)('0' + (v % 10));
-        v /= 10;
-    } while (v);
-    for (int i = 0; i < n; i++) {
-        out[i] = rev[n - 1 - i];
-    }
-    return n;
-}
 
 // -------- palette (built inline so nothing lives in static storage) -------
 inline Color cBackdrop()   { return col(6, 8, 14, 150); }    // full-screen dim
@@ -139,8 +118,9 @@ public:
 namespace {
 
 // Shared vertical-list helpers so every list-style tab scrolls the same way.
+// Keep multi-call helpers out of line; duplicating them costs hundreds of bytes.
 // Returns the index of the first row to draw so that `sel` stays visible.
-int listScrollStart(int sel, int count, int maxRows) {
+__attribute__((noinline)) int listScrollStart(int sel, int count, int maxRows) {
     if (count <= maxRows) {
         return 0;
     }
@@ -155,20 +135,52 @@ int listScrollStart(int sel, int count, int maxRows) {
 }
 
 // Draw the selection highlight bar behind a row.
-void drawRowHighlight(Menu *menu, int x, int y, int w, int rowH) {
+__attribute__((noinline)) void drawRowHighlight(Menu *menu, int x, int y, int w, int rowH) {
     menu->fillBox(x - 6, y - (rowH - 12) / 2, w + 12, rowH, cRowSelBg());
 }
 
 const int ROW_H = ROW_SZ + 8;
 
 // Wrap helper for a cursor over [0, n).
-int wrap(int v, int n) {
+__attribute__((noinline)) int wrap(int v, int n) {
     if (v < 0) {
         v += n;
     } else if (v >= n) {
         v -= n;
     }
     return v;
+}
+
+void bgmStatsDraw(Menu *menu) {
+    if (!gSettings.getBool(SETTING_SHOW_BGM_SLOTS) || !JASystem::TrackMgr::sRootTrack) {
+        return;
+    }
+
+    u32 freeRoots = 0;
+    for (int i = 0; i < 8; i++) {
+        if (!JASystem::TrackMgr::sRootTrack[i]) {
+            freeRoots++;
+        }
+    }
+
+    char text[20];
+    int  pos = 0;
+    text[pos++] = 'R';
+    text[pos++] = 'T';
+    text[pos++] = ':';
+    pos += Util::formatUInt(text + pos, freeRoots); 
+    text[pos++] = ' ';
+    text[pos++] = 'S';
+    text[pos++] = ':';
+    pos += Util::formatUInt(text + pos, JASystem::TrackMgr::seqRemain);
+    text[pos] = '\0';
+
+    const int size = 16;
+    const int tw = Menu::textWidth(text, size);
+    const int x    = 640 - 20 - tw;
+    const int y    = 480 - 80 - size;
+    menu->fillBox(x, y, tw + 1, size + 1, col(0, 0, 0, 180));
+    menu->drawText(text, x, y, size, size, col(255, 255, 255, 255));
 }
 
 }  // namespace
@@ -553,7 +565,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
 
 int Menu::textWidth(const char *s, int sizeX) {
     if (!sFont) {
-        return strLen(s) * sizeX * 3 / 4;  // pre-ctor fallback; never hit in draw
+        return 0;
     }
 
     // Mirror J2DPrint::parse, which is what J2DTextBox::draw runs through. Per
@@ -623,11 +635,7 @@ void Menu::switchTab(int dir) {
 // =====================================================================
 
 void Menu::toast(const char *msg) {
-    int i = 0;
-    for (; msg[i] && i < (int)sizeof(mToastBuf) - 1; i++) {
-        mToastBuf[i] = msg[i];
-    }
-    mToastBuf[i] = '\0';
+    Util::copyString(mToastBuf, sizeof(mToastBuf), msg);
     mToastFrames = kToastFrames;
 }
 
@@ -684,11 +692,8 @@ void Menu::pollSettingsSave() {
         // FatFS FRESULT, so the failure can be looked up (7 = write protected,
         // 9 = invalid object, ...).
         char buf[48];
-        int  n = 0;
-        for (const char *p = "Save failed (fs "; *p; p++) {
-            buf[n++] = *p;
-        }
-        n += fmtUInt(buf + n, gSettings.lastError());
+        int  n = Util::appendString(buf, "Save failed (fs ");
+        n += Util::formatUInt(buf + n, gSettings.lastError());
         buf[n++] = ')';
         buf[n]   = '\0';
         toast(buf);
@@ -802,6 +807,7 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     mOrtho = ortho;  // used by fillBox() to re-enter 2D state
     if (!mShown) {
         drawToast();  // still visible with the menu closed
+        bgmStatsDraw(this);
         return;
     }
 
@@ -841,6 +847,7 @@ void Menu::draw(J2DOrthoGraph *ortho) {
 
     // Last, so it sits above the panel rather than under the backdrop.
     drawToast();
+    bgmStatsDraw(this);
 }
 
 // =====================================================================

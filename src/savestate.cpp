@@ -59,6 +59,7 @@
 #include "susamune/binds.hxx"
 #include "susamune/mem2_map.h"
 #include "susamune/settings.hxx"
+#include "susamune/util.hxx"
 
 #include "Dolphin/CARD.h"
 #include "Dolphin/GX.h"
@@ -363,13 +364,8 @@ SavestateManager::SavestateManager() {
 }
 
 void SavestateManager::setStatus(const char *msg) {
-    // Copy into our static buffer (mStrPtr already points at it); do NOT call
-    // J2DTextBox::setString, which reallocates on the current/stage heap.
-    u32 i = 0;
-    for (; msg[i] != '\0' && i < sizeof(sStatusBuf) - 1; i++) {
-        sStatusBuf[i] = msg[i];
-    }
-    sStatusBuf[i] = '\0';
+    // Do NOT call J2DTextBox::setString; it reallocates on the stage heap.
+    Util::copyString(sStatusBuf, sizeof(sStatusBuf), msg);
 }
 
 bool SavestateManager::saveState() {
