@@ -39,7 +39,7 @@ jobs:
         run: python setup_venv.py
 
       - name: Configure console build
-        run: cmake --preset savestates_console -D VERS=${{ matrix.region }}
+        run: cmake --preset release_console -D VERS=${{ matrix.region }}
 
       - name: Build launcher
         run: cmake --build --preset console

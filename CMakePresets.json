@@ -7,15 +7,15 @@
     },
     "configurePresets": [
         {
-            "name": "savestates_console",
-            "displayName": "Savestates only (Console)",
+            "name": "release_console",
+            "displayName": "Release build (Console)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build",
             "hidden": false
         },
         {
-            "name": "savestates_emu",
-            "displayName": "Savestates only (Dolphin)",
+            "name": "release_emu",
+            "displayName": "Release build (Dolphin)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
@@ -52,7 +52,7 @@
         {
             "name": "console",
             "hidden": false,
-            "configurePreset": "savestates_console",
+            "configurePreset": "release_console",
             "targets": [
                 "launcher"
             ]
@@ -60,7 +60,7 @@
         {
             "name": "emu_iso",
             "hidden": false,
-            "configurePreset": "savestates_emu",
+            "configurePreset": "release_emu",
             "targets": [
                 "iso"
             ]

@@ -1,3 +1,11 @@
+## 2026-07-28
+
+> move all the initialization to appinit?
+
+Not possible. They cannot safely initialize directly in onAppInit() because, at that point:
+* The current heap is a temporary boot heap that is later destroyed.
+* gpSystemFont is still null.
+
 ## 2026-07-18
 
 Miscellaneous notes from zeldocto conversation that have not been sorted into gecko_codes.md and todo.md:

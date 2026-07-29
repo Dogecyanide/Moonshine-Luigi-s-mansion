@@ -31,27 +31,27 @@
     X(BIND_SAVESTATE_SAVE,     "savestate_save")                              \
     X(BIND_SAVESTATE_LOAD,     "savestate_load")
 
-// The bindable buttons, as (GameCube button bit, ini/menu token). The bits are
-// the hardware PADStatus::mButton bits, which is also what JUTGamePad::EButtons
-// uses -- so a bind mask can be compared against either source unchanged.
+// The bindable buttons, as (GameCube button bit, ini token, menu glyph). The
+// bits are the hardware PADStatus::mButton bits, which is also what
+// JUTGamePad::EButtons uses.
 //
-// Order matters twice over: it is the order buttons are listed in a rendered
-// combo ("X+DUp"), in the menu and in susamune.ini alike. The analog sticks are
+// Order matters twice over: it is the order buttons are listed in the menu
+// and in susamune.ini ("X+DUp"). The analog sticks are
 // deliberately absent; the menu reserves the C-stick for navigating while a
 // bind is being recorded.
 #define SUSAMUNE_BIND_BUTTON_LIST(X)                                          \
-    X(0x0100u, "A")                                                           \
-    X(0x0200u, "B")                                                           \
-    X(0x0400u, "X")                                                           \
-    X(0x0800u, "Y")                                                           \
-    X(0x0040u, "L")                                                           \
-    X(0x0020u, "R")                                                           \
-    X(0x0010u, "Z")                                                           \
-    X(0x1000u, "Start")                                                       \
-    X(0x0001u, "DLeft")                                                       \
-    X(0x0004u, "DDown")                                                       \
-    X(0x0008u, "DUp")                                                         \
-    X(0x0002u, "DRight")
+    X(0x0100u, "A",      "\x81\x97")                                         \
+    X(0x0200u, "B",      "\x81\x94")                                         \
+    X(0x0400u, "X",      "\x81\x7b")                                         \
+    X(0x0800u, "Y",      "\x81\x8f")                                         \
+    X(0x0040u, "L",      "\x81\x83")                                         \
+    X(0x0020u, "R",      "\x81\x84")                                         \
+    X(0x0010u, "Z",      "\x81\x90")                                         \
+    X(0x1000u, "Start",  "Start")                                             \
+    X(0x0001u, "DLeft",  "D" "\x81\xa9")                                     \
+    X(0x0004u, "DDown",  "D" "\x81\xab")                                     \
+    X(0x0008u, "DUp",    "D" "\x81\xaa")                                     \
+    X(0x0002u, "DRight", "D" "\x81\xa8")
 
 // Union of the bits above: everything a bind may contain. Input is masked with
 // this before comparing, so a bind matches on the bindable buttons only and
@@ -62,8 +62,8 @@
 // fourth is pressed.
 #define SUSAMUNE_BIND_MAX_BUTTONS 4
 
-// Separator between buttons in the ini / menu rendering of a combo, and the
-// token written for a bind with no buttons at all.
+// Separator between buttons in the ini and the token written for a bind with
+// no buttons at all. The menu uses the font's ampersand glyph instead.
 #define SUSAMUNE_BIND_SEPARATOR '+'
 #define SUSAMUNE_BIND_NONE_TOKEN "none"
 

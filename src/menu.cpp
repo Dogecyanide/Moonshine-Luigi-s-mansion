@@ -35,19 +35,17 @@
 // and so callers can concatenate them with text: BTN_A " Select".
 #define BTN_A "\x81\x97"
 #define BTN_B "\x81\x94"
-#define BTN_X "\x81\x7b"
-#define BTN_Y "\x81\x8f"
 #define BTN_L "\x81\x83"
 #define BTN_R "\x81\x84"
 #define BTN_C "\x81\x93"  // C-stick
-#define BTN_Z "\x81\x90"
 
 // Full-width symbol glyphs. This font's ASCII->full-width remap is disabled
 // (its min map startCode is 0x20, not >=0x8000), so punctuation like '&' must
 // be given as its 2-byte code directly -- a plain ASCII '&' resolves to the
 // blank default glyph.
-#define SYM_AMP "\x81\x95"  // full-width ampersand
-#define SYM_UP  "\x81\xaa"
+#define SYM_LEFT "\x81\xa9"
+#define SYM_UP   "\x81\xaa"
+#define SYM_RIGHT "\x81\xa8"
 #define SYM_DOWN "\x81\xab"
 
 namespace {
@@ -755,10 +753,11 @@ void Menu::drawTabStrip(int x, int y, int w) {
 
     // Scroll chevrons when tabs overflow either edge.
     if (mTabFirst > 0) {
-        drawText("<", x, y + 6, TAB_SZ, TAB_SZ, cAccent());
+        drawText(SYM_LEFT, x - 2, y + 6, TAB_SZ, TAB_SZ, cAccent());
     }
     if (last < mNumTabs - 1) {
-        drawText(">", x + w - TAB_CHEV + 2, y + 6, TAB_SZ, TAB_SZ, cAccent());
+        drawText(SYM_RIGHT, x + w - TAB_CHEV + 2, y + 6,
+                 TAB_SZ, TAB_SZ, cAccent());
     }
 }
 

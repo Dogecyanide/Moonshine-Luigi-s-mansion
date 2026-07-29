@@ -59,7 +59,23 @@ These features may have binds, menu settings, and/or their own GUI elements, and
 
 TBD
 
-Stages 
+open with Z. will need an option to disable Z menu to not conflict
+
+1st wheel
+- Bianco Hills
+- Ricco Harbor
+- Gelato Beach
+- Pinna Park
+- Sirena Beach
+- Pianta Village 
+- Noki Bay
+- Corona Mountain
+Center: Delfino 
+
+2nd wheel - Normally showing episodes 1 - 8, subareas at center
+Or Press X to switch to Subareas and Secrets?
+
+Subareas/secrets will depend on the level you are in. Take all the sublevels and secrets listed on the code
 
 Cap at 8. Less than 8 should definitely not fill the whole circle (align to quadrants).
 More than 8 TBD.

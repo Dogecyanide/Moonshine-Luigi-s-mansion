@@ -49,11 +49,10 @@ struct BindDesc {
     u16         defaultMask;  // combo the mod ships with
 };
 
-// Buffer size for format(). Sized for *every* bindable button at once (43
-// bytes), not just the four a bind may hold, so a hand-edited susamune.ini
-// with an over-long combo cannot overrun a caller's buffer before set()
-// rejects it.
-const int kBindTextMax = 48;
+// Buffer size for format(). Sized for *every* bindable button at once, not
+// just the four a bind may hold, so a hand-edited susamune.ini with an
+// over-long combo cannot overrun a caller's buffer before set() rejects it.
+const int kBindTextMax = 64;
 
 class Binds {
 public:
@@ -105,7 +104,7 @@ public:
     // Buttons accumulated so far, for live feedback in the menu.
     u16    recordPreview() const { return mRecAccum; }
 
-    // Render a combo as "X+DUp", or SUSAMUNE_BIND_NONE_TOKEN when empty.
+    // Render a combo with ampersand glyphs, or SUSAMUNE_BIND_NONE_TOKEN when empty.
     // `out` must hold kBindTextMax bytes.
     static void format(u16 mask, char *out);
 

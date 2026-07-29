@@ -59,13 +59,17 @@
 #include "susamune/binds.hxx"
 #include "susamune/mem2_map.h"
 #include "susamune/settings.hxx"
+#if ENABLE_SAVESTATE_DBG
 #include "susamune/util.hxx"
+#endif
 
 #include "Dolphin/CARD.h"
 #include "Dolphin/GX.h"
 #include "Dolphin/OS.h"
+#if ENABLE_SAVESTATE_DBG
 #include "J2D/J2DOrthoGraph.hxx"
 #include "J2D/J2DTextBox.hxx"
+#endif
 #include "JKernel/JKRHeap.hxx"
 #include "JUtility/JUTGamePad.hxx"
 #include "SMS/GC2D/SmplFader.hxx"
@@ -325,10 +329,10 @@ bool inLoadTransition() {
     return false;
 }
 
-// Backing store for the on-screen status text. Lives in the mod's BSS (not the
-// pressured system heap, and not the stage heap that gets freed between levels)
-// so J2DTextBox::mStrPtr can point at it permanently. See SavestateManager ctor.
+#if ENABLE_SAVESTATE_DBG
+// Kept out of the stage heap so the textbox survives stage transitions.
 char sStatusBuf[12];
+#endif
 
 } // namespace
 
@@ -338,12 +342,14 @@ char sStatusBuf[12];
 // ---------------------------------------------------------------------
 
 SavestateManager::SavestateManager() {
-    mLoadPending                 = false;
-    mInfoText                    = new J2DTextBox(gpSystemFont->mFont, "ready");
-    mInfoText->mCharSizeX        = 18;
-    mInfoText->mCharSizeY        = 18;
-    mInfoText->mGradientBottom   = { 255, 200, 0, 255 };
-    mInfoText->mGradientTop      = { 255, 200, 0, 255 };
+    mLoadPending = false;
+
+#if ENABLE_SAVESTATE_DBG
+    mInfoText                  = new J2DTextBox(gpSystemFont->mFont, "ready");
+    mInfoText->mCharSizeX      = 18;
+    mInfoText->mCharSizeY      = 18;
+    mInfoText->mGradientBottom = { 255, 200, 0, 255 };
+    mInfoText->mGradientTop    = { 255, 200, 0, 255 };
 
     // J2DTextBox::setString does `delete[] mStrPtr; mStrPtr = new char[...]` on
     // whatever heap is current -- which during gameplay is the stage heap. That
@@ -357,35 +363,41 @@ SavestateManager::SavestateManager() {
     }
     mInfoText->mStrPtr = sStatusBuf;
     setStatus("ready");
+#endif
 
     // Mark the snapshot buffer empty so a stale MEM2 load doesn't
     // accidentally pass the magic check after a cold boot.
     headerPtr()->magic = 0;
 }
 
+#if ENABLE_SAVESTATE_DBG
 void SavestateManager::setStatus(const char *msg) {
     // Do NOT call J2DTextBox::setString; it reallocates on the stage heap.
     Util::copyString(sStatusBuf, sizeof(sStatusBuf), msg);
 }
+#define SET_STATUS(msg) setStatus(msg)
+#else
+#define SET_STATUS(msg) ((void)0)
+#endif
 
 bool SavestateManager::saveState() {
     // Refuse while a stage load is in flight or the intro sequence is playing;
     // the heap is not yet stable there. See inLoadTransition().
     if (inLoadTransition()) {
-        setStatus("E:loading");
+        SET_STATUS("E:loading");
         return false;
     }
 
     JKRHeap *heap = gpApplication.mCurrentHeap;
     if (!heap) {
-        setStatus("E:noheap");
+        SET_STATUS("E:noheap");
         return false;
     }
 
     const u32 heapStart = reinterpret_cast<u32>(heap);
     const u32 heapEnd   = reinterpret_cast<u32>(heap->mEnd);
     if (heapEnd <= heapStart) {
-        setStatus("E:badheap");
+        SET_STATUS("E:badheap");
         return false;
     }
     const u32 heapSize  = heapEnd - heapStart;
@@ -400,7 +412,7 @@ bool SavestateManager::saveState() {
     }
     total += heapSize;
     if (total + kHeaderSize > kSnapshotReservedSize) {
-        setStatus("E:size");
+        SET_STATUS("E:size");
         return false;
     }
 
@@ -506,7 +518,7 @@ bool SavestateManager::saveState() {
     unmuteAudioDma(dma);
     OSRestoreInterrupts(ints);
 
-    setStatus("saved");
+    SET_STATUS("saved");
     return true;
 }
 
@@ -515,27 +527,27 @@ bool SavestateManager::loadState() {
     // overwriting a heap the setup thread is still filling crashes. See
     // inLoadTransition().
     if (inLoadTransition()) {
-        setStatus("E:loading");
+        SET_STATUS("E:loading");
         return false;
     }
 
     SavestateHeader *h = headerPtr();
     if (h->magic != kSnapshotMagic) {
-        setStatus("E:nosnap");
+        SET_STATUS("E:nosnap");
         return false;
     }
     if (h->version != kSnapshotVersion) {
-        setStatus("E:version");
+        SET_STATUS("E:version");
         return false;
     }
     if (h->game_version != SUSAMUNE_GAME_VERSION) {
-        setStatus("E:region");
+        SET_STATUS("E:region");
         return false;
     }
 
     JKRHeap *heap = gpApplication.mCurrentHeap;
     if (!heap) {
-        setStatus("E:noheap");
+        SET_STATUS("E:noheap");
         return false;
     }
 
@@ -543,13 +555,13 @@ bool SavestateManager::loadState() {
     // (different scenario, different boot path), restoring would scribble
     // stale pointers all over the place. Refuse the load.
     if (reinterpret_cast<u32>(heap) != h->heap_addr) {
-        setStatus("E:hpaddr");
+        SET_STATUS("E:hpaddr");
         return false;
     }
     const u32 heapSize = reinterpret_cast<u32>(heap->mEnd)
                        - reinterpret_cast<u32>(heap);
     if (heapSize != h->heap_size) {
-        setStatus("E:hpsize");
+        SET_STATUS("E:hpsize");
         return false;
     }
 
@@ -558,7 +570,7 @@ bool SavestateManager::loadState() {
     // new director's setup -- and not the use case we're after.
     if (h->area_id    != gpApplication.mCurrentScene.mAreaID
      || h->episode_id != gpApplication.mCurrentScene.mEpisodeID) {
-        setStatus("E:scene");
+        SET_STATUS("E:scene");
         return false;
     }
 
@@ -574,7 +586,7 @@ bool SavestateManager::loadState() {
         int spins = 0;
         while (gpCardManager->getLastStatus() == CARD_ERROR_BUSY) {
             if (++spins > 600) { // ~10 s @ 60 Hz of yielding
-                setStatus("E:cardbsy");
+                SET_STATUS("E:cardbsy");
                 return false;
             }
             OSYieldThread();
@@ -633,7 +645,7 @@ bool SavestateManager::loadState() {
     unmuteAudioDma(dma);
     OSRestoreInterrupts(ints);
 
-    setStatus("loaded");
+    SET_STATUS("loaded");
     return true;
 }
 
@@ -646,7 +658,7 @@ void SavestateManager::updateHook() {
         // made those systems consume half-live/half-restored state. Defer the
         // operation until after the post-render GXDrawDone barrier instead.
         mLoadPending = true;
-        setStatus("loading");
+        SET_STATUS("loading");
     }
 }
 
@@ -660,11 +672,11 @@ void SavestateManager::processPendingLoad() {
     loadState();
 }
 
+#if ENABLE_SAVESTATE_DBG
 void SavestateManager::draw(J2DOrthoGraph *ortho) {
     (void)ortho;
-#if ENABLE_SAVESTATE_DBG
     if (mInfoText) {
         mInfoText->draw(20, 60);
     }
-#endif
 }
+#endif

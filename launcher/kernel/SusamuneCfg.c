@@ -49,10 +49,9 @@ static const char *const BindKeys[] = { SUSAMUNE_BIND_LIST(SUSAMUNE_BIND_KEY) };
 
 #define BIND_KEY_COUNT ((u32)(sizeof(BindKeys) / sizeof(BindKeys[0])))
 
-// Button bit <-> token, from the list the mod renders combos with, so the
-// spelling in the file matches the spelling in the menu.
+// Button bit <-> ini token. The third list field is the mod's font glyph.
 struct BindButton { u16 bit; const char *token; };
-#define SUSAMUNE_BIND_BUTTON_ROW(bit, token) { (u16)(bit), token },
+#define SUSAMUNE_BIND_BUTTON_ROW(bit, token, display) { (u16)(bit), token },
 static const struct BindButton BindButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_BIND_BUTTON_ROW) };
 #undef SUSAMUNE_BIND_BUTTON_ROW
 

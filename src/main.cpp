@@ -175,7 +175,9 @@ extern "C" void afterDraw() {
         
         if (gMenu)
             gMenu->draw(&ortho);
+#if ENABLE_SAVESTATE_DBG
         if (gSavestateMgr)
             gSavestateMgr->draw(&ortho);
+#endif
     }
 }

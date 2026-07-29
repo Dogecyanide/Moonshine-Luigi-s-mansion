@@ -1,10 +1,10 @@
 #ifndef _SUSAMUNE_SAVESTATE_HXX
 #define _SUSAMUNE_SAVESTATE_HXX
 
+#if ENABLE_SAVESTATE_DBG
 #include "J2D/J2DOrthoGraph.hxx"
 #include "J2D/J2DTextBox.hxx"
-#include "SMS/Player/MarioGamePad.hxx"
-
+#endif
 
 class SavestateManager {
 public:
@@ -20,17 +20,21 @@ public:
     // for the current frame has finished.
     void processPendingLoad();
 
+#if ENABLE_SAVESTATE_DBG
     // Drawn after the scene each frame, shows "saved" / "loaded" / error.
     void draw(J2DOrthoGraph *ortho);
+#endif
 
     // Public so callers can trigger from elsewhere (e.g. a debug menu).
     bool saveState();
     bool loadState();
 
 private:
+#if ENABLE_SAVESTATE_DBG
     void setStatus(const char *msg);
 
     J2DTextBox *mInfoText;
+#endif
     bool mLoadPending;
 };
 

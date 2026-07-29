@@ -8,21 +8,23 @@
 - Delfino Piranha Plant #1 (bianco hills) crash: invalid read from 0x61f9f244, pc = 0x800bc614. Only on emulator for some reason?
 - FLUDD sounds break when loading after shine spawn. Might not be fixable reasonably. Sort of inevitable since we don't completely save/restore audio state. Can also just reload the level.
 
-## TODO
+## Scratch
 
-- [ ] [Bindings menu](#bindings)
+- [x] [Bindings menu](#bindings)
 - [x] [SD card settings persistence](#sd-card-persistence)
 - [ ] [Customizable GUI support](#customizable-gui)
 - [ ] Gecko code porting (gecko_codes.md)
-- [ ] gui wonkiness, text moving around when switching to on/off etc. needs to be right-justified
 - [ ] Emulator autodetect.
+- [ ] Settings menu pauses the game
 - [ ] probably have a separate way to control default settings rather than autosaving? and rather than pressing a button to just save the current
-- [ ] dont require different channels for different regions. load a bin from SD card
+    - A bit problematic to deal with because we _sorta_ need two different settings structs, and I dont want that, so we have to be more clever
+- [ ] Dont require different channels for different regions. load a bin from SD card
 - [ ] Input tracing feature. Needs planning.
 - [ ] Switch everything to a single Clang compiler (based on the kuribo tree) that does PowerPC and ARM to simplify dependencies.
 - [ ] QFT doesnt pause on shine get grab when no shine get animation is on (maybe just my qft settings? probably not)
 - [ ] Chatgpt critical review that codes have been implemented accurately
-- [ ] whole debug text thing for savestates should be disabled when the ifdef flag is off not just the call to draw
+- [ ] update readme its not just savestates anymore
+- [ ] sound fix (warspyking)
 
 ### Bindings
 

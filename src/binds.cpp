@@ -23,12 +23,16 @@ const char *const kIniKeys[BIND_COUNT] = { SUSAMUNE_BIND_LIST(SUSAMUNE_BIND_KEY)
 struct BindButton {
     u16         bit;
     const char *token;
+    const char *display;
 };
-#define SUSAMUNE_BIND_BUTTON_ROW(bit, token) { (u16)(bit), token },
+#define SUSAMUNE_BIND_BUTTON_ROW(bit, token, display) { (u16)(bit), token, display },
 const BindButton kButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_BIND_BUTTON_ROW) };
 #undef SUSAMUNE_BIND_BUTTON_ROW
 
 const int kNumButtons = (int)(sizeof(kButtons) / sizeof(kButtons[0]));
+
+// standard_fontEx.bfn maps the Shift-JIS full-width ampersand to this glyph.
+const char kDisplaySeparator[] = "\x81\x95";
 
 // Button bits, spelled with the JUTGamePad names so the defaults read like the
 // combos in doc/gecko_codes.md.
@@ -52,7 +56,7 @@ const BindDesc kBindDescs[BIND_COUNT] = {
     { "Spawn Yoshi: pink", (u16)(kY | kDDown) },
     { "Fast forward 4x", (u16)(kB | kDLeft) },
     { "Fast forward 8x", (u16)(kB | kDRght) },
-    { "Open/close menu", (u16)(kY | kStart) },
+    { "Open \x81\x95 close menu", (u16)(kY | kStart) },
     { "Savestate: save", kDLeft },
     { "Savestate: load", kDRght },
 };
@@ -193,9 +197,9 @@ void Binds::format(u16 mask, char *out) {
             continue;
         }
         if (n > 0) {
-            out[n++] = SUSAMUNE_BIND_SEPARATOR;
+            n += Util::appendString(out + n, kDisplaySeparator);
         }
-        n += Util::appendString(out + n, kButtons[i].token);
+        n += Util::appendString(out + n, kButtons[i].display);
     }
 
     if (n == 0) {
