@@ -87,6 +87,16 @@ inline Color cRowDim()     { return col(120, 130, 150, 255); }
 inline Color cValue()      { return col(120, 220, 150, 255); }// setting value
 inline Color cFooter()     { return col(104, 114, 136, 255); }
 
+// -------- font metrics ----------------------------------------------------
+// Cached in Menu::Menu so the static textWidth() can reach them. They describe
+// the same font drawText() renders with (gpSystemFont), so measuring matches
+// what J2DPrint (via J2DTextBox::draw) actually lays out.
+JUTFont *sFont        = nullptr;
+int      sFontWidth   = 1;      // design cell width; every advance scales by size/this
+int      sCharSpacing = 0;      // J2DTextBox's spacing, handed to J2DPrint
+bool     sFontFixed   = false;  // font advances every glyph by sFontFixedW
+int      sFontFixedW  = 0;
+
 // -------- layout ----------------------------------------------------------
 const int PANEL_X = 40;
 const int PANEL_Y = 20;
@@ -98,6 +108,10 @@ const int TITLE_SZ  = 20;
 const int TAB_SZ    = 18;
 const int ROW_SZ    = 16;
 const int FOOT_SZ   = 12;
+
+const int TAB_GAP   = 20;  // space between tabs
+const int TAB_INNER = 12;  // highlight padding around a tab's text
+const int TAB_CHEV  = 16;  // strip margin reserved for the scroll chevrons
 
 const int TAB_STRIP_Y = PANEL_Y + 46;
 const int TAB_STRIP_H = 30;
@@ -406,7 +420,7 @@ public:
         }
         if (rapid & TMarioGamePad::A) {
             gBinds.beginRecord((BindId)mSel);
-        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
+        } else if (rapid & TMarioGamePad::B) {
             gBinds.set((BindId)mSel, 0);  // clear
         }
     }
@@ -463,7 +477,7 @@ public:
 
         menu->drawText(gBinds.recording()
                            ? "Release a button to set, or " BTN_C " to cancel"
-                           : BTN_A " Set bind    " BTN_C "-Left Clear",
+                           : BTN_A " Set bind    " BTN_B " Clear",
                        x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
     }
 
@@ -493,7 +507,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mShown       = false;
     mCurTab      = 0;
     mNumTabs     = 0;
-    mTabScrollPx = 0;
+    mTabFirst    = 0;
     mToastBuf[0] = '\0';
     mToastFrames = 0;
     mSaveWatch   = false;
@@ -507,6 +521,18 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     if (mFontHeight <= 0) {
         mFontHeight = 1;
     }
+
+    // Advance metrics for the static textWidth(). mFont->_4/_8 are JUTFont's
+    // fixed-advance override: when set, every glyph advances by _8 regardless
+    // of its width entry.
+    sFont        = mText.mFont;
+    sFontWidth   = sFont->getWidth();
+    if (sFontWidth <= 0) {
+        sFontWidth = 1;
+    }
+    sCharSpacing = (int)mText.mCharSpacing;
+    sFontFixed   = (sFont->_4 != 0);
+    sFontFixedW  = (int)sFont->_8;
 
     // The ctor above allocated a small string buffer on the current heap via
     // setString(); free it and never let mText reallocate again. From here on
@@ -526,21 +552,42 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
 }
 
 int Menu::textWidth(const char *s, int sizeX) {
-    // Estimate advance width. Half-width ASCII glyphs run ~0.75 cell; a 2-byte
-    // Shift-JIS glyph (e.g. a button icon) is full-width, ~1 cell. Detect SJIS
-    // lead bytes (0x81-0x9F / 0xE0-0xFC) so a button counts as one glyph, not
-    // two, and gets its wider advance -- keeps right-align / tab layout honest.
-    int w = 0;
+    if (!sFont) {
+        return strLen(s) * sizeX * 3 / 4;  // pre-ctor fallback; never hit in draw
+    }
+
+    // Mirror J2DPrint::parse, which is what J2DTextBox::draw runs through. Per
+    // glyph the pen advances by TWidth::mWidth (both width bytes are read
+    // unsigned there), and only the first glyph of the line also pays its
+    // mMargin left bearing -- later glyphs are drawn back-shifted by their own
+    // margin instead. The font is proportional, so anything that assumes a
+    // fixed advance drifts and right-aligned text stops lining up.
+    int units = 0;  // total advance in font design units
+    int count = 0;
     for (const unsigned char *p = reinterpret_cast<const unsigned char *>(s); *p;) {
-        unsigned char c = *p;
-        bool lead = (c >= 0x81 && c <= 0x9F) || (c >= 0xE0 && c <= 0xFC);
-        if (lead && p[1]) {
-            w += sizeX;      // full-width glyph
+        int code = *p;
+        if (sFont->isLeadByte(code) && p[1]) {
+            code = (code << 8) | p[1];
             p += 2;
         } else {
-            w += sizeX * 3 / 4;  // half-width ASCII
             p += 1;
         }
+        if (sFontFixed) {
+            units += sFontFixedW;
+        } else {
+            JUTFont::TWidth tw;
+            sFont->getWidthEntry(code, &tw);
+            units += (u8)tw.mWidth;
+            if (count == 0) {
+                units += (u8)tw.mMargin;
+            }
+        }
+        count++;
+    }
+
+    int w = units * sizeX / sFontWidth;
+    if (count > 1) {
+        w += sCharSpacing * (count - 1);
     }
     return w;
 }
@@ -656,60 +703,59 @@ void Menu::pollSettingsSave() {
 }
 
 void Menu::drawTabStrip(int x, int y, int w) {
-    const int gap   = 20;    // space between tabs
-    const int inner = 12;    // highlight padding around active tab text
-    const int chevW = 16;    // reserved for scroll chevrons
+    const int stripX = x + TAB_CHEV;
+    const int visW   = w - TAB_CHEV * 2;
 
-    // First pass: locate the selected tab's logical x-range and total width.
-    int cursor = 0;
-    int selX0 = 0, selX1 = 0;
-    for (int i = 0; i < mNumTabs; i++) {
-        int tw = textWidth(mTabs[i]->title(), TAB_SZ) + inner * 2;
-        if (i == mCurTab) {
-            selX0 = cursor;
-            selX1 = cursor + tw;
+    // The strip scrolls by whole tabs, not by pixels: mTabFirst is the leftmost
+    // one drawn and it always sits flush at stripX. Scrolling by pixels instead
+    // leaves a ragged part-tab-wide gap on the left, since a tab that does not
+    // fit entirely is skipped.
+    if (mTabFirst > mCurTab) {
+        mTabFirst = mCurTab;
+    }
+    if (mTabFirst < 0 || mTabFirst >= mNumTabs) {
+        mTabFirst = 0;
+    }
+    // Advance the window until the selected tab fits at its right end.
+    while (mTabFirst < mCurTab) {
+        int span = 0;
+        for (int i = mTabFirst; i <= mCurTab; i++) {
+            span += tabWidth(i) + (i > mTabFirst ? TAB_GAP : 0);
         }
-        cursor += tw + gap;
-    }
-    int totalW = cursor - gap;
-    int visW   = w - chevW * 2;
-
-    // Keep the selected tab fully inside the visible window.
-    if (selX0 - mTabScrollPx < 0) {
-        mTabScrollPx = selX0;
-    }
-    if (selX1 - mTabScrollPx > visW) {
-        mTabScrollPx = selX1 - visW;
-    }
-    if (mTabScrollPx < 0 || totalW <= visW) {
-        mTabScrollPx = 0;
-    }
-
-    int stripX = x + chevW;
-
-    // Second pass: draw the tabs that fit fully in the window.
-    cursor = 0;
-    for (int i = 0; i < mNumTabs; i++) {
-        int tw    = textWidth(mTabs[i]->title(), TAB_SZ) + inner * 2;
-        int drawX = stripX + (cursor - mTabScrollPx);
-        if (drawX >= stripX && drawX + tw <= stripX + visW) {
-            bool active = (i == mCurTab);
-            if (active) {
-                fillBox(drawX, y, tw, TAB_STRIP_H, cAccent());
-            }
-            drawText(mTabs[i]->title(), drawX + inner, y + 6, TAB_SZ, TAB_SZ,
-                     active ? cTabOnText() : cTabIdle());
+        if (span <= visW) {
+            break;
         }
-        cursor += tw + gap;
+        mTabFirst++;
+    }
+
+    int cursor = stripX;
+    int last   = mTabFirst;
+    for (int i = mTabFirst; i < mNumTabs; i++) {
+        int tw = tabWidth(i);
+        if (i > mTabFirst && cursor + tw > stripX + visW) {
+            break;  // no room for this one; the rest are further right still
+        }
+        bool active = (i == mCurTab);
+        if (active) {
+            fillBox(cursor, y, tw, TAB_STRIP_H, cAccent());
+        }
+        drawText(mTabs[i]->title(), cursor + TAB_INNER, y + 6, TAB_SZ, TAB_SZ,
+                 active ? cTabOnText() : cTabIdle());
+        cursor += tw + TAB_GAP;
+        last = i;
     }
 
     // Scroll chevrons when tabs overflow either edge.
-    if (mTabScrollPx > 0) {
+    if (mTabFirst > 0) {
         drawText("<", x, y + 6, TAB_SZ, TAB_SZ, cAccent());
     }
-    if (totalW - mTabScrollPx > visW) {
-        drawText(">", x + w - chevW + 2, y + 6, TAB_SZ, TAB_SZ, cAccent());
+    if (last < mNumTabs - 1) {
+        drawText(">", x + w - TAB_CHEV + 2, y + 6, TAB_SZ, TAB_SZ, cAccent());
     }
+}
+
+int Menu::tabWidth(int i) const {
+    return textWidth(mTabs[i]->title(), TAB_SZ) + TAB_INNER * 2;
 }
 
 void Menu::update(TMarioGamePad *pad) {

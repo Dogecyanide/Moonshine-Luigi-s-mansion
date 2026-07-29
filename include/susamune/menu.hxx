@@ -49,8 +49,10 @@ public:
     // (JUTResFont) reconfigures, so a bare J2DFillBox after any text renders as
     // skewed garbage.
     void fillBox(int x, int y, int w, int h, JUtility::TColor color);
-    // Estimated pixel width of `s` at the given cell size (for right-align /
-    // tab layout). Font is roughly fixed-advance, so this is len * factor.
+    // Pixel width of `s` at the given cell size (for right-align / tab layout).
+    // Reads the font's per-glyph advances, so it matches what drawText lays
+    // out -- the font is proportional and any estimate makes right-aligned
+    // text jitter as its content changes.
     static int textWidth(const char *s, int sizeX);
 
     static const int kMaxTabs = 12;
@@ -60,6 +62,7 @@ public:
 private:
     void switchTab(int dir);
     void drawTabStrip(int x, int y, int w);
+    int  tabWidth(int i) const;  // drawn width of tab `i`, padding included
     void drawToast();
     // Auto-save on close: fires a save when the menu is dismissed with edits
     // pending, then watches for the launcher's answer and toasts the result.
@@ -73,7 +76,8 @@ private:
     bool            mShown;
     int             mCurTab;
     int             mNumTabs;
-    int             mTabScrollPx;   // horizontal scroll of the tab strip
+    int             mTabFirst;      // leftmost tab drawn; the strip scrolls by
+                                    // whole tabs so it stays left-justified
     MenuTab        *mTabs[kMaxTabs];
     char            mToastBuf[48];  // toast text, owned (see drawText's note
                                     // on borrowed strings)
