@@ -184,8 +184,8 @@ in an existing category needs **no menu change** — just the settings row. A ne
 category means a new enum value + one `mTabs[…] = new (buf) CategorySettingsTab(
 "Title", SETTING_CAT_…)` line and a static buffer next to the others.
 
-Current tabs: `Warps`, `Stages`, `QoL`, `Cosmetic`, `Misc`, `Savestate`,
-`Binds`.
+Current tabs: `QoL`, `Cosmetic`, `Misc`, `Savestate`, `Binds`, plus the
+`Warps` and `Stages` debug tabs when `ENABLE_DEBUG_WARPS` is enabled.
 
 ## Class B: asm hooks (`C2` codes)
 

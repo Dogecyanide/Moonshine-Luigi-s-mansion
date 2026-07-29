@@ -6,7 +6,8 @@
 // =====================================================================
 // warp.hxx
 //
-// Stage-warp data and logic, split out of the menu. The menu (menu.cpp)
+// Debug stage-warp declarations. The implementation lives in debug_warp.cpp
+// and is only compiled when ENABLE_DEBUG_WARPS is enabled. The menu
 // only picks a destination and calls Warp::request(); the actual flag
 // manipulation and scene switch live here and run from main.cpp's
 // game-mode hook via Warp::execute().

@@ -14,7 +14,9 @@
 #include "susamune/features.hxx"
 #include "susamune/actions.hxx"
 #include "susamune/binds.hxx"
+#if ENABLE_DEBUG_WARPS
 #include "susamune/warp.hxx"
+#endif
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
@@ -78,7 +80,6 @@ extern "C" void onAppInit(TApplication* app) {
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     u8 state = director->updateGameMode();
 
-#if ENABLE_MENU
     // Opening the menu must not also pause the game. The default menu bind
     // includes Start, which is what the director is reacting to here, so
     // swallow the transition into the pause state on the frame it fires.
@@ -87,6 +88,7 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
         state = director->mCurState;
     }
 
+#if ENABLE_DEBUG_WARPS
     if (Warp::pending()) {
         Warp::execute();
         // QF timer reset flag
@@ -118,9 +120,7 @@ extern "C" void onSetup(TMarDirector* director) {
     // Settings are already initialised, much earlier, by onAppInit.
 
     JKRHeap *oldHeap = JKRHeap::sSystemHeap->becomeCurrentHeap();
-#if ENABLE_MENU
     menuInit();
-#endif
     gSavestateMgr = new SavestateManager();
     
     if (oldHeap) {
@@ -148,11 +148,9 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     if (gSavestateMgr) {
         gSavestateMgr->updateHook();
     }
-#if ENABLE_MENU
     if (gMenu) {
         gMenu->update(gpApplication.mGamePads[0]);
     }
-#endif
 
     return state;
 }
@@ -175,10 +173,8 @@ extern "C" void afterDraw() {
             GXSetProjection(mtx, GX_ORTHOGRAPHIC);
         }        
         
-#if ENABLE_MENU
         if (gMenu)
             gMenu->draw(&ortho);
-#endif
         if (gSavestateMgr)
             gSavestateMgr->draw(&ortho);
     }

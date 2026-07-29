@@ -15,7 +15,9 @@
 #include "susamune/binds.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/util.hxx"
+#if ENABLE_DEBUG_WARPS
 #include "susamune/warp.hxx"
+#endif
 
 #include "JSystem/JAudio/JASystem/JASTrackMgr.hxx"
 #include "J2D/J2DOrthoGraph.hxx"
@@ -45,6 +47,8 @@
 // be given as its 2-byte code directly -- a plain ASCII '&' resolves to the
 // blank default glyph.
 #define SYM_AMP "\x81\x95"  // full-width ampersand
+#define SYM_UP  "\x81\xaa"
+#define SYM_DOWN "\x81\xab"
 
 namespace {
 
@@ -86,6 +90,7 @@ const int PAD       = 18;
 const int TITLE_SZ  = 20;
 const int TAB_SZ    = 18;
 const int ROW_SZ    = 16;
+const int ROW_H = ROW_SZ + 8;
 const int FOOT_SZ   = 12;
 
 const int TAB_GAP   = 20;  // space between tabs
@@ -113,6 +118,18 @@ public:
     // switching, no close combo. The binds tab needs it, since every button
     // it might record is also a menu control.
     virtual bool grabsInput() const { return false; }
+
+protected:
+    void drawScrollHints(Menu *menu, int x, int y, int w, int h, int start, int end,
+                         int count) {
+        if (start > 0) {
+            menu->drawText(SYM_UP, x + w - 12, y - ROW_H + 2, ROW_SZ, ROW_SZ, cRowDim());
+        }
+        if (end < count) {
+            menu->drawText(SYM_DOWN, x + w - 12, y + h - ROW_SZ,
+                           ROW_SZ, ROW_SZ, cRowDim());
+        }
+    }
 };
 
 namespace {
@@ -138,8 +155,6 @@ __attribute__((noinline)) int listScrollStart(int sel, int count, int maxRows) {
 __attribute__((noinline)) void drawRowHighlight(Menu *menu, int x, int y, int w, int rowH) {
     menu->fillBox(x - 6, y - (rowH - 12) / 2, w + 12, rowH, cRowSelBg());
 }
-
-const int ROW_H = ROW_SZ + 8;
 
 // Wrap helper for a cursor over [0, n).
 __attribute__((noinline)) int wrap(int v, int n) {
@@ -188,6 +203,7 @@ void bgmStatsDraw(Menu *menu) {
 // ---------------------------------------------------------------------
 // Warp presets tab
 // ---------------------------------------------------------------------
+#if ENABLE_DEBUG_WARPS
 class WarpPresetsTab : public MenuTab {
 public:
     WarpPresetsTab() : mSel(0) {}
@@ -230,15 +246,6 @@ public:
     }
 
 private:
-    void drawScrollHints(Menu *menu, int x, int y, int w, int h, int start, int end,
-                         int count) {
-        if (start > 0) {
-            menu->drawText("^", x + w - 12, y, ROW_SZ, ROW_SZ, cRowDim());
-        }
-        if (end < count) {
-            menu->drawText("v", x + w - 12, y + h - ROW_H, ROW_SZ, ROW_SZ, cRowDim());
-        }
-    }
     int mSel;
 };
 
@@ -303,6 +310,7 @@ private:
     int mArea;
     int mEpisode;
 };
+#endif
 
 // ---------------------------------------------------------------------
 // Category settings tab (generic settings renderer)
@@ -370,12 +378,8 @@ public:
             menu->drawText(val, vx, ry, ROW_SZ, ROW_SZ, cValue());
             ry += ROW_H;
         }
-        if (start > 0) {
-            menu->drawText("^", x + w - 12, y, ROW_SZ, ROW_SZ, cRowDim());
-        }
-        if (end < n) {
-            menu->drawText("v", x + w - 12, y + h - ROW_H, ROW_SZ, ROW_SZ, cRowDim());
-        }
+    
+        drawScrollHints(menu, x, y, w, h, start, end, n);
     }
 
 private:
@@ -480,12 +484,7 @@ public:
             ry += ROW_H;
         }
 
-        if (start > 0) {
-            menu->drawText("^", x + w - 12, y, ROW_SZ, ROW_SZ, cRowDim());
-        }
-        if (end < BIND_COUNT) {
-            menu->drawText("v", x + w - 12, y + h - ROW_H, ROW_SZ, ROW_SZ, cRowDim());
-        }
+        drawScrollHints(menu, x, y, w, h, start, end, BIND_COUNT);
 
         menu->drawText(gBinds.recording()
                            ? "Release a button to set, or " BTN_C " to cancel"
@@ -505,8 +504,10 @@ private:
 // vtables are set without relying on C++ static-init, which the injected mod
 // does not run).
 namespace {
+#if ENABLE_DEBUG_WARPS
 u8 sPresetsBuf[sizeof(WarpPresetsTab)]         __attribute__((aligned(8)));
 u8 sStagesBuf[sizeof(WarpStagesTab)]           __attribute__((aligned(8)));
+#endif
 u8 sQolBuf[sizeof(CategorySettingsTab)]        __attribute__((aligned(8)));
 u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
 u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
@@ -554,8 +555,10 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
         mText.mStrPtr = nullptr;
     }
 
+#if ENABLE_DEBUG_WARPS
     mTabs[mNumTabs++] = new (sPresetsBuf) WarpPresetsTab();
     mTabs[mNumTabs++] = new (sStagesBuf) WarpStagesTab();
+#endif
     mTabs[mNumTabs++] = new (sQolBuf) CategorySettingsTab("QoL", SETTING_CAT_QOL);
     mTabs[mNumTabs++] = new (sCosmeticBuf) CategorySettingsTab("Cosmetic", SETTING_CAT_COSMETIC);
     mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab("Misc", SETTING_CAT_MISC);
