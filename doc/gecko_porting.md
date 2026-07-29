@@ -552,8 +552,15 @@ This completes both the "Simple On/Off Toggles or Select Options" and the
   Per `doc/gecko_codes.md` that belongs with the savestate / "Lite Savestate"
   work, so it is intentionally not ported here. (*Regrab last held object*,
   the other leftover, is now a bind — see above.)
-- **Gecko-relocation caveat.** The launcher already relocates some absolute
+- **Gecko-relocation caveat.** The launcher relocates some absolute
   heap-address gecko codes past the mod's arena reservation
-  (`PatchSusamuneGeckoCodes`, see AGENTS.md). Native ports don't need that —
-  they read live pointers — but keep it in mind if a code writes to a
-  hardcoded heap address rather than a static `.text`/`.data` one.
+  (`PatchSusamuneGeckoCodes`, see AGENTS.md). A **port carries the same
+  problem**: most ports are fine (they patch `.text`/`.data` or read live
+  pointers), but a patch row that targets a hardcoded heap address must add
+  `SUSAMUNE_ARENA_RESERVE_SIZE` itself — that is what `FHEAP`/`FHEAPMASK` in
+  `features.cpp` are for. Fast Text is the case in point: its three
+  instruction patches are plain `FWORD`s, but the `!!!` text it forces is
+  planted directly in the loaded message buffer, so those rows are `FHEAP`s.
+  PAL loads one message file per language at a different address, so its row
+  is resolved at runtime from the language word (`resolveFastTextPalMsg`) —
+  unresolved rows (`addr == 0`) are skipped by `applyPatches`.

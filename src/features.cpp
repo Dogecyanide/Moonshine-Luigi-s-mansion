@@ -45,6 +45,21 @@ struct Feature {
 #define FMASK(jp, us, pal, mask, val) \
     { SUSAMUNE_MEM1_ADDR(jp, us, pal), (mask), (val) }
 
+// Patch at a hardcoded *heap* address (one region's, so these live inside a
+// per-region #if). The mod raises the game's arena floor by
+// SUSAMUNE_ARENA_RESERVE_SIZE, so every bottom-anchored heap allocation sits
+// that much higher than the address a gecko code hardcodes -- add it back.
+// PatchSusamuneGeckoCodes() in the launcher does the same to the .gct when
+// these codes are run as gecko instead of ported.
+#define FHEAP(addr, val) \
+    { (addr) + SUSAMUNE_ARENA_RESERVE_SIZE, 0xFFFFFFFFu, (val) }
+#define FHEAPMASK(addr, mask, val) \
+    { (addr) + SUSAMUNE_ARENA_RESERVE_SIZE, (mask), (val) }
+
+// A patch row whose address is filled in at runtime (PAL Fast Text, below).
+// applyPatches() skips rows that are still unresolved.
+#define FUNRESOLVED() { 0u, 0xFFFFFFFFu, 0u }
+
 // ---------------------------------------------------------------------
 // Patch tables, one per feature. Addresses are (jp=GMSJ01, us=GMSE01,
 // pal=GMSP01); the on-state words come straight from Codes.xml.
@@ -188,11 +203,56 @@ const Patch kNeverPauseIgt[] = {
 //   jp 80215290 / us 80153DA0 / pal 80148D20 = 38000000 (li r0, 0)
 //   jp 80214610 / us 8015317C / pal 80147F98 = 38005000 (li r0, 0x5000)
 //   jp 800E4888 / us 80291340 / pal 802890CC = 60000000 (nop)
-const Patch kFastText[] = {
+//
+// The forced message is only short *text* because the gecko's unconditional
+// tail lines plant it in the loaded message buffer; without them the fixed
+// message id resolves to whatever happens to sit there. Those writes target a
+// hardcoded heap address, so they need the arena-reserve fixup (FHEAP).
+//   jp 028D8A7E 00028149 -> "!" (Shift-JIS 8149) x3 at 808D8A7E..83
+//      048D8A84 00000000 -> terminator
+//   us 048D3A3C 21000000 -> "!" + terminator (US/PAL fonts map ASCII directly)
+//   pal one buffer per language, resolved at runtime -- see kFastTextPalMsg.
+#if defined(SUSAMUNE_VERSION_JP)
+#define FAST_TEXT_MSG_ROWS                            \
+    FHEAPMASK(0x808D8A7Cu, 0x0000FFFFu, 0x00008149u), \
+    FHEAP(0x808D8A80u, 0x81498149u),                  \
+    FHEAP(0x808D8A84u, 0x00000000u),
+#elif defined(SUSAMUNE_VERSION_US)
+#define FAST_TEXT_MSG_ROWS FHEAP(0x808D3A3Cu, 0x21000000u),
+#else
+#define FAST_TEXT_MSG_ROWS FUNRESOLVED(),
+#endif
+
+// Not const: PAL's message-buffer row is filled in at runtime.
+Patch gFastText[] = {
     FWORD(0x80215290, 0x80153DA0, 0x80148D20, 0x38000000),
     FWORD(0x80214610, 0x8015317C, 0x80147F98, 0x38005000),
     FWORD(0x800E4888, 0x80291340, 0x802890CC, 0x60000000),
+    FAST_TEXT_MSG_ROWS
 };
+#undef FAST_TEXT_MSG_ROWS
+
+#if defined(SUSAMUNE_VERSION_PAL)
+// PAL ships one message file per language and each loads at its own address,
+// so the gecko compares a language word before writing. Indexed by that word;
+// values are the gecko's, addresses still unrelocated (FHEAP is not usable in
+// a plain table, the reserve is added in resolveFastTextPalMsg).
+//   0474E87C 21000000 / 0474E9F4 21210000 / 0474ED38 00000000 /
+//   0474EE04 A1000000 / 0474EBDC 21210000
+const struct {
+    u32 addr;
+    u32 val;
+} kFastTextPalMsg[] = {
+    { 0x8074E87Cu, 0x21000000u },  // English  "!"
+    { 0x8074E9F4u, 0x21210000u },  // German   "!!"
+    { 0x8074ED38u, 0x00000000u },  // French   (terminator only)
+    { 0x8074EE04u, 0xA1000000u },  // Spanish  "\xA1"
+    { 0x8074EBDCu, 0x21210000u },  // Italian  "!!"
+};
+
+// 20570B7C in dpad_pal.txt: the language word the five writes are gated on.
+#define FAST_TEXT_PAL_LANG_ADDR 0x80570B7Cu
+#endif
 
 // Force Plaza Events: three "b +0x18" branches and two nops that reroute the
 // plaza-event setup; paired with the kForcePlazaAsm hook.
@@ -230,7 +290,7 @@ const Feature kFeatures[] = {
     FEAT(SETTING_DISABLE_BLUE_COIN, kBlueCoinNop),
     FEAT(SETTING_NEVER_PAUSE_IGT, kNeverPauseIgt),
     FEAT(SETTING_FORCE_PLAZA_EVENTS, kForcePlaza),
-    FEAT(SETTING_FAST_TEXT, kFastText),
+    FEAT(SETTING_FAST_TEXT, gFastText),
 };
 
 const int kNumFeatures = (int)(sizeof(kFeatures) / sizeof(kFeatures[0]));
@@ -248,7 +308,7 @@ const int kNumPatches =
     PATCH_COUNT(kShineOutfit) + PATCH_COUNT(kShinyShines) +
     PATCH_COUNT(kShadowMarioHp) + PATCH_COUNT(kFreePauseBranch) +
     PATCH_COUNT(kBlueCoinNop) + PATCH_COUNT(kNeverPauseIgt) +
-    PATCH_COUNT(kForcePlaza) + PATCH_COUNT(kFastText);
+    PATCH_COUNT(kForcePlaza) + PATCH_COUNT(gFastText);
 struct PatchState {
     u32  orig;
     u32  last;
@@ -516,7 +576,42 @@ struct HookState {
 };
 HookState gHookState[kNumHooks];
 
+#if defined(SUSAMUNE_VERSION_PAL)
+// Fill in Fast Text's message-buffer row (the last row of gFastText) from the
+// live language word. Only called while the setting is on, because the word is
+// in the heap: before the message data is loaded it reads as whatever was
+// there, and 0 (English) is indistinguishable from cleared heap.
+//
+// The language word is a heap address like the buffers themselves, so it
+// should move with the arena reservation -- but the launcher's .gct fixup
+// (PatchSusamuneGeckoCodes) relocates only the buffer writes and works on
+// console, so try the unreserved address as well rather than pick one blind.
+void resolveFastTextPalMsg() {
+    Patch &row = gFastText[sizeof(gFastText) / sizeof(gFastText[0]) - 1];
+    if (row.addr != 0) {
+        return;
+    }
+
+    u32 lang = *reinterpret_cast<volatile u32 *>(FAST_TEXT_PAL_LANG_ADDR +
+                                                 SUSAMUNE_ARENA_RESERVE_SIZE);
+    if (lang > 4) {
+        lang = *reinterpret_cast<volatile u32 *>(FAST_TEXT_PAL_LANG_ADDR);
+    }
+    if (lang > 4) {
+        return;  // not a language yet; try again next frame
+    }
+
+    row.addr  = kFastTextPalMsg[lang].addr + SUSAMUNE_ARENA_RESERVE_SIZE;
+    row.value = kFastTextPalMsg[lang].val;
+}
+#endif
+
 void applyPatches() {
+#if defined(SUSAMUNE_VERSION_PAL)
+    if (gSettings.getBool(SETTING_FAST_TEXT)) {
+        resolveFastTextPalMsg();
+    }
+#endif
     int idx = 0;
     for (int f = 0; f < kNumFeatures; f++) {
         const Feature &feat = kFeatures[f];
@@ -527,6 +622,10 @@ void applyPatches() {
         for (int j = 0; j < feat.num; j++, idx++) {
             const Patch &p = feat.patches[j];
             PatchState  &s = gPatchState[idx];
+
+            if (p.addr == 0) {
+                continue;  // unresolved (PAL Fast Text message buffer)
+            }
 
             if (!s.captured) {
                 s.orig     = *reinterpret_cast<volatile u32 *>(p.addr);
