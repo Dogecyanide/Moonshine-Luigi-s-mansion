@@ -254,6 +254,13 @@ const struct {
 #define FAST_TEXT_PAL_LANG_ADDR 0x80570B7Cu
 #endif
 
+// Disable Z Menu: skip the updateGameMode path that opens the stock map.
+// Z remains available to mod binds and every other game input path.
+//   jp C60EB020->800EB02C / us C6297A64->80297A70 / pal C628F8FC->8028F908
+const Patch kDisableZMenu[] = {
+    FWORD(0x800EB020, 0x80297A64, 0x8028F8FC, 0x4800000C),
+};
+
 // Force Plaza Events: three "b +0x18" branches and two nops that reroute the
 // plaza-event setup; paired with the kForcePlazaAsm hook.
 //   jp 0410C4C8 / us 042B7810 / pal 042AF7E0 = 48000018 (b +0x18)
@@ -271,7 +278,7 @@ const Patch kForcePlaza[] = {
 
 #define FEAT(id, arr) { id, arr, (u8)(sizeof(arr) / sizeof((arr)[0])) }
 
-const Feature kFeatures[] = {
+constexpr Feature kFeatures[] = {
     FEAT(SETTING_INFINITE_LIVES, kInfiniteLives),
     FEAT(SETTING_UNLOCK_NOZZLES, kUnlockNozzles),
     FEAT(SETTING_UNLOCK_YOSHI, kUnlockYoshi),
@@ -291,29 +298,26 @@ const Feature kFeatures[] = {
     FEAT(SETTING_NEVER_PAUSE_IGT, kNeverPauseIgt),
     FEAT(SETTING_FORCE_PLAZA_EVENTS, kForcePlaza),
     FEAT(SETTING_FAST_TEXT, gFastText),
+    FEAT(SETTING_DISABLE_Z_MENU, kDisableZMenu),
 };
+constexpr int kNumFeatures = (int)(sizeof(kFeatures) / sizeof(kFeatures[0]));
 
-const int kNumFeatures = (int)(sizeof(kFeatures) / sizeof(kFeatures[0]));
-
-// Per-patch mutable state, flattened across every feature in table order.
-// Captured lazily on first apply: `orig` is the retail word, `last` is the
-// word we most recently wrote (so we can skip untouched patches).
-#define PATCH_COUNT(arr) (sizeof(arr) / sizeof((arr)[0]))
-const int kNumPatches =
-    PATCH_COUNT(kInfiniteLives) + PATCH_COUNT(kUnlockNozzles) +
-    PATCH_COUNT(kUnlockYoshi) + PATCH_COUNT(kAnyFruitYoshi) +
-    PATCH_COUNT(kInfiniteJuice) + PATCH_COUNT(kExitAreaEverywhere) +
-    PATCH_COUNT(kFmvSkips) + PATCH_COUNT(kRespawnShines) +
-    PATCH_COUNT(kFruitNeverTimeout) + PATCH_COUNT(kMuteBgm) +
-    PATCH_COUNT(kShineOutfit) + PATCH_COUNT(kShinyShines) +
-    PATCH_COUNT(kShadowMarioHp) + PATCH_COUNT(kFreePauseBranch) +
-    PATCH_COUNT(kBlueCoinNop) + PATCH_COUNT(kNeverPauseIgt) +
-    PATCH_COUNT(kForcePlaza) + PATCH_COUNT(gFastText);
+constexpr int countFeaturePatches() {
+    int count = 0;
+    for (int i = 0; i < kNumFeatures; i++) {
+        count += kFeatures[i].num;
+    }
+    return count;
+}
+constexpr int kNumPatches = countFeaturePatches();
 struct PatchState {
     u32  orig;
     u32  last;
     bool captured;
 };
+// Per-patch mutable state, flattened across every feature in table order.
+// Captured lazily on first apply: `orig` is the retail word, `last` is the
+// word we most recently wrote (so we can skip untouched patches).
 PatchState gPatchState[kNumPatches];
 
 // =====================================================================
@@ -712,16 +716,22 @@ const ChoicePatch kFluddPatches[] = {
 
 #define CHOICE(id, arr) { id, arr, (u8)(sizeof(arr) / sizeof((arr)[0])) }
 
-const ChoiceFeature kChoiceFeatures[] = {
+constexpr ChoiceFeature kChoiceFeatures[] = {
     CHOICE(SETTING_NOZZLE_LOCK, kNozzlePatches),
     CHOICE(SETTING_FLUDD_SECRETS, kFluddPatches),
 };
 
-const int kNumChoiceFeatures =
+constexpr int kNumChoiceFeatures =
     (int)(sizeof(kChoiceFeatures) / sizeof(kChoiceFeatures[0]));
 
-const int kNumChoicePatches =
-    PATCH_COUNT(kNozzlePatches) + PATCH_COUNT(kFluddPatches);
+constexpr int countChoicePatches() {
+    int count = 0;
+    for (int i = 0; i < kNumChoiceFeatures; i++) {
+        count += kChoiceFeatures[i].num;
+    }
+    return count;
+}
+constexpr int kNumChoicePatches = countChoicePatches();
 PatchState gChoiceState[kNumChoicePatches];
 
 void applyChoices() {
@@ -763,8 +773,6 @@ void writeGameCode(u32 addr, u32 word) {
 u32 branchWord(u32 from, u32 to) {
     return 0x48000000u | ((to - from) & 0x03FFFFFCu);
 }
-
-#undef PATCH_COUNT
 
 void featuresApply() {
     applyPatches();
