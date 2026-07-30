@@ -17,6 +17,8 @@
 //   - the ini_key is what appears in susamune.ini. It is deliberately
 //     separate from the menu display name in kSettingDescs so that
 //     relabelling a menu entry never invalidates a user's saved file.
+//     Only the launcher expands the keys into strings -- the mod reads
+//     values by index and would otherwise carry the table for nothing.
 //
 // The menu display name, type, choice labels, default and category stay
 // in kSettingDescs (settings.cpp) -- the launcher has no use for them and

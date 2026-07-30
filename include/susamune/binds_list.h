@@ -13,7 +13,8 @@
 //   - the enumerator defines BindId and therefore the binds[] layout of
 //     the MEM2 handoff block, so ROWS MUST NOT BE REORDERED OR REMOVED
 //     once a build has shipped -- append instead.
-//   - the ini_key is what appears under [binds] in susamune.ini.
+//   - the ini_key is what appears under [binds] in susamune.ini. Only the
+//     launcher expands the keys into strings; the mod reads by index.
 //
 // The menu display name and the default combo stay in kBindDescs
 // (binds.cpp); the launcher has no use for them.

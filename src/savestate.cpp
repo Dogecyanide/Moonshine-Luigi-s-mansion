@@ -119,18 +119,18 @@ namespace {
 // A range is captured unconditionally when gate == kNoGate; otherwise it is
 // only captured while the named setting is enabled. This lets a menu toggle
 // exclude a range from the snapshot (e.g. the libc RNG seed) without touching
-// the save/load machinery.
-const int kNoGate = -1;
+// the save/load machinery. Unsigned sentinel deliberately: a -1 in a `char`
+// field only reads back as -1 while -fsigned-char is in force.
+const u8 kNoGate = 0xFFu;
 
 struct StaticRange {
     u32 start;
     u32 end;
-    const char *name;
-    int gate;  // kNoGate, or a SettingId that must be enabled
+    u8  gate;  // kNoGate, or a SettingId that must be enabled
 };
 
 const StaticRange kStaticRanges[] = {
-    { SUSAMUNE_ADDR_APPLICATION, SUSAMUNE_ADDR_APPLICATION + sizeof(TApplication), "gpApp", kNoGate },
+    { SUSAMUNE_ADDR_APPLICATION, SUSAMUNE_ADDR_APPLICATION + sizeof(TApplication), kNoGate },
 #if defined(SUSAMUNE_VERSION_JP)
     // JP only: the game half of .bss [GAME_BSS_START, GAME_BSS_END) with the SMS
     // audio modules carved OUT. Those modules (System.a/MSoundMainSide and the
@@ -147,25 +147,21 @@ const StaticRange kStaticRanges[] = {
     //   MSound.a cluster   .bss = [0x803f44d0, 0x803f57a0)  (MAnmSound..MSModBgm)
     // US/PAL keep the window contiguous below until their audio modules are
     // mapped in maps/us.map / maps/pal.map.
-    { SUSAMUNE_ADDR_GAME_BSS_START, 0x803f2c38u,               "bss-game-1", kNoGate }, // .. before MSoundMainSide
-    { 0x803f2cf0u,                  0x803f44d0u,               "bss-game-2", kNoGate }, // after MSoundMainSide .. before MSound.a
-    { 0x803f57a0u,                  SUSAMUNE_ADDR_GAME_BSS_END, "bss-game-3", kNoGate }, // after MSound.a ..
+    { SUSAMUNE_ADDR_GAME_BSS_START, 0x803f2c38u, kNoGate }, // .. before MSoundMainSide
+    { 0x803f2cf0u,                  0x803f44d0u, kNoGate }, // after MSoundMainSide .. before MSound.a
+    { 0x803f57a0u,                  SUSAMUNE_ADDR_GAME_BSS_END, kNoGate }, // after MSound.a ..
 #else
-    { SUSAMUNE_ADDR_GAME_BSS_START, SUSAMUNE_ADDR_GAME_BSS_END, "bss-game", kNoGate },
+    { SUSAMUNE_ADDR_GAME_BSS_START, SUSAMUNE_ADDR_GAME_BSS_END, kNoGate },
 #endif
-    { SUSAMUNE_ADDR_GAME_SDATA_START, SUSAMUNE_ADDR_GAME_SDATA_END, "sdata-game", kNoGate },
-    { SUSAMUNE_ADDR_GAME_SBSS_START, SUSAMUNE_ADDR_GAME_SBSS_END, "sbss-game", kNoGate },
-    // MSL rand.c `next` -- the seed for libc rand()/srand(), which is what
-    // every gameplay RNG funnels through (MarioUtil MsRandF/MsRandI, so King
-    // Boo's fruit pulls, Gooper Blooper / manta patterns, enemy timers, etc).
-    // It sits below the selected game-sdata boundary, so it was excluded
-    // before -- which is why the RNG stream
-    // kept advancing across a load instead of rewinding. It's a plain 4-byte
-    // counter with no hardware/kernel linkage, so restoring it is safe.
-    // Gated on SETTING_SAVE_RNG_STATE: when the menu toggle is Off, the seed is
-    // left out of the snapshot so the RNG stream keeps advancing across a load
-    // instead of rewinding. On (default) preserves the historical behaviour.
-    { SUSAMUNE_ADDR_LIBC_RAND_SEED, SUSAMUNE_ADDR_LIBC_RAND_SEED + sizeof(u32), "rand-seed",
+    { SUSAMUNE_ADDR_GAME_SDATA_START, SUSAMUNE_ADDR_GAME_SDATA_END, kNoGate },
+    { SUSAMUNE_ADDR_GAME_SBSS_START, SUSAMUNE_ADDR_GAME_SBSS_END, kNoGate },
+    // MSL rand.c `next` -- the seed for libc rand()/srand(), which every
+    // gameplay RNG funnels through (MarioUtil MsRandF/MsRandI, so King Boo's
+    // fruit pulls, Gooper Blooper / manta patterns, enemy timers). It sits
+    // below the game-sdata boundary, so it needs its own row. A plain counter
+    // with no hardware linkage, so restoring it is safe. Off leaves the seed
+    // advancing across a load instead of rewinding with the state.
+    { SUSAMUNE_ADDR_LIBC_RAND_SEED, SUSAMUNE_ADDR_LIBC_RAND_SEED + sizeof(u32),
       SETTING_SAVE_RNG_STATE },
 };
 const int kNumStaticRanges = sizeof(kStaticRanges) / sizeof(kStaticRanges[0]);
@@ -179,18 +175,17 @@ const int kNumStaticRanges = sizeof(kStaticRanges) / sizeof(kStaticRanges[0]);
 struct PointedAlloc {
     u32 ptr_addr;     // address of the global pointer (in BSS)
     u32 size;         // bytes to capture from *(*ptr_addr)
-    const char *name;
 };
 
 const PointedAlloc kPointedAllocs[] = {
     // TFlagManager::smInstance -- coin counts, shines, episode flags,
     // life count, etc. Without this, coin pickups are forgotten on load.
-    { SUSAMUNE_ADDR_FLAG_MANAGER_INSTANCE, sizeof(TFlagManager),  "TFlagManager" },
+    { SUSAMUNE_ADDR_FLAG_MANAGER_INSTANCE, sizeof(TFlagManager) },
     // TTimeRec::_instance -- the input/profiler recorder. Object size is
     // 0x820 bytes; the constructor argument 0xDFC0 is unrelated to it.
-    { SUSAMUNE_ADDR_TIME_REC_INSTANCE,     0x820u,                "TTimeRec"     },
+    { SUSAMUNE_ADDR_TIME_REC_INSTANCE,     0x820u },
     // SMSRumbleMgr -- rumble channels' active state.
-    { SUSAMUNE_ADDR_RUMBLE_MANAGER,        sizeof(RumbleMgr),     "RumbleMgr"    },
+    { SUSAMUNE_ADDR_RUMBLE_MANAGER,        sizeof(RumbleMgr) },
     // gpApplication.mGamePads[0..3] -- the four TMarioGamePad objects on
     // the root heap. The pointers themselves live inside the gpApplication
     // static range, but the per-pad button-meaning state machine
@@ -198,15 +193,15 @@ const PointedAlloc kPointedAllocs[] = {
     // mutates every frame. Without restoring it, reloading while a dialog
     // had disabled the pad leaves the meaning bits stuck.
     // Address = &gpApplication + offsetof(TApplication, mGamePads[i]).
-    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(0), sizeof(TMarioGamePad), "Pad0" },
-    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(1), sizeof(TMarioGamePad), "Pad1" },
-    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(2), sizeof(TMarioGamePad), "Pad2" },
-    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(3), sizeof(TMarioGamePad), "Pad3" },
+    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(0), sizeof(TMarioGamePad) },
+    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(1), sizeof(TMarioGamePad) },
+    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(2), sizeof(TMarioGamePad) },
+    { SUSAMUNE_ADDR_APPLICATION_GAMEPAD(3), sizeof(TMarioGamePad) },
     // gpApplication.mFader -- the screen fader's animation state lives on
     // the root heap. Without this the fader gets stuck mid-fade when you
     // load from inside a transition (shine-get fadeout, save card screen).
     // Address = &gpApplication + offsetof(TApplication, mFader).
-    { SUSAMUNE_ADDR_APPLICATION_FADER, sizeof(TSmplFader), "Fader" },
+    { SUSAMUNE_ADDR_APPLICATION_FADER, sizeof(TSmplFader) },
 };
 const int kNumPointedAllocs = sizeof(kPointedAllocs) / sizeof(kPointedAllocs[0]);
 

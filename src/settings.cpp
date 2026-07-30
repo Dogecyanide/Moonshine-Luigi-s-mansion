@@ -16,67 +16,63 @@
 
 namespace {
 
-// Stable ini keys, in SettingId order, from the same list that builds the
-// enum -- so the launcher's key table and this one cannot drift apart.
-#define SUSAMUNE_SETTING_KEY(id, key) key,
-const char *const kIniKeys[SETTING_COUNT] = { SUSAMUNE_SETTING_LIST(SUSAMUNE_SETTING_KEY) };
-#undef SUSAMUNE_SETTING_KEY
-
-
 // CHOICE labels. Index 0 is the default / "restore original" state (see the
 // choice-feature apply in features.cpp), so it must be the game's normal
 // behaviour for the corresponding gecko code.
 const char *const kFluddLabels[3]  = { "Completed", "No FLUDD", "All secrets" };
 const char *const kNozzleLabels[4] = { "Unlocked", "Rocket", "Turbo", "Hover" };
 
+#define SBOOL(name, def, cat) { name, nullptr, 2, def, cat }
+#define SCHOICE(name, def, labels, cat) \
+    { name, labels, (u8)(sizeof(labels) / sizeof((labels)[0])), def, cat }
+
 // Descriptor table, indexed by SettingId. One row per setting.
-// Row layout: { name, type, numChoices, default, choices, category }.
 const SettingDesc kSettingDescs[SETTING_COUNT] = {
     // SETTING_SAVE_RNG_STATE: when On (default), a savestate load restores the
     // libc RNG seed so the RNG stream rewinds with the state -- the game's
     // historical behaviour. Off leaves the seed advancing across a load, so a
     // runner can practise varied RNG outcomes from the same snapshot.
-    { "Save RNG state", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_SAVESTATE },
+    SBOOL("Save RNG state", 1, SETTING_CAT_SAVESTATE),
 
     // Quality-of-life toggles. Defaults mirror the GCT generator's Standard
     // preset where it has an equivalent code.
-    { "Infinite lives", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_QOL },
-    { "Unlock nozzles", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_QOL },
-    { "Unlock Yoshi", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_QOL },
-    { "Any fruit opens Yoshi eggs", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_QOL },
-    { "Infinite juice", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_QOL },
-    { "Exit area everywhere", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_QOL },
-    { "FMV skips", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_QOL },
-    { "Respawn one-time shines", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_QOL },
-    { "Fruit never times out", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_QOL },
-    { "Free pause", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_QOL },
-    { "Disable blue coin flag", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_QOL },
-    { "Deathless blooper surfing", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_QOL },
-    { "Fast text", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_QOL },
-    { "FLUDD in secrets", SETTING_CHOICE, 3, 0, kFluddLabels, SETTING_CAT_QOL },
+    SBOOL("Infinite lives", 1, SETTING_CAT_QOL),
+    SBOOL("Unlock nozzles", 0, SETTING_CAT_QOL),
+    SBOOL("Unlock Yoshi", 0, SETTING_CAT_QOL),
+    SBOOL("Any fruit opens Yoshi eggs", 0, SETTING_CAT_QOL),
+    SBOOL("Infinite juice", 0, SETTING_CAT_QOL),
+    SBOOL("Exit area everywhere", 1, SETTING_CAT_QOL),
+    SBOOL("FMV skips", 1, SETTING_CAT_QOL),
+    SBOOL("Respawn one-time shines", 1, SETTING_CAT_QOL),
+    SBOOL("Fruit never times out", 0, SETTING_CAT_QOL),
+    SBOOL("Free pause", 1, SETTING_CAT_QOL),
+    SBOOL("Disable blue coin flag", 1, SETTING_CAT_QOL),
+    SBOOL("Deathless blooper surfing", 0, SETTING_CAT_QOL),
+    SBOOL("Fast text", 0, SETTING_CAT_QOL),
+    SCHOICE("FLUDD in secrets", 0, kFluddLabels, SETTING_CAT_QOL),
 
     // Cosmetic toggles.
-    { "Mute background music", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_COSMETIC },
-    { "Shine outfit", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_COSMETIC },
-    { "Shiny shines", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_COSMETIC },
-    { "Shadow Mario HP meter", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_COSMETIC },
-    { "Episode names as IDs", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_COSMETIC },
+    SBOOL("Mute background music", 0, SETTING_CAT_COSMETIC),
+    SBOOL("Shine outfit", 0, SETTING_CAT_COSMETIC),
+    SBOOL("Shiny shines", 0, SETTING_CAT_COSMETIC),
+    SBOOL("Shadow Mario HP meter", 0, SETTING_CAT_COSMETIC),
+    SBOOL("Episode names as IDs", 0, SETTING_CAT_COSMETIC),
 
     // Misc toggles.
-    { "Fast Piantissimo", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
-    { "Never pause IGT", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_MISC },
-    { "Force plaza events", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_MISC },
-    { "Nozzle lock", SETTING_CHOICE, 4, 0, kNozzleLabels, SETTING_CAT_MISC },
+    SBOOL("Fast Piantissimo", 0, SETTING_CAT_MISC),
+    SBOOL("Never pause IGT", 1, SETTING_CAT_MISC),
+    SBOOL("Force plaza events", 1, SETTING_CAT_MISC),
+    SCHOICE("Nozzle lock", 0, kNozzleLabels, SETTING_CAT_MISC),
     // The three "stateful" ports. Unlike the patch/hook features these are
     // implemented as game logic in main.cpp (Intro Skip, Stage Intro Skip);
     // No Shine Get Animation is a one-word patch in features.cpp.
-    { "Intro skip", SETTING_BOOL, 2, 1, nullptr, SETTING_CAT_MISC },
-    { "Stage intro skip", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
-    { "No shine get animation", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
-    { "BGM slot counter", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_MISC },
+    SBOOL("Intro skip", 1, SETTING_CAT_MISC),
+    SBOOL("Stage intro skip", 0, SETTING_CAT_MISC),
+    SBOOL("No shine get animation", 0, SETTING_CAT_MISC),
+    SBOOL("BGM slot counter", 0, SETTING_CAT_MISC),
 
     // Appended to preserve the persisted values[] layout.
-    { "Disable Z Menu", SETTING_BOOL, 2, 0, nullptr, SETTING_CAT_QOL },
+    SBOOL("Disable Z Menu", 0, SETTING_CAT_QOL),
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'
@@ -258,10 +254,7 @@ SettingsSaveState Settings::pollSave() {
 #endif  // IS_EMULATOR
 
 void Settings::set(SettingId id, u8 value) {
-    const SettingDesc &d = kSettingDescs[id];
-    if (d.numChoices != 0) {
-        value = value % d.numChoices;
-    }
+    value = value % kSettingDescs[id].numChoices;
     if (mData.values[id] != value) {
         mDirty = true;
     }
@@ -269,8 +262,7 @@ void Settings::set(SettingId id, u8 value) {
 }
 
 void Settings::cycle(SettingId id, int dir) {
-    const SettingDesc &d = kSettingDescs[id];
-    int n = d.numChoices ? d.numChoices : 2;
+    int n = kSettingDescs[id].numChoices;
     int v = (int)mData.values[id] + dir;
     // Wrap into [0, n). dir is +/-1, so one add/sub suffices.
     if (v < 0) {
@@ -287,15 +279,13 @@ void Settings::cycle(SettingId id, int dir) {
 const char *Settings::valueLabel(SettingId id) const {
     const SettingDesc &d = kSettingDescs[id];
     u8 v = mData.values[id];
-    if (d.type == SETTING_CHOICE && d.choices) {
+    if (d.choices) {
         return d.choices[v % d.numChoices];
     }
     return kBoolLabels[v ? 1 : 0];
 }
 
 const SettingDesc &Settings::desc(SettingId id) { return kSettingDescs[id]; }
-
-const char *Settings::iniKey(SettingId id) { return kIniKeys[id]; }
 
 // kSettingDescs is indexed by SettingId and must stay row-for-row aligned with
 // SUSAMUNE_SETTING_LIST. Adding a list row without a descriptor row (or vice

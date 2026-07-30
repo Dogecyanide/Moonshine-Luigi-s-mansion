@@ -14,19 +14,13 @@
 
 namespace {
 
-// Stable ini keys, in BindId order, from the same list that builds the enum --
-// so the launcher's key table and this one cannot drift apart.
-#define SUSAMUNE_BIND_KEY(id, key) key,
-const char *const kIniKeys[BIND_COUNT] = { SUSAMUNE_BIND_LIST(SUSAMUNE_BIND_KEY) };
-#undef SUSAMUNE_BIND_KEY
-
-// Button bit -> token, in the order a combo is rendered.
+// Button bit -> menu glyph, in the order a combo is rendered. The ini token in
+// SUSAMUNE_BIND_BUTTON_LIST is dropped: only the launcher reads susamune.ini.
 struct BindButton {
     u16         bit;
-    const char *token;
     const char *display;
 };
-#define SUSAMUNE_BIND_BUTTON_ROW(bit, token, display) { (u16)(bit), token, display },
+#define SUSAMUNE_BIND_BUTTON_ROW(bit, token, display) { (u16)(bit), display },
 const BindButton kButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_BIND_BUTTON_ROW) };
 #undef SUSAMUNE_BIND_BUTTON_ROW
 
@@ -209,8 +203,6 @@ void Binds::format(u16 mask, char *out) {
 }
 
 const BindDesc &Binds::desc(BindId id) { return kBindDescs[id]; }
-
-const char *Binds::iniKey(BindId id) { return kIniKeys[id]; }
 
 // kBindDescs is indexed by BindId and must stay row-for-row aligned with
 // SUSAMUNE_BIND_LIST, exactly as kSettingDescs is with SUSAMUNE_SETTING_LIST.

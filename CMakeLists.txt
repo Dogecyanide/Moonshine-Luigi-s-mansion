@@ -95,7 +95,7 @@ endif()
 
 set(SHARED_FLAGS
     --target=powerpc-gecko-ibm-kuribo-eabi
-    -Os
+    -Oz
     -fno-exceptions
     -fno-rtti
     # `s8` in include/ is a typedef for plain `char`, which is unsigned on this

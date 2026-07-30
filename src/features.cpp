@@ -22,28 +22,37 @@
 
 namespace {
 
-// One masked write to a 32-bit word. want = (orig & ~mask) | value.
-//   - mask 0xFFFFFFFF -> replace the whole word (gecko 04 / C6 / instr).
-//   - mask 0xFFFF0000 -> replace the high halfword only (gecko 02 at a
-//     word-aligned address, e.g. turning a conditional branch unconditional).
+// One write to a 32-bit word. Game addresses are word-aligned, so the low two
+// bits of `addr` are free and carry a halfword-select flag instead of a full
+// 32-bit mask per row -- nearly every one of the ~35 rows is a whole-word
+// write, and the mask would be dead weight on all of them.
+const u32 kMaskHi = 1u;  // replace the high halfword only (gecko 02)
+const u32 kMaskLo = 2u;
+
 struct Patch {
     u32 addr;
-    u32 mask;
     u32 value;
 };
 
+inline u32 patchAddr(const Patch &p) { return p.addr & ~(kMaskHi | kMaskLo); }
+inline u32 patchMask(const Patch &p) {
+    if (p.addr & kMaskHi) return 0xFFFF0000u;
+    if (p.addr & kMaskLo) return 0x0000FFFFu;
+    return 0xFFFFFFFFu;
+}
+
 struct Feature {
-    SettingId    id;
     const Patch *patches;
+    u8           id;   // a SettingId
     u8           num;
 };
 
 // Whole-word patch: `val` is the on-state word.
 #define FWORD(jp, us, pal, val) \
-    { SUSAMUNE_MEM1_ADDR(jp, us, pal), 0xFFFFFFFFu, (val) }
-// Masked patch: replace only the bits in `mask` with `val`.
-#define FMASK(jp, us, pal, mask, val) \
-    { SUSAMUNE_MEM1_ADDR(jp, us, pal), (mask), (val) }
+    { SUSAMUNE_MEM1_ADDR(jp, us, pal), (val) }
+// High-halfword-only patch.
+#define FHALFHI(jp, us, pal, val) \
+    { SUSAMUNE_MEM1_ADDR(jp, us, pal) | kMaskHi, (val) }
 
 // Patch at a hardcoded *heap* address (one region's, so these live inside a
 // per-region #if). The mod raises the game's arena floor by
@@ -52,13 +61,13 @@ struct Feature {
 // PatchSusamuneGeckoCodes() in the launcher does the same to the .gct when
 // these codes are run as gecko instead of ported.
 #define FHEAP(addr, val) \
-    { (addr) + SUSAMUNE_ARENA_RESERVE_SIZE, 0xFFFFFFFFu, (val) }
-#define FHEAPMASK(addr, mask, val) \
-    { (addr) + SUSAMUNE_ARENA_RESERVE_SIZE, (mask), (val) }
+    { (addr) + SUSAMUNE_ARENA_RESERVE_SIZE, (val) }
+#define FHEAPLO(addr, val) \
+    { ((addr) + SUSAMUNE_ARENA_RESERVE_SIZE) | kMaskLo, (val) }
 
 // A patch row whose address is filled in at runtime (PAL Fast Text, below).
 // applyPatches() skips rows that are still unresolved.
-#define FUNRESOLVED() { 0u, 0xFFFFFFFFu, 0u }
+#define FUNRESOLVED() { 0u, 0u }
 
 // ---------------------------------------------------------------------
 // Patch tables, one per feature. Addresses are (jp=GMSJ01, us=GMSE01,
@@ -128,8 +137,8 @@ const Patch kFmvSkips[] = {
 //   jp 021D72E8 / us 021FF85C / pal 021F7740 = 4800 (hi16) -> b
 const Patch kRespawnShines[] = {
     FWORD(0x801BF378, 0x801E792C, 0x801DF804, 0x48000050),
-    FMASK(0x801BFA48, 0x801E7FFC, 0x801DFED4, 0xFFFF0000, 0x48000000),
-    FMASK(0x801D72E8, 0x801FF85C, 0x801F7740, 0xFFFF0000, 0x48000000),
+    FHALFHI(0x801BFA48, 0x801E7FFC, 0x801DFED4, 0x48000000),
+    FHALFHI(0x801D72E8, 0x801FF85C, 0x801F7740, 0x48000000),
 };
 
 // Fruit Never Time Out: overwrite the fruit despawn-timer limit (a datum in
@@ -214,7 +223,7 @@ const Patch kNeverPauseIgt[] = {
 //   pal one buffer per language, resolved at runtime -- see kFastTextPalMsg.
 #if defined(SUSAMUNE_VERSION_JP)
 #define FAST_TEXT_MSG_ROWS                            \
-    FHEAPMASK(0x808D8A7Cu, 0x0000FFFFu, 0x00008149u), \
+    FHEAPLO(0x808D8A7Cu, 0x00008149u),                \
     FHEAP(0x808D8A80u, 0x81498149u),                  \
     FHEAP(0x808D8A84u, 0x00000000u),
 #elif defined(SUSAMUNE_VERSION_US)
@@ -276,7 +285,7 @@ const Patch kForcePlaza[] = {
     FWORD(0x8010C5F8, 0x802B7940, 0x802AF910, 0x60000000),
 };
 
-#define FEAT(id, arr) { id, arr, (u8)(sizeof(arr) / sizeof((arr)[0])) }
+#define FEAT(id, arr) { arr, (u8)(id), (u8)(sizeof(arr) / sizeof((arr)[0])) }
 
 constexpr Feature kFeatures[] = {
     FEAT(SETTING_INFINITE_LIVES, kInfiniteLives),
@@ -310,15 +319,28 @@ constexpr int countFeaturePatches() {
     return count;
 }
 constexpr int kNumPatches = countFeaturePatches();
-struct PatchState {
-    u32  orig;
-    u32  last;
-    bool captured;
-};
-// Per-patch mutable state, flattened across every feature in table order.
-// Captured lazily on first apply: `orig` is the retail word, `last` is the
-// word we most recently wrote (so we can skip untouched patches).
-PatchState gPatchState[kNumPatches];
+// Retail word at each patch site, flattened across every feature in table
+// order and captured lazily on first apply. Whether a slot has been captured
+// needs its own bit rather than an `orig == 0` sentinel: the Fast Text
+// message-buffer rows patch heap words that are legitimately zero.
+u32 gPatchOrig[kNumPatches];
+u8  gPatchCaptured[kNumPatches];
+// Whether our word is currently installed. Writes happen on the transition
+// only -- NOT whenever the site differs from what we want. Some sites are heap
+// words the game rewrites on its own (again Fast Text's message buffer), and
+// re-asserting a disabled patch's captured `orig` over those would corrupt
+// live game data.
+u8  gPatchOn[kNumPatches];
+
+// True the first time it is called for a given slot. Byte per slot rather than
+// a bitmask: the shift/mask sequence costs more code than the bytes it saves.
+inline bool takeOnce(u8 *flags, int i) {
+    if (flags[i]) {
+        return false;
+    }
+    flags[i] = 1;
+    return true;
+}
 
 // =====================================================================
 // Asm-hook features: ports of the gecko C2 ("insert asm") codes.
@@ -529,14 +551,14 @@ u32 gCaveForcePlaza[] = {
 };
 
 struct AsmHook {
-    SettingId id;
-    u32       site;   // game address whose instruction becomes b->cave
-    u32      *cave;    // asm block; its trailing word is patched to b->site+4
-    u8        n;       // word count of cave
+    u32  site;   // game address whose instruction becomes b->cave
+    u32 *cave;   // asm block; its trailing word is patched to b->site+4
+    u8   id;     // a SettingId
+    u8   n;      // word count of cave
 };
 
 #define HOOK(id, jp, us, pal, caveArr) \
-    { id, SUSAMUNE_MEM1_ADDR(jp, us, pal), caveArr, \
+    { SUSAMUNE_MEM1_ADDR(jp, us, pal), caveArr, (u8)(id), \
       (u8)(sizeof(caveArr) / sizeof(u32)) }
 
 const AsmHook kAsmHooks[] = {
@@ -572,13 +594,9 @@ const AsmHook kAsmHooks[] = {
 
 const int kNumHooks = (int)(sizeof(kAsmHooks) / sizeof(kAsmHooks[0]));
 
-struct HookState {
-    u32  orig;    // retail word at the site (captured)
-    u32  last;    // word we last wrote at the site
-    u32  onWord;  // b site->cave, computed once the cave is placed
-    bool inited;
-};
-HookState gHookState[kNumHooks];
+u32 gHookOrig[kNumHooks];  // retail word at each site (captured)
+u8  gHookInited[kNumHooks];
+u8  gHookOn[kNumHooks];
 
 #if defined(SUSAMUNE_VERSION_PAL)
 // Fill in Fast Text's message-buffer row (the last row of gFastText) from the
@@ -622,26 +640,25 @@ void applyPatches() {
         if (idx + feat.num > kNumPatches) {
             return;
         }
-        bool on = gSettings.getBool(feat.id);
+        bool on = gSettings.getBool((SettingId)feat.id);
         for (int j = 0; j < feat.num; j++, idx++) {
-            const Patch &p = feat.patches[j];
-            PatchState  &s = gPatchState[idx];
+            const Patch &p    = feat.patches[j];
+            u32          addr = patchAddr(p);
 
-            if (p.addr == 0) {
+            if (addr == 0) {
                 continue;  // unresolved (PAL Fast Text message buffer)
             }
 
-            if (!s.captured) {
-                s.orig     = *reinterpret_cast<volatile u32 *>(p.addr);
-                s.last     = s.orig;
-                s.captured = true;
+            if (takeOnce(gPatchCaptured, idx)) {
+                gPatchOrig[idx] = *reinterpret_cast<volatile u32 *>(addr);
+            }
+            if (on == (bool)gPatchOn[idx]) {
+                continue;
             }
 
-            u32 want = on ? ((s.orig & ~p.mask) | p.value) : s.orig;
-            if (want != s.last) {
-                writeGameCode(p.addr, want);
-                s.last = want;
-            }
+            u32 orig = gPatchOrig[idx];
+            writeGameCode(addr, on ? ((orig & ~patchMask(p)) | p.value) : orig);
+            gPatchOn[idx] = on;
         }
     }
 }
@@ -649,9 +666,8 @@ void applyPatches() {
 void applyHooks() {
     for (int k = 0; k < kNumHooks; k++) {
         const AsmHook &h = kAsmHooks[k];
-        HookState     &s = gHookState[k];
 
-        if (!s.inited) {
+        if (takeOnce(gHookInited, k)) {
             // The cave already holds the asm (loaded with the blob); patch its
             // trailing placeholder to `b -> site+4` in place, then flush the
             // whole cave so the core can execute it.
@@ -661,17 +677,17 @@ void applyHooks() {
             DCFlushRange(h.cave, h.n * 4);
             ICInvalidateRange(h.cave, h.n * 4);
 
-            s.orig   = *reinterpret_cast<volatile u32 *>(h.site);
-            s.onWord = branchWord(h.site, reinterpret_cast<u32>(&h.cave[0]));
-            s.last   = s.orig;
-            s.inited = true;
+            gHookOrig[k] = *reinterpret_cast<volatile u32 *>(h.site);
         }
 
-        u32 want = gSettings.getBool(h.id) ? s.onWord : s.orig;
-        if (want != s.last) {
-            writeGameCode(h.site, want);
-            s.last = want;
+        bool on = gSettings.getBool((SettingId)h.id);
+        if (on == (bool)gHookOn[k]) {
+            continue;
         }
+        writeGameCode(h.site,
+                      on ? branchWord(h.site, reinterpret_cast<u32>(&h.cave[0]))
+                         : gHookOrig[k]);
+        gHookOn[k] = on;
     }
 }
 
@@ -684,13 +700,12 @@ void applyHooks() {
 
 struct ChoicePatch {
     u32        addr;
-    u32        mask;
     const u32 *vals;  // vals[c-1] for choice c>=1; choice 0 uses captured orig
 };
 
 struct ChoiceFeature {
-    SettingId          id;
     const ChoicePatch *patches;
+    u8                 id;   // a SettingId
     u8                 num;
 };
 
@@ -699,8 +714,7 @@ struct ChoiceFeature {
 //   Rocket=3BE00001, Turbo=3BE00005, Hover=3BE00004 (li r31, id); Unlocked=orig
 const u32 kNozzleVals[] = { 0x3BE00001u, 0x3BE00005u, 0x3BE00004u };
 const ChoicePatch kNozzlePatches[] = {
-    { SUSAMUNE_MEM1_ADDR(0x801494D4u, 0x80269F50u, 0x80261CDCu), 0xFFFFFFFFu,
-      kNozzleVals },
+    { SUSAMUNE_MEM1_ADDR(0x801494D4u, 0x80269F50u, 0x80261CDCu), kNozzleVals },
 };
 
 // FLUDD in secrets (from DPad Functions, mode bits 0x401/0x402/0x404). Two
@@ -710,11 +724,11 @@ const ChoicePatch kNozzlePatches[] = {
 const u32 kFluddBtn0[] = { 0x60000000u, 0x48000018u };
 const u32 kFluddBtn1[] = { 0x60000000u, 0x48000014u };
 const ChoicePatch kFluddPatches[] = {
-    { SUSAMUNE_MEM1_ADDR(0x80198784u, 0x801C0910u, 0x801B87C8u), 0xFFFFFFFFu, kFluddBtn0 },
-    { SUSAMUNE_MEM1_ADDR(0x800EC0F4u, 0x80298B88u, 0x80290A20u), 0xFFFFFFFFu, kFluddBtn1 },
+    { SUSAMUNE_MEM1_ADDR(0x80198784u, 0x801C0910u, 0x801B87C8u), kFluddBtn0 },
+    { SUSAMUNE_MEM1_ADDR(0x800EC0F4u, 0x80298B88u, 0x80290A20u), kFluddBtn1 },
 };
 
-#define CHOICE(id, arr) { id, arr, (u8)(sizeof(arr) / sizeof((arr)[0])) }
+#define CHOICE(id, arr) { arr, (u8)(id), (u8)(sizeof(arr) / sizeof((arr)[0])) }
 
 constexpr ChoiceFeature kChoiceFeatures[] = {
     CHOICE(SETTING_NOZZLE_LOCK, kNozzlePatches),
@@ -732,7 +746,9 @@ constexpr int countChoicePatches() {
     return count;
 }
 constexpr int kNumChoicePatches = countChoicePatches();
-PatchState gChoiceState[kNumChoicePatches];
+u32 gChoiceOrig[kNumChoicePatches];
+u8  gChoiceCaptured[kNumChoicePatches];
+u8  gChoiceCur[kNumChoicePatches];  // choice currently installed; 0 = original
 
 void applyChoices() {
     int idx = 0;
@@ -741,23 +757,18 @@ void applyChoices() {
         if (idx + cf.num > kNumChoicePatches) {
             return;
         }
-        u8                   c  = gSettings.get(cf.id);
+        u8 c = gSettings.get((SettingId)cf.id);
         for (int j = 0; j < cf.num; j++, idx++) {
             const ChoicePatch &p = cf.patches[j];
-            PatchState        &s = gChoiceState[idx];
 
-            if (!s.captured) {
-                s.orig     = *reinterpret_cast<volatile u32 *>(p.addr);
-                s.last     = s.orig;
-                s.captured = true;
+            if (takeOnce(gChoiceCaptured, idx)) {
+                gChoiceOrig[idx] = *reinterpret_cast<volatile u32 *>(p.addr);
             }
-
-            u32 want = (c == 0) ? s.orig
-                                : ((s.orig & ~p.mask) | p.vals[c - 1]);
-            if (want != s.last) {
-                writeGameCode(p.addr, want);
-                s.last = want;
+            if (c == gChoiceCur[idx]) {
+                continue;
             }
+            writeGameCode(p.addr, c == 0 ? gChoiceOrig[idx] : p.vals[c - 1]);
+            gChoiceCur[idx] = c;
         }
     }
 }

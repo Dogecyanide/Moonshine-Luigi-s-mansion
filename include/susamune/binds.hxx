@@ -109,7 +109,6 @@ public:
     static void format(u16 mask, char *out);
 
     static const BindDesc &desc(BindId id);
-    static const char     *iniKey(BindId id);
 
     // --- persistence (see settings.cpp, which owns the MEM2 handoff) ---
     void adopt(u16 mask, BindId id);  // like set(), but not a user edit

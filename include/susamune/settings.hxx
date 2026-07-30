@@ -37,11 +37,6 @@ enum SettingId {
 };
 #undef SUSAMUNE_SETTING_ENUM
 
-enum SettingType {
-    SETTING_BOOL,    // two states, rendered On / Off
-    SETTING_CHOICE,  // 1-of-N, rendered as choices[value]
-};
-
 // Which menu tab a setting appears under. The menu builds one generic tab per
 // category and renders the settings tagged with it.
 enum SettingCategory {
@@ -52,14 +47,14 @@ enum SettingCategory {
     SETTING_CAT_COUNT
 };
 
-// Static, const description of one setting. Lives in .rodata.
+// Static, const description of one setting. Field order and widths are chosen
+// so a row is 12 bytes rather than 24; there are ~30 of these.
 struct SettingDesc {
-    const char        *name;        // label shown in the menu
-    SettingType        type;
-    u8                 numChoices;  // SETTING_BOOL => 2
+    const char        *name;          // label shown in the menu
+    const char *const *choices;       // null => bool, rendered On / Off
+    u8                 numChoices;    // 2 for a bool
     u8                 defaultValue;
-    const char *const *choices;     // SETTING_CHOICE => numChoices labels
-    SettingCategory    category;    // menu tab it renders under
+    u8                 category;      // a SettingCategory
 };
 
 // The live payload, in the mod's BSS. POD; magic + version mirror the
@@ -128,10 +123,6 @@ public:
     const char *valueLabel(SettingId id) const;
 
     static const SettingDesc &desc(SettingId id);
-
-    // Stable ini key for a setting (from settings_list.h). Exposed mainly so
-    // debug output can name a setting the same way the file does.
-    static const char *iniKey(SettingId id);
 
 private:
     SettingsData      mData;
