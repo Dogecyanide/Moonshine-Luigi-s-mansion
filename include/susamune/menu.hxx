@@ -49,6 +49,8 @@ public:
     // (JUTResFont) reconfigures, so a bare J2DFillBox after any text renders as
     // skewed garbage.
     void fillBox(int x, int y, int w, int h, JUtility::TColor color);
+    // Same, for a convex polygon: `xy` is `n` interleaved x,y pairs.
+    void fillPoly(const s16 *xy, int n, JUtility::TColor color);
     // Pixel width of `s` at the given cell size (for right-align / tab layout).
     // Reads the font's per-glyph advances, so it matches what drawText lays
     // out -- the font is proportional and any estimate makes right-aligned

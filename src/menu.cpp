@@ -17,9 +17,10 @@
 #include "susamune/settings.hxx"
 #include "susamune/util.hxx"
 #if ENABLE_DEBUG_WARPS
-#include "susamune/warp.hxx"
+#include "susamune/debug_warp.hxx"
 #endif
 
+#include "Dolphin/GX.h"
 #include "JSystem/JAudio/JASystem/JASTrackMgr.hxx"
 #include "J2D/J2DOrthoGraph.hxx"
 #include "J2D/J2DPane.hxx"  // J2DFillBox
@@ -608,6 +609,30 @@ void Menu::fillBox(int x, int y, int w, int h, Color color) {
         mOrtho->setup2D();
     }
     J2DFillBox(x, y, w, h, color);
+}
+
+void Menu::fillPoly(const s16 *xy, int n, Color color) {
+    // setup2D() reasserts the flat vertex state and the position matrix, the
+    // same preconditions J2DGrafContext::fillBox relies on.
+    if (!mOrtho) {
+        return;
+    }
+    // Vertices go to the write-gather pipe by address: GX.h reaches it through
+    // a `wgPipe` object that none of the game maps export.
+    volatile u16 *const wgU16 = (volatile u16 *)0xCC008000;
+    volatile u32 *const wgU32 = (volatile u32 *)0xCC008000;
+
+    mOrtho->setup2D();
+    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET);
+    GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, (u16)n);
+    const u32 packed = ((u32)color.r << 24) | ((u32)color.g << 16) |
+                       ((u32)color.b << 8) | (u32)color.a;
+    for (int i = 0; i < n; i++) {
+        *wgU16 = (u16)xy[i * 2];
+        *wgU16 = (u16)xy[i * 2 + 1];
+        *wgU16 = 0;
+        *wgU32 = packed;
+    }
 }
 
 void Menu::switchTab(int dir) {

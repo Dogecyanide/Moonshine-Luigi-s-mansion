@@ -33,8 +33,15 @@ public:
         STATE_GAME_STARTING = 2,
         STATE_NORMAL        = 4,
         STATE_PAUSE_MENU    = 5,
+        // Entered after moveStage(): fades out, then direct() reports the
+        // next app state instead of returning 0.
+        STATE_STAGE_EXIT    = 9,
         STATE_FREEZE        = 10,
-        STATE_SAVE_CARD     = 11
+        STATE_SAVE_CARD     = 11,
+        // Same as STATE_STAGE_EXIT, reached from the card/quit paths. Like the
+        // pause states it stops object movement and animation, and its own
+        // branch does nothing until the fader is fully faded out.
+        STATE_STAGE_EXIT_2  = 12
     };
 
     enum State { WARP_OUT = 2 };

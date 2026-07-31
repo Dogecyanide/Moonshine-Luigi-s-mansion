@@ -57,35 +57,94 @@ These features may have binds, menu settings, and/or their own GUI elements, and
 
 ## Warp Wheel ({Instant} Level Select)
 
-TBD
+A separate menu (triggered by Z by default) that opens a wheel with 8 slices, 9 including a region in the center, showing warp options. The warps are organized into a hierarchy of a root wheel which selects roughly speaking the world for the warp, and then each sub-wheel has different warps for the various episodes and subareas in the worlds. Pointing the control stick in one of the 8 regions selects that region. Directions go from up notch (1) clockwise. Each region has some indicative text (some of it can be shortened to fit, like Bianco Hills -> Bianco ; Gelato Beach -> Gelato, etc. As long as it's indicative.) By default, when you select a world and press A, it will then show the standard episodes of that world. For all the worlds in the root wheel except for Delfino and Sirena (Inside), this is simply the standard episodes 1 - 8. Selecting an episode and pressing A warps you to it. If X is pressed while in the menu, then "subarea mode" is enabled and then instead you see the subareas you can warp to in that world. Some usage examples:
 
-open with Z. will need an option to disable Z menu to not conflict
+To go to Pianta Village, Episode 4:
+- Press Z
+- Hold downleft notch on the control stick and press A
+- Hold downright notch on the control stick and press A
 
-1st wheel
-- Bianco Hills
-- Ricco Harbor
-- Gelato Beach
-- Pinna Park
-- Sirena Beach
-- Pianta Village 
-- Noki Bay
-- Corona Mountain
+To go to Pachinko secret:
+- Press Z 
+- Press A with the control stick neutral
+- Press X, then hold upright notch and press A 
+
+Root Wheel
+1. Bianco Hills
+2. Ricco Harbor
+3. Gelato Beach
+4. Pinna Park
+5. Sirena Beach
+6. Pianta Village 
+7. Noki Bay
+8. Sirena (Inside)
 Center: Delfino 
 
-2nd wheel - Normally showing episodes 1 - 8, subareas at center
-Or Press X to switch to Subareas and Secrets?
+Bianco: [subareas]
+2. Windmill
+3. Bianco 3
+6. Bianco 6
 
-Subareas/secrets will depend on the level you are in. Take all the sublevels and secrets listed on the code
+Ricco: [subareas]
+1. Blooper battle
+2. Blooper race
+4. Ricco 4
+5. Blooper battle
 
-Cap at 8. Less than 8 should definitely not fill the whole circle (align to quadrants).
-More than 8 TBD.
+Gelato: [subareas]
+1. Gelato 1
+4. Sand Bird
 
-L / R to different pages when there are more than 8.
+Pinna: [subareas]
+1. Mecha-Bowser
+2. Pinna 2
+6. Pinna 6
+8. Balloons
 
-area lock / other edge cases with level select code.
+Sirena: [subareas]
+2. -> Sirena 2
+4. -> Sirena 4 
+5. -> King Boo
 
-Instant restart -> quick 
-Instant restart through level select -> longer
+Sirena (Inside): [main]
+1. -> Ep. 3 Hotel
+2. -> Ep. 4 Hotel
+3. -> Ep. 4 Casino
+4. -> Ep. 5 Hotel
+5. -> Ep. 5 Casino
+6. -> Ep. 7 Hotel
+7. -> Ep. 8 Hotel Red Coins 
+
+Pianta: [subareas]
+5. Pianta 5
+
+Noki: [subareas]
+3. Bottle
+4. Eel
+6. Noki 6
+8. Red Coin Fish
+
+Delfino: [main]
+1. Bianco Plant
+2. Bianco Chase
+3. Ricco/Gelato Plants
+4. Peaceful
+5. Pinna Cutscene
+6. Yoshi Unlock
+7. Flooded Plaza
+
+Delfino: [secrets]
+1. Beach Pipe
+2. Pachinko
+3. Grass Pipe
+4. Lilypad
+5. Jail
+6. Airstrip
+7. Airstrip reds
+8. Bowser
+Center: Corona
+
+Note that some stages are sparse. This means that there should just be no slices drawn at the corresponding angles. 
 
 ## Level Restart
 

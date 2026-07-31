@@ -14,8 +14,9 @@
 #include "susamune/features.hxx"
 #include "susamune/actions.hxx"
 #include "susamune/binds.hxx"
+#include "susamune/warp_wheel.hxx"
 #if ENABLE_DEBUG_WARPS
-#include "susamune/warp.hxx"
+#include "susamune/debug_warp.hxx"
 #endif
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
@@ -88,6 +89,8 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
         state = director->mCurState;
     }
 
+    state = LevelWarp::kick(director, state);
+
 #if ENABLE_DEBUG_WARPS
     if (Warp::pending()) {
         Warp::execute();
@@ -136,8 +139,27 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     // it and asks whether the menu bind was pressed this frame, which would
     // otherwise be answered from the previous frame's sample.
     gBinds.update();
+    // Before direct(): while the wheel is open it takes the pad away from
+    // the game.
+    WarpWheel::update(gpApplication.mGamePads[0]);
 
+    // Freeze the stage while an overlay is up. direct() runs the movement and
+    // animation perform lists only outside the pause and stage-exit states, so
+    // lending it one of those for the call is the entire pause; state 12 is the
+    // one whose own branch does nothing while the fader is up. Any app state it
+    // did produce would be a state change we never asked for, so drop it.
+    const bool freeze = gpMarDirector &&
+                        gpMarDirector->mCurState == TMarDirector::STATE_NORMAL &&
+                        ((gMenu && gMenu->shown()) || WarpWheel::shown());
+    if (freeze) {
+        gpMarDirector->mCurState = TMarDirector::STATE_STAGE_EXIT_2;
+    }
     int state = director->direct();
+    if (freeze) {
+        gpMarDirector->mCurState = TMarDirector::STATE_NORMAL;
+        state = 0;
+    }
+    state = LevelWarp::onDirected(state);
 
     // Apply/restore the toggled memory-patch features (ported gecko codes).
     // Runs every frame like the gecko handler; no-ops when nothing changed.
@@ -175,6 +197,7 @@ extern "C" void afterDraw() {
         
         if (gMenu)
             gMenu->draw(&ortho);
+        WarpWheel::draw();
 #if ENABLE_SAVESTATE_DBG
         if (gSavestateMgr)
             gSavestateMgr->draw(&ortho);

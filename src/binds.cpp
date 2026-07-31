@@ -34,6 +34,7 @@ const u16 kA     = JUTGamePad::A;
 const u16 kB     = JUTGamePad::B;
 const u16 kX     = JUTGamePad::X;
 const u16 kY     = JUTGamePad::Y;
+const u16 kZ     = JUTGamePad::Z;
 const u16 kStart = JUTGamePad::START;
 const u16 kDUp   = JUTGamePad::DPAD_UP;
 const u16 kDDown = JUTGamePad::DPAD_DOWN;
@@ -53,6 +54,10 @@ const BindDesc kBindDescs[BIND_COUNT] = {
     { "Open " SUSAMUNE_GLYPH_AMP " close menu", (u16)(kY | kStart) },
     { "Savestate: save", kDLeft },
     { "Savestate: load", kDRght },
+    { "Open warp wheel", kZ },
+    { "Instant restart", (u16)(kB | kDUp) },
+    { "Full restart", (u16)(kZ | kB | kDUp) },
+    { "Warp to last selected", (u16)(kY | kB | kDUp) },
 };
 
 int popCount(u16 v) {

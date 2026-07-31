@@ -72,7 +72,10 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     SBOOL("BGM slot counter", 0, SETTING_CAT_MISC),
 
     // Appended to preserve the persisted values[] layout.
-    SBOOL("Disable Z Menu", 0, SETTING_CAT_QOL),
+    // Disable Z Menu defaults on: Z is the warp wheel's bind.
+    SBOOL("Disable Z Menu", 1, SETTING_CAT_QOL),
+    // Area lock: every departure restarts the area being left instead.
+    SBOOL("Area lock", 0, SETTING_CAT_MISC),
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'

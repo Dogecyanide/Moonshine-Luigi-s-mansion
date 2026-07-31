@@ -7,8 +7,7 @@
 // game-mode hook and, when set, calls Warp::execute() then moveStage().
 // =====================================================================
 
-#include "susamune/warp.hxx"
-
+#include "susamune/debug_warp.hxx"
 #include "SMS/Manager/FlagManager.hxx"
 #include "SMS/System/Application.hxx"
 

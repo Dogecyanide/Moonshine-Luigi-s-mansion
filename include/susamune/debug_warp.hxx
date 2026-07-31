@@ -4,7 +4,7 @@
 #include <Dolphin/types.h>
 
 // =====================================================================
-// warp.hxx
+// debug_warp.hxx
 //
 // Debug stage-warp declarations. The implementation lives in debug_warp.cpp
 // and is only compiled when ENABLE_DEBUG_WARPS is enabled. The menu
