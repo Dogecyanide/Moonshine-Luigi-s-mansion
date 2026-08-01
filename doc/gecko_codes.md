@@ -148,17 +148,13 @@ Note that some stages are sparse. This means that there should just be no slices
 
 ## Level Restart
 
-There are 3 relevant ways to restart the stage in the original gecko codes:
+Three ways to restart, as actions configurable with binds:
 
-1. **Instant Restart**: The quickest way to restart the level, and only works in the same area/subarea because it skips the full loading process.
-2. **Instant Level Select**: Restart with Z + B + D-Pad Up: instantly does a warp to the same area as the current (i.e. without having to go into the pause menu as you would with level select)
-3. **Instant Level Select**: Restart with Y + B + D-Pad Up: instantly does a warp to the _last selected warp_
+1. Instant Restart: B + D-Pad Up -- restart the current area keeping the respawn position Mario arrived at
+2. Full Restart: Z + B + D-Pad Up -- restart the current area, respawn position reset to the area's default
+3. Warp to Last Selected: Y + B + D-Pad Up -- warp to the _last selected warp_
 
-The mod should replicate the behavior of these 3 methods, with 3 actions configurable with binds. These are the names they should have in the menu and their default bind:
-
-1. Instant Restart: B + D-Pad Up
-2. Full Restart: Z + B + D-Pad Up
-3. Warp to Last Selected: Y + B + D-Pad Up
+All three are the same warp with a different destination; Instant Restart additionally points `mCurrentScene` at `mPrevScene` first, which is what preserves the respawn position. Upstream's separate **Instant Restart** gecko code is not ported -- it claims the same thing but blanks `mCurrentScene` instead, which is precisely what loses the respawn position.
 
 In addition, you should implement the Area Lock feature of **Instant Level Select**. This will make all warps restart the current area instead of sending Mario to other areas. (Read the documentation of the code for more details). This should be an on/off toggle setting in the menu.
 

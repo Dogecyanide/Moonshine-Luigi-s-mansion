@@ -55,9 +55,9 @@ const BindDesc kBindDescs[BIND_COUNT] = {
     { "Savestate: save", kDLeft },
     { "Savestate: load", kDRght },
     { "Open warp wheel", kZ },
-    { "Instant restart", (u16)(kB | kDUp) },
     { "Full restart", (u16)(kZ | kB | kDUp) },
     { "Warp to last selected", (u16)(kY | kB | kDUp) },
+    { "Instant restart", (u16)(kB | kDUp) },
 };
 
 int popCount(u16 v) {

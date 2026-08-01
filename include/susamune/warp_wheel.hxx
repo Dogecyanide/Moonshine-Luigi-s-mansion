@@ -34,9 +34,10 @@ struct Dest {
 // Arm a warp. warpTo() also records the destination for warpToLast().
 void warpTo(const Dest &dest);
 void warpToLast();
-// full = reload the area through the whole flag setup; otherwise just
-// re-enter it, which is quicker but only ever restarts the current area.
-void restart(bool full);
+// Reload the current area, by the same path a wheel warp takes. keepSpawn
+// brings Mario back out of the entrance he arrived through instead of the
+// area's default spawn.
+void restart(bool keepSpawn);
 
 // From onUpdateGameMode. Starts the exit transition when a warp is armed,
 // returning the director state to enter; otherwise returns `state` as-is.

@@ -31,13 +31,8 @@ const u8 kAreaCasino = 14;
 
 namespace {
 
-enum Kind {
-    KIND_NONE,
-    KIND_REENTER,  // re-enter the current area without the flag setup
-    KIND_WARP,
-};
-
-Kind             sKind = KIND_NONE;
+bool             sArmed;
+bool             sKeepSpawn;
 LevelWarp::Dest  sDest;
 LevelWarp::Dest  sLast;
 bool             sLastValid;
@@ -81,53 +76,50 @@ void warpTo(const Dest &dest) {
     sDest      = dest;
     sLast      = dest;
     sLastValid = true;
-    sKind      = KIND_WARP;
+    sArmed     = true;
+    sKeepSpawn = false;
 }
 
 void warpToLast() {
     if (sLastValid) {
-        sDest = sLast;
-        sKind = KIND_WARP;
+        sDest      = sLast;
+        sArmed     = true;
+        sKeepSpawn = false;
     }
 }
 
-void restart(bool full) {
-    if (!full) {
-        sKind = KIND_REENTER;
-        return;
-    }
+void restart(bool keepSpawn) {
     const TGameSequence &cur = gpApplication.mCurrentScene;
     sDest.area               = cur.mAreaID;
     sDest.episode            = cur.mEpisodeID;
     sDest.gameInt3           = currentGameInt3();
-    sKind                    = KIND_WARP;
+    sArmed                   = true;
+    sKeepSpawn               = keepSpawn;
 }
 
 u8 kick(TMarDirector *director, u8 state) {
-    if (sKind == KIND_NONE) {
+    if (!sArmed) {
         return state;
     }
+    sArmed       = false;
+    sTailPending = true;
 
-    TGameSequence &cur  = gpApplication.mCurrentScene;
-    TGameSequence &next = gpApplication.mNextScene;
-
-    if (sKind == KIND_REENTER) {
-        next.mAreaID    = cur.mAreaID;
-        next.mEpisodeID = cur.mEpisodeID;
-        next.mFlag.mVal = cur.mFlag.mVal;
-        // Blanking the current scene is what keeps the re-entry cheap: the
-        // stage it names is not the one being loaded, so nothing carries over.
-        cur.mAreaID    = 0;
-        cur.mEpisodeID = 0;
-        cur.mFlag.mVal = 0x40;
-        markQuickFreezeReset();
-    } else {
-        next.mAreaID    = sDest.area;
-        next.mEpisodeID = sDest.episode;
-        sTailPending    = true;
+    if (sKeepSpawn) {
+        sKeepSpawn = false;
+        // decideMarioPosIdx() picks Mario's entry point from mPrevScene, which
+        // TApplication fills from mCurrentScene as it loads -- so naming the
+        // area he arrived from leaves the entry point where it was and he comes
+        // back out of the same pipe. Safe only because applyDest() rewrites
+        // mNextScene at the end of the transition: the destination follows
+        // mCurrentScene too, and would otherwise be dragged along with it.
+        TGameSequence &cur = gpApplication.mCurrentScene;
+        cur.mAreaID        = gpApplication.mPrevScene.mAreaID;
+        cur.mEpisodeID     = gpApplication.mPrevScene.mEpisodeID;
     }
 
-    sKind = KIND_NONE;
+    gpApplication.mNextScene.mAreaID    = sDest.area;
+    gpApplication.mNextScene.mEpisodeID = sDest.episode;
+
     director->moveStage();
     return TMarDirector::STATE_STAGE_EXIT;
 }
@@ -284,11 +276,11 @@ const Slot kHotel[kNumSlots] = {
 const Slot kPlaza[kNumSlots] = {
     { "Bianco Plant", 1, 0, 0 },
     { "Bianco Chase", 1, 1, 0 },
-    { "R/G Plants", 1, 5, 0 },
-    { "Peaceful", 1, 7, 0 },
-    { "Pinna Cut", 1, 8, 0 },
-    { "Yoshi", 1, 9, 0 },
-    { "Flooded", 1, 2, 0 },
+    { "R" SUSAMUNE_GLYPH_AMP "G Plants", 1, 5, 0 },
+    { "Peaceful", 1, 2, 0 },
+    { "Pinna Cut", 1, 7, 0 },
+    { "Yoshi", 1, 8, 0 },
+    { "Flooded", 1, 9, 0 },
     EMPTY,
     EMPTY,
 };
@@ -378,7 +370,8 @@ const int kGap = 6;
 
 const int kTitleY   = 44;
 const int kTitleSz  = 20;
-const int kLabelSz  = 15;
+const int kLabelSz  = 12;
+const int kRootSz   = 16;
 const int kDigitSz  = 26;
 const int kFooterY  = 448;
 const int kFooterSz = 12;
@@ -497,7 +490,7 @@ void drawSlice(int i, bool selected) {
     corner((centreK + 15) & 15, centreK, kRadiusInner, quad + 6);
     gMenu->fillPoly(quad, 4, selected ? cSelected() : cSlice());
 
-    const int size = (sRoot >= 0 && !currentSlots()) ? kDigitSz : kLabelSz;
+    const int size = (sRoot < 0) ? kRootSz : ((!currentSlots()) ? kDigitSz : kLabelSz);
     drawCentred(label, kCx + kUnit[centreK][0] * kRadiusLabel / 4096,
                 kCy + kUnit[centreK][1] * kRadiusLabel / 4096 - size / 2, size,
                 selected ? cOnAccent() : cLabel());
@@ -513,8 +506,9 @@ void drawCentre(bool selected) {
         octagon[k * 2]     = (s16)(kCx + kUnit[k * 2 + 1][0] * kRadiusInner / 4096);
         octagon[k * 2 + 1] = (s16)(kCy + kUnit[k * 2 + 1][1] * kRadiusInner / 4096);
     }
+    const int size = (sRoot < 0) ? kRootSz : kLabelSz;
     gMenu->fillPoly(octagon, 8, selected ? cSelected() : cSlice());
-    drawCentred(label, kCx, kCy - kLabelSz / 2, kLabelSz,
+    drawCentred(label, kCx, kCy - size / 2, size,
                 selected ? cOnAccent() : cLabel());
 }
 
@@ -536,9 +530,9 @@ void update(TMarioGamePad *pad) {
     }
 
     if (gBinds.wasPressed(BIND_INSTANT_RESTART)) {
-        LevelWarp::restart(false);
-    } else if (gBinds.wasPressed(BIND_FULL_RESTART)) {
         LevelWarp::restart(true);
+    } else if (gBinds.wasPressed(BIND_FULL_RESTART)) {
+        LevelWarp::restart(false);
     } else if (gBinds.wasPressed(BIND_WARP_LAST)) {
         LevelWarp::warpToLast();
     }
