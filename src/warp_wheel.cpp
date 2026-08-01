@@ -159,163 +159,109 @@ s32 onDirected(s32 appState) {
 
 namespace {
 
-// One region of a wheel. A null label means the angle is empty and no slice
-// is drawn there.
+// Slices run clockwise from the up notch; index 8 is the centre.
+const int kNumSlots = 9;
+
+// One region of a wheel. `slot` is where it sits: slices run clockwise from
+// the up notch and 8 is the centre. Wheels are sparse, so only the positions
+// that exist are listed -- `slot` rides in the padding the label pointer's
+// alignment leaves behind and costs nothing.
 struct Slot {
     const char *label;
+    u8          slot;
     u8          area;
     u8          episode;
     u8          gameInt3;
 };
 
-// Slices run clockwise from the up notch; index 8 is the centre.
-const int kNumSlots = 9;
-
-#define EMPTY { nullptr, 0, 0, 0 }
-
-const Slot kBiancoSub[kNumSlots] = {
-    EMPTY,
-    { "Windmill", 0x37, 0, 1 },
-    { "Bianco 3", 0x2F, 0, 2 },
-    EMPTY,
-    EMPTY,
-    { "Bianco 6", 0x2E, 0, 5 },
-    EMPTY,
-    EMPTY,
-    EMPTY,
+// Every stored wheel's regions end to end, grouped in kWheels order.
+const Slot kSlots[] = {
+    // Bianco subareas
+    { "Windmill", 1, 0x37, 0, 1 },
+    { "Bianco 3", 2, 0x2F, 0, 2 },
+    { "Bianco 6", 5, 0x2E, 0, 5 },
+    // Ricco subareas. Both Gooper Blooper fights are the one scene ricco8
+    // behind area 0x3B, which has a single scenario, so there is only one.
+    { "Blooper", 0, 0x3B, 0, 0 },
+    { "Blooper Race", 1, 0x1E, 0, 1 },
+    { "Ricco 4", 3, 0x30, 0, 3 },
+    // Gelato subareas
+    { "Gelato 1", 0, 0x20, 0, 0 },
+    { "Sand Bird", 3, 0x21, 0, 3 },
+    // Pinna subareas
+    { "Mecha-Bowser", 0, 0x3A, 1, 0 },
+    { "Pinna 2", 1, 0x32, 0, 1 },
+    { "Pinna 6", 5, 0x29, 0, 5 },
+    { "Balloons", 7, 0x3A, 0, 7 },
+    // Sirena subareas
+    { "Sirena 2", 1, 0x33, 0, 1 },
+    { "Sirena 4", 3, 0x28, 0, 3 },
+    { "King Boo", 4, 0x38, 0, 4 },
+    // Pianta subareas
+    { "Pianta 5", 4, 0x2A, 0, 4 },
+    // Noki subareas
+    { "Bottle", 2, 0x2C, 0, 2 },
+    { "Eel", 3, 0x39, 0, 3 },
+    { "Noki 6", 5, 0x1F, 0, 5 },
+    { "Red Fish", 7, 0x10, 0, 7 },
+    // Sirena hotel. The hotel and the casino each hide several scenarios
+    // behind one area id; gameInt3 is what separates them.
+    { "Ep2 Hotel", 0, 7, 0, 1 },
+    { "Ep3 Hotel", 1, 7, 1, 2 },
+    { "Ep4 Hotel", 2, 7, 2, 3 },
+    { "Ep4 Casino", 3, 14, 0, 3 },
+    { "Ep5 Hotel", 4, 7, 2, 4 },
+    { "Ep5 Casino", 5, 14, 1, 4 },
+    { "Ep7 Hotel", 6, 7, 3, 6 },
+    { "Ep8 Reds", 7, 7, 4, 7 },
+    // Delfino Plaza
+    { "Bianco Plant", 0, 1, 0, 0 },
+    { "Bianco Chase", 1, 1, 1, 0 },
+    { "R" SUSAMUNE_GLYPH_AMP "G Plants", 2, 1, 5, 0 },
+    { "Peaceful", 3, 1, 2, 0 },
+    { "Pinna Cut", 4, 1, 7, 0 },
+    { "Yoshi", 5, 1, 8, 0 },
+    { "Flooded", 6, 1, 9, 0 },
+    // Delfino secrets
+    { "Beach Pipe", 0, 0x15, 0, 0 },
+    { "Pachinko", 1, 0x16, 0, 0 },
+    { "Grass Pipe", 2, 0x17, 0, 0 },
+    { "Lilypad", 3, 0x18, 0, 0 },
+    { "Jail", 4, 0x1D, 0, 0 },
+    { "Airstrip", 5, 0x00, 0, 0 },
+    { "Air Reds", 6, 0x14, 0, 0 },
+    { "Bowser", 7, 0x3C, 0, 0 },
+    { "Corona", 8, 0x34, 0, 0 },
 };
 
-// Both Gooper Blooper fights are the one scene ricco8 behind area 0x3B, which
-// has a single scenario -- there is no second destination to point slot 5 at.
-const Slot kRiccoSub[kNumSlots] = {
-    { "Blooper", 0x3B, 0, 0 },
-    { "Blooper Race", 0x1E, 0, 1 },
-    EMPTY,
-    { "Ricco 4", 0x30, 0, 3 },
-    EMPTY,
-    EMPTY,
-    EMPTY,
-    EMPTY,
-    EMPTY,
-};
-
-const Slot kGelatoSub[kNumSlots] = {
-    { "Gelato 1", 0x20, 0, 0 },
-    EMPTY,
-    EMPTY,
-    { "Sand Bird", 0x21, 0, 3 },
-    EMPTY,
-    EMPTY,
-    EMPTY,
-    EMPTY,
-    EMPTY,
-};
-
-const Slot kPinnaSub[kNumSlots] = {
-    { "Mecha-Bowser", 0x3A, 1, 0 },
-    { "Pinna 2", 0x32, 0, 1 },
-    EMPTY,
-    EMPTY,
-    EMPTY,
-    { "Pinna 6", 0x29, 0, 5 },
-    EMPTY,
-    { "Balloons", 0x3A, 0, 7 },
-    EMPTY,
-};
-
-const Slot kSirenaSub[kNumSlots] = {
-    EMPTY,
-    { "Sirena 2", 0x33, 0, 1 },
-    EMPTY,
-    { "Sirena 4", 0x28, 0, 3 },
-    { "King Boo", 0x38, 0, 4 },
-    EMPTY,
-    EMPTY,
-    EMPTY,
-    EMPTY,
-};
-
-const Slot kPiantaSub[kNumSlots] = {
-    EMPTY,
-    EMPTY,
-    EMPTY,
-    EMPTY,
-    { "Pianta 5", 0x2A, 0, 4 },
-    EMPTY,
-    EMPTY,
-    EMPTY,
-    EMPTY,
-};
-
-const Slot kNokiSub[kNumSlots] = {
-    EMPTY,
-    EMPTY,
-    { "Bottle", 0x2C, 0, 2 },
-    { "Eel", 0x39, 0, 3 },
-    EMPTY,
-    { "Noki 6", 0x1F, 0, 5 },
-    EMPTY,
-    { "Red Fish", 0x10, 0, 7 },
-    EMPTY,
-};
-
-// The hotel and the casino each hide several scenarios behind one area id;
-// gameInt3 is what separates them.
-const Slot kHotel[kNumSlots] = {
-    { "Ep3 Hotel", 7, 1, 2 },
-    { "Ep4 Hotel", 7, 2, 3 },
-    { "Ep4 Casino", 14, 0, 3 },
-    { "Ep5 Hotel", 7, 2, 4 },
-    { "Ep5 Casino", 14, 1, 4 },
-    { "Ep7 Hotel", 7, 3, 6 },
-    { "Ep8 Reds", 7, 4, 7 },
-    EMPTY,
-    EMPTY,
-};
-
-const Slot kPlaza[kNumSlots] = {
-    { "Bianco Plant", 1, 0, 0 },
-    { "Bianco Chase", 1, 1, 0 },
-    { "R" SUSAMUNE_GLYPH_AMP "G Plants", 1, 5, 0 },
-    { "Peaceful", 1, 2, 0 },
-    { "Pinna Cut", 1, 7, 0 },
-    { "Yoshi", 1, 8, 0 },
-    { "Flooded", 1, 9, 0 },
-    EMPTY,
-    EMPTY,
-};
-
-const Slot kPlazaSecrets[kNumSlots] = {
-    { "Beach Pipe", 0x15, 0, 0 },
-    { "Pachinko", 0x16, 0, 0 },
-    { "Grass Pipe", 0x17, 0, 0 },
-    { "Lilypad", 0x18, 0, 0 },
-    { "Jail", 0x1D, 0, 0 },
-    { "Airstrip", 0x00, 0, 0 },
-    { "Air Reds", 0x14, 0, 0 },
-    { "Bowser", 0x3C, 0, 0 },
-    { "Corona", 0x34, 0, 0 },
-};
-
-#undef EMPTY
-
+// A stored wheel: its title and its half-open range of kSlots. Holding the
+// range rather than a pointer and a count keeps this at two words.
 struct Wheel {
     const char *title;
-    const Slot *slots;
+    u8          first;
+    u8          count;
 };
 
-const Wheel kWheels[] = {
-    { "Bianco Subareas", kBiancoSub },
-    { "Ricco Subareas", kRiccoSub },
-    { "Gelato Subareas", kGelatoSub },
-    { "Pinna Subareas", kPinnaSub },
-    { "Sirena Subareas", kSirenaSub },
-    { "Pianta Subareas", kPiantaSub },
-    { "Noki Subareas", kNokiSub },
-    { "Sirena Hotel", kHotel },
-    { "Delfino Plaza", kPlaza },
-    { "Delfino Secrets", kPlazaSecrets },
+constexpr Wheel kWheels[] = {
+    { "Bianco Subareas", 0, 3 },
+    { "Ricco Subareas", 3, 3 },
+    { "Gelato Subareas", 6, 2 },
+    { "Pinna Subareas", 8, 4 },
+    { "Sirena Subareas", 12, 3 },
+    { "Pianta Subareas", 15, 1 },
+    { "Noki Subareas", 16, 4 },
+    { "Sirena Hotel", 20, 8 },
+    { "Delfino Plaza", 28, 7 },
+    { "Delfino Secrets", 35, 9 },
 };
+
+constexpr int kNumWheels = sizeof(kWheels) / sizeof(kWheels[0]);
+
+// The ranges must tile kSlots exactly, which catches a group whose size
+// changed without the following groups' offsets moving with it.
+static_assert(kWheels[kNumWheels - 1].first + kWheels[kNumWheels - 1].count ==
+                  sizeof(kSlots) / sizeof(kSlots[0]),
+              "kWheels ranges must cover kSlots exactly");
 
 // A region of the root wheel. `episodeArea` non-zero means its main wheel is
 // generated rather than stored: eight slices, one per episode of that area.
@@ -398,12 +344,23 @@ s8 currentWheel() {
     return (sSubMode && root.subWheel >= 0) ? root.subWheel : root.mainWheel;
 }
 
-const Slot *currentSlots() {
+// The wheel on screen, or null when it is a generated episode wheel.
+const Wheel *currentWheelData() {
     if (sRoot < 0) {
         return nullptr;
     }
     s8 wheel = currentWheel();
-    return wheel >= 0 ? kWheels[wheel].slots : nullptr;
+    return wheel >= 0 ? &kWheels[wheel] : nullptr;
+}
+
+// The region at slice `i` of `wheel`, or null when that angle is empty.
+const Slot *findSlot(const Wheel *wheel, int i) {
+    for (int k = 0; k < wheel->count; k++) {
+        if (kSlots[wheel->first + k].slot == i) {
+            return &kSlots[wheel->first + k];
+        }
+    }
+    return nullptr;
 }
 
 const char *currentTitle() {
@@ -419,23 +376,25 @@ const char *slotLabel(int i) {
     if (sRoot < 0) {
         return kRoot[i].label;
     }
-    const Slot *slots = currentSlots();
-    if (slots) {
-        return slots[i].label;
+    const Wheel *wheel = currentWheelData();
+    if (wheel) {
+        const Slot *slot = findSlot(wheel, i);
+        return slot ? slot->label : nullptr;
     }
     return i < 8 ? kEpisodeLabels[i] : nullptr;
 }
 
 // Resolve slice `i` to a destination. False when the slice is empty.
 bool slotDest(int i, LevelWarp::Dest *out) {
-    const Slot *slots = currentSlots();
-    if (slots) {
-        if (!slots[i].label) {
+    const Wheel *wheel = currentWheelData();
+    if (wheel) {
+        const Slot *slot = findSlot(wheel, i);
+        if (!slot) {
             return false;
         }
-        out->area     = slots[i].area;
-        out->episode  = slots[i].episode;
-        out->gameInt3 = slots[i].gameInt3;
+        out->area     = slot->area;
+        out->episode  = slot->episode;
+        out->gameInt3 = slot->gameInt3;
         return true;
     }
     if (i >= 8) {
@@ -490,7 +449,7 @@ void drawSlice(int i, bool selected) {
     corner((centreK + 15) & 15, centreK, kRadiusInner, quad + 6);
     gMenu->fillPoly(quad, 4, selected ? cSelected() : cSlice());
 
-    const int size = (sRoot < 0) ? kRootSz : ((!currentSlots()) ? kDigitSz : kLabelSz);
+    const int size = (sRoot < 0) ? kRootSz : ((!currentWheelData()) ? kDigitSz : kLabelSz);
     drawCentred(label, kCx + kUnit[centreK][0] * kRadiusLabel / 4096,
                 kCy + kUnit[centreK][1] * kRadiusLabel / 4096 - size / 2, size,
                 selected ? cOnAccent() : cLabel());
