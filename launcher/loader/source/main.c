@@ -49,6 +49,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "wdvd.h"
 #include "b64/cdecode.h"
 #include "vi_encoder.h"
+#include "SusamuneMod.h"
 #include "susamune/mem2_map.h"
 
 #include "ff_utf8.h"
@@ -2266,6 +2267,9 @@ int main(int argc, char **argv)
 	//read patches from GAMEID.txt to mem2, which in patch.c will be applied to mem1
 	srand (time (0));
 	SetFilePatches();
+
+	//stage mod_<region>.bin for this disc; the kernel copies it into MEM1
+	SusamuneLoadMod(ncfg->GameID);
 	
 	// More SMC stuff
 //	u8 sonic = 0;

@@ -62,7 +62,11 @@ def main():
     check_arena_reserve(linker_script, base)
 
     p = Project()
-    p.project_name = "susamune"
+    # The intermediates (<name>.o / <name>.bin) live in obj_dir, which is the
+    # build dir shared by every version, and all three versions link in
+    # parallel -- so the name has to carry the version or they clobber
+    # each other mid-link.
+    p.project_name = f"susamune_{args.vers}"
     p.verbose = True
     p.print_commands = args.print_commands
     p.obj_dir = ""

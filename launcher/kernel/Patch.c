@@ -38,15 +38,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "codehandleronly.h"
 #include "ff_utf8.h"
 #include "susamune/mem2_map.h"
-// Generated build artifact (mod blob + write list), written to the CMake build
-// dir and found via -I$(SUSAMUNE_INJECT_DIR); not version-controlled. Guarded so
-// the kernel still compiles standalone (PatchSusamune* fall back to no-ops when
-// SUSAMUNE_GAME_ID is undefined).
-#if defined(__has_include)
-#  if __has_include("susamune_inject.h")
-#    include "susamune_inject.h"
-#  endif
-#endif
+#include "susamune/mod_bin.h"
 
 //#define DEBUG_DSP  // Very slow!! Replace with raw dumps?
 
@@ -4074,17 +4066,47 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 		UseReadLimit = 0;
 }
 
+// The staged mod_<region>.bin, if the loader found one for this disc. Valid
+// only between SusamuneModStaged() returning non-NULL and the end of
+// PatchSusamune(); the buffer is a loader-to-kernel handoff and nothing keeps
+// it alive past the copy into MEM1.
+static const struct SusamuneModHeader *SusamuneModStaged(void)
+{
+	const struct SusamuneModHeader *hdr = SUSAMUNE_MOD_PHYS_PTR;
+	u32 codeEnd;
+
+	sync_before_read((void*)hdr, SUSAMUNE_MOD_HEADER_SIZE);
+
+	if (hdr->magic != SUSAMUNE_MOD_MAGIC || hdr->version != SUSAMUNE_MOD_VERSION)
+		return NULL;
+	if (hdr->gameId != GAME_ID)
+		return NULL;
+
+	// The file is untrusted input off an SD card: refuse anything whose parts
+	// do not add up, rather than memcpy'ing a bogus length into MEM1.
+	if (hdr->codeSize > SUSAMUNE_MEM2_MODBIN_SIZE - SUSAMUNE_MOD_HEADER_SIZE
+			|| (hdr->codeSize & 3))
+		return NULL;
+	codeEnd = SUSAMUNE_MOD_HEADER_SIZE + hdr->codeSize;
+	if (hdr->writeCount > (SUSAMUNE_MEM2_MODBIN_SIZE - codeEnd) / 8)
+		return NULL;
+	if (hdr->fileSize != codeEnd + hdr->writeCount * 8)
+		return NULL;
+
+	return hdr;
+}
+
 // Relocate hardcoded-heap-address Gecko codes so they keep working with the
 // mod active.
 //
-// The mod raises the game's arena floor by SUSAMUNE_ARENA_RESERVE, so every
+// The mod raises the game's arena floor by its arenaReserve, so every
 // bottom-anchored heap allocation ends up that many bytes higher than on stock.
 // Most practice codes are fine (they patch .text, read .bss, or dereference
 // live pointers), but a code that writes to a *hardcoded* heap address misses
 // its target. The regional SMS DPad Functions code is one. Its JP and US
 // variants write directly to their message buffers; PAL conditionally writes
 // five words to its corresponding buffer. Under the mod those buffers live
-// at +SUSAMUNE_ARENA_RESERVE, so the writes otherwise land in dead space and
+// at +arenaReserve, so the writes otherwise land in dead space and
 // dialogue renders as the default text instead.
 //
 // We scan the loaded cheat list for the full region-specific tail and bump the
@@ -4093,7 +4115,7 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 // kernel's own endianness.
 static int RelocateSusamuneGeckoSignature(u8 *codes, u32 size,
 		const u8 *sig, u32 sig_size, const u8 *addr_offsets,
-		u32 addr_count, const char *region)
+		u32 addr_count, u32 reserve, const char *region)
 {
 	if (size < sig_size)
 		return 0;
@@ -4111,7 +4133,7 @@ static int RelocateSusamuneGeckoSignature(u8 *codes, u32 size,
 		{
 			u8 *addr = &codes[i + addr_offsets[j]];
 			u32 value = ((u32)addr[0] << 16) | ((u32)addr[1] << 8) | addr[2];
-			value += SUSAMUNE_ARENA_RESERVE;
+			value += reserve;
 			addr[0] = (u8)(value >> 16);
 			addr[1] = (u8)(value >> 8);
 			addr[2] = (u8)value;
@@ -4119,7 +4141,7 @@ static int RelocateSusamuneGeckoSignature(u8 *codes, u32 size,
 
 		sync_after_write(&codes[i], sig_size);
 		dbgprintf("Patch:Relocated %s susamune dpad gecko code (+0x%X)\r\n",
-				region, SUSAMUNE_ARENA_RESERVE);
+				region, reserve);
 		return 1; // Each regional signature is unique; one instance is expected.
 	}
 	return 0;
@@ -4127,9 +4149,14 @@ static int RelocateSusamuneGeckoSignature(u8 *codes, u32 size,
 
 static void PatchSusamuneGeckoCodes(u8 *codes, u32 size)
 {
-#ifdef SUSAMUNE_GAME_ID
-	if (GAME_ID != SUSAMUNE_GAME_ID)
+	const struct SusamuneModHeader *hdr = SusamuneModStaged();
+	u32 reserve;
+
+	// Only the mod shifts the heap, so with no mod loaded the codes are
+	// already aimed correctly.
+	if (hdr == NULL)
 		return;
+	reserve = hdr->arenaReserve;
 
 	// JP dpad.txt tail. The first two lines target the message buffer; the
 	// following TMario::taking nop anchors the match.
@@ -4165,41 +4192,53 @@ static void PatchSusamuneGeckoCodes(u8 *codes, u32 size)
 	};
 	static const u8 pal_addr_offsets[] = { 9, 25, 41, 57, 73 };
 
-	if (GAME_ID == 0x474D534Au) // GMSJ
+	if (GAME_ID == SUSAMUNE_MOD_GAME_ID_JP)
 		RelocateSusamuneGeckoSignature(codes, size, jp_sig, sizeof(jp_sig),
-				jp_addr_offsets, sizeof(jp_addr_offsets), "JP");
-	else if (GAME_ID == 0x474D5345u) // GMSE
+				jp_addr_offsets, sizeof(jp_addr_offsets), reserve, "JP");
+	else if (GAME_ID == SUSAMUNE_MOD_GAME_ID_US)
 		RelocateSusamuneGeckoSignature(codes, size, us_sig, sizeof(us_sig),
-				us_addr_offsets, sizeof(us_addr_offsets), "US");
-	else if (GAME_ID == 0x474D5350u) // GMSP
+				us_addr_offsets, sizeof(us_addr_offsets), reserve, "US");
+	else if (GAME_ID == SUSAMUNE_MOD_GAME_ID_PAL)
 		RelocateSusamuneGeckoSignature(codes, size, pal_sig, sizeof(pal_sig),
-				pal_addr_offsets, sizeof(pal_addr_offsets), "PAL");
-#endif
+				pal_addr_offsets, sizeof(pal_addr_offsets), reserve, "PAL");
 }
 
 // Inject the susamune mod into the freshly-loaded game image: copy its code
 // into the region reserved at the bottom of the game's root heap, then apply
-// the resolved hook writes (branches into the mod plus the raised arena floor).
+// the hook writes that ship with it (branches into the mod plus the raised
+// arena floor). Both come from the mod_<region>.bin the loader staged in MEM2
+// -- the writes are version-specific, so they travel with the blob rather than
+// being compiled into the kernel.
+//
 // All game addresses are MEM1-cached (0x80xxxxxx); mask to physical for the
 // kernel's direct RAM access.
 void PatchSusamune(void)
 {
-#ifdef SUSAMUNE_GAME_ID
-	if (GAME_ID != SUSAMUNE_GAME_ID)
+	const struct SusamuneModHeader *hdr = SusamuneModStaged();
+	const u8 *code;
+	const u32 *writes;
+	u32 base, i;
+
+	if (hdr == NULL)
 		return;
 
-	u32 base = SUSAMUNE_CODE_BASE & 0x7FFFFFFF;
-	memcpy((void*)base, susamune_code, SUSAMUNE_CODE_SIZE);
-	sync_after_write((void*)base, SUSAMUNE_CODE_SIZE);
+	code   = (const u8*)hdr + SUSAMUNE_MOD_HEADER_SIZE;
+	writes = (const u32*)(code + hdr->codeSize);
+	sync_before_read((void*)hdr, hdr->fileSize);
 
-	u32 i;
-	for (i = 0; i < SUSAMUNE_WRITE_COUNT; ++i)
+	base = hdr->baseAddr & 0x7FFFFFFF;
+	memcpy((void*)base, code, hdr->codeSize);
+	sync_after_write((void*)base, hdr->codeSize);
+
+	for (i = 0; i < hdr->writeCount; ++i)
 	{
-		u32 addr = susamune_writes[i].addr & 0x7FFFFFFF;
-		write32(addr, susamune_writes[i].val);
+		u32 addr = writes[i * 2] & 0x7FFFFFFF;
+		write32(addr, writes[i * 2 + 1]);
 		sync_after_write((void*)addr, 4);
 	}
-#endif
+
+	dbgprintf("Patch:Injected susamune mod (%u bytes at 0x%08X, %u writes)\r\n",
+			hdr->codeSize, hdr->baseAddr, hdr->writeCount);
 }
 
 void PatchInit()

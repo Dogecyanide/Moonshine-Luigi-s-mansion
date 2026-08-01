@@ -1,7 +1,7 @@
 # devkitARM group: the big-endian ARM kernel + kernelboot + fatfs-arm. Consumes
-# the ppc group's generated headers (via LAUNCHER_GEN_DIR) and the mod's
-# susamune_inject.h (via SUSAMUNE_INJECT_DIR). Produces data/kernel.zip and
-# data/kernelboot.bin. Configured with the toolchain-devkitARM.cmake toolchain.
+# the ppc group's generated headers (via LAUNCHER_GEN_DIR). Produces
+# data/kernel.zip and data/kernelboot.bin. Configured with the
+# toolchain-devkitARM.cmake toolchain.
 
 cmake_minimum_required(VERSION 3.21)
 project(nintendont_arm C ASM)

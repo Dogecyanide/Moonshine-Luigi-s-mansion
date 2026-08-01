@@ -11,6 +11,9 @@
             "displayName": "Release build (Console)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "VERS": "jp;us;pal"
+            },
             "hidden": false
         },
         {

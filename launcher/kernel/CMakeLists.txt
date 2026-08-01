@@ -1,8 +1,9 @@
 # Nintendont ARM kernel. Links against the prebuilt big-endian be/lib{c,gcc}.a,
 # fatfs-arm, and the generated kernel/asm + codehandler blob headers. Produces
 # kernel.elf -> kernel.bin -> data/kernel.zip (the loader unzips it at boot).
-# The susamune mod is injected via susamune_inject.h (found on the include path,
-# pulled in by Patch.c under __has_include). Was kernel/Makefile.
+# The susamune mod is NOT built into the kernel: Patch.c injects whatever
+# mod_<region>.bin the loader staged in MEM2, so this target is version-agnostic
+# and does not depend on the mod build at all. Was kernel/Makefile.
 
 set(_sources
     start.s common.c alloc.c GCAM.c JVSIO.c JVSIOMessage.c FST.c DI.c RealDI.c
@@ -32,13 +33,7 @@ target_include_directories(kernel PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
     "${CMAKE_CURRENT_SOURCE_DIR}/../fatfs"
-    "${LAUNCHER_GEN_DIR}"          # codehandler.h + asm/*.h blob headers
-    "${SUSAMUNE_INJECT_DIR}")      # susamune_inject.h (mod blob + writes)
-
-# Recompile Patch.o when the mod's inject header changes -- this is the
-# fine-grained dependency that lets a mod-source edit relink only the kernel.
-set_source_files_properties(Patch.c PROPERTIES
-    OBJECT_DEPENDS "${SUSAMUNE_INJECT_DIR}/susamune_inject.h")
+    "${LAUNCHER_GEN_DIR}")         # codehandler.h + asm/*.h blob headers
 
 target_link_libraries(kernel PRIVATE
     fatfs-arm

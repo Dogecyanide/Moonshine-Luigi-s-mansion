@@ -12,19 +12,25 @@
 
 - [x] [Bindings menu](#bindings)
 - [x] [SD card settings persistence](#sd-card-persistence)
+- [x] Dont require different channels for different regions. load a bin from SD card
 - [ ] [Customizable GUI support](#customizable-gui)
 - [ ] Gecko code porting (gecko_codes.md)
 - [ ] Emulator autodetect.
 - [ ] Settings menu pauses the game
 - [ ] probably have a separate way to control default settings rather than autosaving? and rather than pressing a button to just save the current
     - A bit problematic to deal with because we _sorta_ need two different settings structs, and I dont want that, so we have to be more clever
-- [ ] Dont require different channels for different regions. load a bin from SD card
 - [ ] Input tracing feature. Needs planning.
 - [ ] Switch everything to a single Clang compiler (based on the kuribo tree) that does PowerPC and ARM to simplify dependencies.
 - [ ] QFT doesnt pause on shine get grab when no shine get animation is on (maybe just my qft settings? probably not)
 - [ ] Chatgpt critical review that codes have been implemented accurately
 - [ ] update readme its not just savestates anymore. update credits to people who made the codes
 - [ ] sound fix (warspyking)
+- [ ] Restore the Nintendont menu and give a way to select the version, and configure the directory.
+- [ ] Reset button restarts the level.... bruh
+- [ ] Shine get timer maxes out at 99
+- [ ] intermittent crash?? only happened once, with the 64KiB thing
+- [ ] move bss out of MEM1
+- [ ] fix icon (should not have jp flag anymore)
 
 ### Bindings
 

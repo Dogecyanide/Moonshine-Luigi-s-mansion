@@ -52,13 +52,22 @@ endif()
 
 # --- Options ---------------------------------------------------------------
 
-set(VERS "jp" CACHE STRING "Game version to build against")
-set_property(CACHE VERS PROPERTY STRINGS jp us pal)
+# VERS is a list: one mod_<vers>.bin is built per entry and all of them are
+# packaged into the single, version-agnostic launcher. The ISO/DOL pipeline
+# (Dolphin development) can only target one disc at a time, so it follows the
+# first entry -- VERS_PRIMARY below.
+set(VERS "jp" CACHE STRING "Game versions to build mod binaries for (list: jp;us;pal)")
 set(SUPPORTED_VERS jp us pal)
-if(NOT VERS IN_LIST SUPPORTED_VERS)
-    message(FATAL_ERROR "VERS must be one of: ${SUPPORTED_VERS}")
+if(NOT VERS)
+    message(FATAL_ERROR "VERS must name at least one of: ${SUPPORTED_VERS}")
 endif()
-string(TOUPPER "${VERS}" VERS_UPPER)
+foreach(_v IN LISTS VERS)
+    if(NOT _v IN_LIST SUPPORTED_VERS)
+        message(FATAL_ERROR "VERS entry '${_v}' is not one of: ${SUPPORTED_VERS}")
+    endif()
+endforeach()
+list(GET VERS 0 VERS_PRIMARY)
+string(TOUPPER "${VERS_PRIMARY}" VERS_PRIMARY_UPPER)
 
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "Where to load the iso from by default in meta.xml")
 set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
@@ -72,7 +81,7 @@ option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launch
 set(ISO_CODE_jp GMSJ01)
 set(ISO_CODE_us GMSE01)
 set(ISO_CODE_pal GMSP01)
-set(ISO_CODE "${ISO_CODE_${VERS}}")
+set(ISO_CODE "${ISO_CODE_${VERS_PRIMARY}}")
 
 if(DEFINED ENV{SMS_ISO})
     set(_sms_iso_default "$ENV{SMS_ISO}")
@@ -81,12 +90,15 @@ else()
 endif()
 set(SMS_ISO "${_sms_iso_default}" CACHE FILEPATH "Source game ISO to patch")
 
-set(LD_SCRIPT "${CMAKE_SOURCE_DIR}/maps/${VERS}.ld")
-set(MAP_FILE "${CMAKE_SOURCE_DIR}/maps/${VERS}.map")
+set(LD_SCRIPT "${CMAKE_SOURCE_DIR}/maps/${VERS_PRIMARY}.ld")
+set(MAP_FILE "${CMAKE_SOURCE_DIR}/maps/${VERS_PRIMARY}.map")
 
 # --- Mod object ------------------------------------------------------------
 # Compile the sources and partial-link (-r) them into a single relocatable
-# object that the DOL patcher later injects.
+# object that the DOL patcher / bin packer later injects. One object per game
+# version: the sources differ only by the SUSAMUNE_VERSION_* define, but that
+# selects a whole MEM1 layout (addresses.hxx), so the versions cannot share a
+# build directory.
 
 file(GLOB MOD_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
 if(NOT ENABLE_DEBUG_WARPS)
@@ -112,34 +124,41 @@ set(SHARED_FLAGS
     -fno-function-sections
     -fno-data-sections)
 
-add_executable(susamune_obj ${MOD_SOURCES})
-set_target_properties(susamune_obj PROPERTIES
-    OUTPUT_NAME susamune_pre
-    SUFFIX .o
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+function(susamune_add_mod_object vers)
+    string(TOUPPER "${vers}" _upper)
+    add_executable(susamune_obj_${vers} ${MOD_SOURCES})
+    set_target_properties(susamune_obj_${vers} PROPERTIES
+        OUTPUT_NAME susamune_pre_${vers}
+        SUFFIX .o
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-target_include_directories(susamune_obj PRIVATE
-    "${CMAKE_SOURCE_DIR}/include"
-    "${CMAKE_SOURCE_DIR}/include/JSystem")
+    target_include_directories(susamune_obj_${vers} PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/include/JSystem")
 
-target_compile_options(susamune_obj PRIVATE
-    ${SHARED_FLAGS}
-    -nobuiltininc
-    -nostdinc++
-    -std=c++17
-    -Werror
-    -Wno-main
-    -Wno-incompatible-library-redeclaration)
+    target_compile_options(susamune_obj_${vers} PRIVATE
+        ${SHARED_FLAGS}
+        -nobuiltininc
+        -nostdinc++
+        -std=c++17
+        -Werror
+        -Wno-main
+        -Wno-incompatible-library-redeclaration)
 
-target_compile_definitions(susamune_obj PRIVATE
-    IS_EMULATOR=$<BOOL:${IS_EMULATOR}>
-    ENABLE_SAVESTATE_DBG=$<BOOL:${ENABLE_SAVESTATE_DBG}>
-    ENABLE_DEBUG_WARPS=$<BOOL:${ENABLE_DEBUG_WARPS}>
-    SUSAMUNE_VERSION_${VERS_UPPER}=1)
+    target_compile_definitions(susamune_obj_${vers} PRIVATE
+        IS_EMULATOR=$<BOOL:${IS_EMULATOR}>
+        ENABLE_SAVESTATE_DBG=$<BOOL:${ENABLE_SAVESTATE_DBG}>
+        ENABLE_DEBUG_WARPS=$<BOOL:${ENABLE_DEBUG_WARPS}>
+        SUSAMUNE_VERSION_${_upper}=1)
 
-target_link_options(susamune_obj PRIVATE ${SHARED_FLAGS} -fuse-ld=lld -Werror -r)
+    target_link_options(susamune_obj_${vers} PRIVATE ${SHARED_FLAGS} -fuse-ld=lld -Werror -r)
+endfunction()
 
-set(MOD_OBJ "$<TARGET_FILE:susamune_obj>")
+foreach(_v IN LISTS VERS)
+    susamune_add_mod_object(${_v})
+endforeach()
+
+set(MOD_OBJ "$<TARGET_FILE:susamune_obj_${VERS_PRIMARY}>")
 
 # --- Pipeline scripts (run from the venv) ----------------------------------
 
@@ -147,11 +166,11 @@ set(IN_ISO_DIR "${CMAKE_BINARY_DIR}/in_iso")
 set(OUT_ISO_DIR "${CMAKE_BINARY_DIR}/out_iso")
 set(IN_ISO_STAMP "${CMAKE_BINARY_DIR}/in_iso.stamp")
 set(OUT_ISO_STAMP "${CMAKE_BINARY_DIR}/out_iso.stamp")
-set(MANIFEST "${CMAKE_BINARY_DIR}/susamune_manifest.json")
 set(PATCHED_DOL "${CMAKE_BINARY_DIR}/main.dol")
 set(GECKO_TXT "${CMAKE_BINARY_DIR}/susamune.txt")
-set(FINAL_ISO "${CMAKE_BINARY_DIR}/susamune_${VERS}.iso")
-set(LAUNCHER_ZIP "${CMAKE_BINARY_DIR}/susamune_launcher_${VERS}.zip")
+set(FINAL_ISO "${CMAKE_BINARY_DIR}/susamune_${VERS_PRIMARY}.iso")
+# One launcher for every disc revision -- the mod is no longer compiled into it.
+set(LAUNCHER_ZIP "${CMAKE_BINARY_DIR}/susamune_launcher.zip")
 
 add_custom_command(
     OUTPUT "${IN_ISO_STAMP}"
@@ -175,21 +194,38 @@ add_custom_command(
     COMMENT "Populating out_iso for Dolphin folder-boot"
     VERBATIM)
 
-add_custom_command(
-    OUTPUT "${MANIFEST}"
-    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
-        --obj "${MOD_OBJ}"
-        --linker-script "${LD_SCRIPT}"
-        --kuribo-home "${KURIBO_COMPILER_HOME}"
-        --vers "${VERS}"
-        --out "${MANIFEST}"
-        launcher
-    DEPENDS susamune_obj "${LD_SCRIPT}"
-            "${CMAKE_SOURCE_DIR}/scripts/patches.py"
-            "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
-    COMMENT "Generating mod manifest"
-    VERBATIM)
-add_custom_target(manifest ALL DEPENDS "${MANIFEST}")
+# One mod_<vers>.bin per requested version: the linked blob plus the hook writes
+# that realise it, in the format include/susamune/mod_bin.h describes. These are
+# what the launcher ships and loads at runtime -- nothing about the mod is
+# compiled into the launcher any more.
+set(MOD_BINS "")
+foreach(_v IN LISTS VERS)
+    set(_manifest "${CMAKE_BINARY_DIR}/susamune_manifest_${_v}.json")
+    set(_bin "${CMAKE_BINARY_DIR}/mod_${_v}.bin")
+    add_custom_command(
+        OUTPUT "${_manifest}"
+        COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
+            --obj "$<TARGET_FILE:susamune_obj_${_v}>"
+            --linker-script "${CMAKE_SOURCE_DIR}/maps/${_v}.ld"
+            --kuribo-home "${KURIBO_COMPILER_HOME}"
+            --vers "${_v}"
+            --out "${_manifest}"
+            launcher
+        DEPENDS susamune_obj_${_v} "${CMAKE_SOURCE_DIR}/maps/${_v}.ld"
+                "${CMAKE_SOURCE_DIR}/scripts/patches.py"
+                "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
+        COMMENT "Generating ${_v} mod manifest"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${_bin}"
+        COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/gen_mod_bin.py"
+            "${_manifest}" -o "${_bin}"
+        DEPENDS "${_manifest}" "${CMAKE_SOURCE_DIR}/scripts/gen_mod_bin.py"
+        COMMENT "Packing mod_${_v}.bin"
+        VERBATIM)
+    list(APPEND MOD_BINS "${_bin}")
+endforeach()
+add_custom_target(mod_bins ALL DEPENDS ${MOD_BINS})
 
 # Patches main.dol and installs it into out_iso so Dolphin folder-boot (and the
 # .vscode tasks) always run the current build without needing the `iso` target.
@@ -199,12 +235,12 @@ add_custom_command(
         --obj "${MOD_OBJ}"
         --linker-script "${LD_SCRIPT}"
         --kuribo-home "${KURIBO_COMPILER_HOME}"
-        --vers "${VERS}"
+        --vers "${VERS_PRIMARY}"
         --in-dol "${IN_ISO_DIR}/root/sys/main.dol"
         --out "${PATCHED_DOL}"
         patch_dol
     COMMAND "${CMAKE_COMMAND}" -E copy "${PATCHED_DOL}" "${OUT_ISO_DIR}/root/sys/main.dol"
-    DEPENDS susamune_obj "${IN_ISO_STAMP}" "${OUT_ISO_STAMP}" "${LD_SCRIPT}"
+    DEPENDS susamune_obj_${VERS_PRIMARY} "${IN_ISO_STAMP}" "${OUT_ISO_STAMP}" "${LD_SCRIPT}"
             "${CMAKE_SOURCE_DIR}/scripts/patches.py"
             "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
     COMMENT "Patching main.dol"
@@ -218,10 +254,10 @@ add_custom_command(
         --obj "${MOD_OBJ}"
         --linker-script "${LD_SCRIPT}"
         --kuribo-home "${KURIBO_COMPILER_HOME}"
-        --vers "${VERS}"
+        --vers "${VERS_PRIMARY}"
         --out "${GECKO_TXT}"
         gecko
-    DEPENDS susamune_obj "${LD_SCRIPT}"
+    DEPENDS susamune_obj_${VERS_PRIMARY} "${LD_SCRIPT}"
             "${CMAKE_SOURCE_DIR}/scripts/patches.py"
             "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
     COMMENT "Generating Gecko code list"
@@ -234,7 +270,7 @@ add_custom_command(
         --update-metadata "${UPDATE_ISO_METADATA}"
         --in-iso "${IN_ISO_DIR}"
         --out-iso "${OUT_ISO_DIR}"
-        --vers "${VERS}"
+        --vers "${VERS_PRIMARY}"
         --dol "${PATCHED_DOL}"
         --output "${FINAL_ISO}"
     DEPENDS "${PATCHED_DOL}" "${IN_ISO_STAMP}"
@@ -248,34 +284,27 @@ add_custom_target(iso DEPENDS "${FINAL_ISO}")
 # devkitPPC, devkitPPC+libogc) that CMake can't mix with the Kuribo clang used
 # here. We drive it as an ExternalProject.
 #
-# First, the mod's inject header becomes a real build artifact: generating it from
-# the manifest, and pointing the launcher's kernel at it, makes a mod-source edit
-# relink only the kernel + loader instead of rebuilding the whole launcher.
+# It no longer depends on the mod build at all: the blob and its hook writes are
+# read from mod_<vers>.bin at runtime, so the launcher is version-agnostic and a
+# mod-source edit only repacks the bins. The bins are handed to the packaging
+# step as files to drop into the app directory.
 include(ExternalProject)
 
-set(INJECT_HEADER "${CMAKE_BINARY_DIR}/susamune_inject.h")
-add_custom_command(
-    OUTPUT "${INJECT_HEADER}"
-    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/gen_inject_header.py"
-        "${MANIFEST}" -o "${INJECT_HEADER}"
-    DEPENDS "${MANIFEST}" "${CMAKE_SOURCE_DIR}/scripts/gen_inject_header.py"
-    COMMENT "Generating susamune_inject.h"
-    VERBATIM)
-add_custom_target(inject_header DEPENDS "${INJECT_HEADER}")
+string(REPLACE ";" "|" _mod_bins_arg "${MOD_BINS}")
 
 ExternalProject_Add(nintendont_launcher
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/launcher"
     BINARY_DIR "${CMAKE_BINARY_DIR}/launcher"
     CMAKE_GENERATOR "${CMAKE_GENERATOR}"
+    LIST_SEPARATOR |
     CMAKE_ARGS
         "-DLAUNCHER_PYTHON=${VENV_PYTHON}"
         "-DLAUNCHER_SCRIPTS_DIR=${CMAKE_SOURCE_DIR}/scripts"
-        "-DSUSAMUNE_INJECT_DIR=${CMAKE_BINARY_DIR}"
-        "-DSUSAMUNE_MANIFEST=${MANIFEST}"
+        "-DSUSAMUNE_MOD_BINS=${_mod_bins_arg}"
         "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
-    DEPENDS inject_header
+    DEPENDS mod_bins
     BUILD_ALWAYS ON
     INSTALL_COMMAND ""
     USES_TERMINAL_CONFIGURE ON

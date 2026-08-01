@@ -33,7 +33,21 @@
 // alias and the ARM kernel consumes the same bytes through the physical alias.
 #define NIN_MEM2_FILE_PATCH_PHYS_BASE        0x11900000u
 #define NIN_MEM2_FILE_PATCH_PPC_BASE         0x91900000u
-#define NIN_MEM2_FILE_PATCH_SIZE             0x00600000u
+#define NIN_MEM2_FILE_PATCH_SIZE             0x005E0000u
+
+// mod_<region>.bin staging (struct SusamuneModHeader, mod_bin.h). The PPC
+// loader reads the file for the detected disc here before booting the kernel;
+// PatchSusamune() copies the code out into MEM1 and nothing reads it again, so
+// the mod is resident in exactly one place for the rest of the session.
+//
+// It shares the file-patch buffer's lifetime -- both are loader-to-kernel
+// handoffs consumed at PatchGame time -- so it is carved off that buffer's tail
+// rather than given memory of its own: 128 KiB out of six MiB, and the game
+// never ships a patch.bin anyway. Deliberately NOT taken out of the snapshot
+// window, whose payload can legitimately grow to fill its reservation.
+#define SUSAMUNE_MEM2_MODBIN_PHYS_BASE       0x11EE0000u
+#define SUSAMUNE_MEM2_MODBIN_PPC_BASE        0x91EE0000u
+#define SUSAMUNE_MEM2_MODBIN_SIZE            0x00020000u
 
 // Dedicated Susamune snapshot window. No Nintendont buffer may overlap this
 // range. Its exclusive end is the settings block below.
@@ -72,8 +86,11 @@
 #if NIN_MEM2_LOADER_DISC_PPC_BASE + NIN_MEM2_LOADER_DISC_SIZE != NIN_MEM2_FILE_PATCH_PPC_BASE
 #error "MEM2 map gap/overlap before the file-patch buffer"
 #endif
-#if NIN_MEM2_FILE_PATCH_PHYS_BASE + NIN_MEM2_FILE_PATCH_SIZE != SUSAMUNE_MEM2_SNAPSHOT_PHYS_BASE
-#error "MEM2 file-patch buffer must end at the snapshot window"
+#if NIN_MEM2_FILE_PATCH_PHYS_BASE + NIN_MEM2_FILE_PATCH_SIZE != SUSAMUNE_MEM2_MODBIN_PHYS_BASE
+#error "MEM2 file-patch buffer must end at the mod-blob staging area"
+#endif
+#if SUSAMUNE_MEM2_MODBIN_PHYS_BASE + SUSAMUNE_MEM2_MODBIN_SIZE != SUSAMUNE_MEM2_SNAPSHOT_PHYS_BASE
+#error "MEM2 mod-blob staging area must end at the snapshot window"
 #endif
 #if SUSAMUNE_MEM2_SNAPSHOT_PHYS_BASE + SUSAMUNE_MEM2_SNAPSHOT_SIZE != SUSAMUNE_MEM2_CFG_PHYS_BASE
 #error "MEM2 snapshot window must end at the settings block"
@@ -103,6 +120,9 @@
 #endif
 #if SUSAMUNE_MEM2_SNAPSHOT_PHYS_BASE + 0x80000000u != SUSAMUNE_MEM2_SNAPSHOT_PPC_BASE
 #error "Invalid snapshot PPC alias"
+#endif
+#if SUSAMUNE_MEM2_MODBIN_PHYS_BASE + 0x80000000u != SUSAMUNE_MEM2_MODBIN_PPC_BASE
+#error "Invalid mod-blob PPC alias"
 #endif
 #if SUSAMUNE_MEM2_CFG_PHYS_BASE + 0x80000000u != SUSAMUNE_MEM2_CFG_PPC_BASE
 #error "Invalid settings-block PPC alias"

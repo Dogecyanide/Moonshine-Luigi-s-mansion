@@ -18,7 +18,9 @@ D-pad left to save, d-pad right to load. If you have the position/red coin/timer
 
 ### Console (wii)
 
-Download the launcher zip for your region from the Releases page. Extract it to your `apps/` folder on your SD card, so that you have a region-matched folder such as `apps:/susamune_launcher_us/{boot.dol,meta.xml,icon.png}`. By default, the launcher is configured to load from a real disc. If you want to load your game from SD card or USB instead, follow the instructions in the comments in `meta.xml` to change the boot path to your ISO.
+Download the launcher zip from the Releases page. There is one launcher for every region: extract it to your `apps/` folder on your SD card, so that you have `apps:/susamune_launcher/{boot.dol,meta.xml,icon.png,mod_jp.bin,mod_us.bin,mod_pal.bin}`. The launcher detects the disc and loads the matching `mod_*.bin`, so keep those files next to `boot.dol`. By default, the launcher is configured to load from a real disc. If you want to load your game from SD card or USB instead, follow the instructions in the comments in `meta.xml` to change the boot path to your ISO.
+
+Settings and binds are stored per region in `susamune.ini` at the root of the SD card, in `[settings_jp]` / `[binds_jp]` sections and their `us` / `pal` counterparts.
 
 To launch your game, simply go to the homebrew channel and run the susamune launcher app that should appear. Your gecko codes should work out of the box if you are already using Nintendont for practice. The code file must match the disc, such as `codes/GMSJ01.gct` (JP), `codes/GMSE01.gct` (US), or `codes/GMSP01.gct` (PAL).
 
@@ -45,7 +47,10 @@ cmake --build preset emu_iso
 ```
 
 The ISO appears as `build/susamune_<version>.iso`. To build US or PAL, add
-`-DVERS=us` or `-DVERS=pal` when configuring CMake.
+`-DVERS=us` or `-DVERS=pal` when configuring CMake. `VERS` is a list — the
+console launcher build uses it to pick which `mod_<region>.bin` files to bundle
+(`-DVERS="jp;us;pal"`) — but the ISO/DOL targets can only target one disc, so
+they follow its first entry.
 
 > [!IMPORTANT]
 > Saving and loading the goop is broken in Dolphin unless 'Texture Cache Accuracy' it set to Safe. You can find this option in the 'Hacks' tab of 'Graphics' in the game's config:

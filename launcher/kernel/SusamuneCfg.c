@@ -12,17 +12,24 @@ block described in susamune_cfg.h:
            SusamuneCfgService() notices, rewrites the ini, and answers through
            status + ackSeq.
 
-The ini is plain text with three sections. [settings] holds the in-game
-options, keyed by the stable names in settings_list.h -- shared with the mod,
-so the key table here cannot drift from the mod's SettingId order. [binds]
-holds one button combination per configurable action, keyed by binds_list.h and
-written as `+`-joined button tokens ("X+DUp") from the same shared list.
-[nintendont] is reserved for launcher options (ISO path and friends) that will
-eventually replace the loader's command-line flags; it is recognised but has no
-keys yet.
+The ini is plain text. [settings_<region>] holds the in-game options, keyed by
+the stable names in settings_list.h -- shared with the mod, so the key table
+here cannot drift from the mod's SettingId order. [binds_<region>] holds one
+button combination per configurable action, keyed by binds_list.h and written as
+`+`-joined button tokens ("X+DUp") from the same shared list. [nintendont] is
+reserved for launcher options (ISO path and friends) that will eventually
+replace the loader's command-line flags; it is recognised but has no keys yet.
 
-NOTE: a save rewrites the whole file, so hand-added keys the launcher does not
-recognise are dropped. Nothing is lost today because [nintendont] is empty.
+One launcher now serves GMSJ/GMSE/GMSP, and each keeps its own settings and
+binds, hence the region tag on the section names. Only the running version's
+sections are ever parsed: the handoff block holds one set of values, not three.
+Consequently a save cannot simply re-emit the file from the block -- it would
+drop the other versions. Instead it reads the old file back and copies every
+line through verbatim, substituting freshly written sections in place of this
+version's two. Sections the launcher does not know stay byte-for-byte intact.
+
+NOTE: keys the launcher does not recognise *inside our own two sections* are
+still dropped, since those sections are regenerated wholesale.
 
 */
 
@@ -33,6 +40,10 @@ recognise are dropped. Nothing is lost today because [nintendont] is empty.
 #include "ff_utf8.h"
 
 #include "susamune/susamune_cfg.h"
+#include "susamune/mod_bin.h"
+
+// Set by DIinit() from the disc header; SusamuneCfgInit() runs after it.
+extern u32 GAME_ID;
 
 // The ini key table, generated from the same list that defines the mod's
 // SettingId enum. Index == SettingId == index into SusamuneCfg::values.
@@ -57,12 +68,35 @@ static const struct BindButton BindButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAM
 
 #define BIND_BUTTON_COUNT ((u32)(sizeof(BindButtons) / sizeof(BindButtons[0])))
 
-// Enough for the whole file: ~24 keys at well under 40 bytes each, plus the
-// section headers and comment banner.
-#define SUSAMUNE_INI_BUF_SIZE 4096
+// Enough for the whole file: ~40 keys at well under 40 bytes each per game
+// version, times three versions, plus section headers and the comment banner.
+// A file larger than this is refused rather than truncated (see WriteIniFile).
+#define SUSAMUNE_INI_BUF_SIZE 8192
+
+// Longest section name we build: "settings" + '_' + "pal" + NUL.
+#define SUSAMUNE_SECTION_NAME_MAX 24
 
 static bool CfgReady = false;
 static u32  CfgAckSeq = 0;
+
+// "[settings_jp]" and friends for the running disc, built once in
+// SusamuneCfgInit. Empty for a game we have no mod for, which is also what
+// leaves CfgReady false.
+static char SettingsSection[SUSAMUNE_SECTION_NAME_MAX];
+static char BindsSection[SUSAMUNE_SECTION_NAME_MAX];
+
+// name + '_' + region tag, e.g. "settings" + "jp".
+static void BuildSectionName(char *out, const char *base, const char *region)
+{
+	u32 n = 0;
+
+	while (*base)
+		out[n++] = *base++;
+	out[n++] = SUSAMUNE_INI_SECTION_SEPARATOR;
+	while (*region)
+		out[n++] = *region++;
+	out[n] = '\0';
+}
 
 static struct SusamuneCfg *CfgBlock(void)
 {
@@ -205,14 +239,30 @@ static bool ParseBindMask(const char *s, u16 *out)
 	return true;
 }
 
-// Which section the parser is currently inside. Keys outside a known section
-// (i.e. [nintendont]) are not ours yet.
+// Which section the parser is currently inside. Anything that is not one of
+// this version's two sections -- [nintendont], or another version's settings --
+// is SECTION_OTHER and left alone.
 enum IniSection { SECTION_OTHER, SECTION_SETTINGS, SECTION_BINDS };
+
+static enum IniSection ClassifySection(const char *name)
+{
+	if (strcmp(name, SettingsSection) == 0)
+		return SECTION_SETTINGS;
+	if (strcmp(name, BindsSection) == 0)
+		return SECTION_BINDS;
+	return SECTION_OTHER;
+}
+
+// Whether the file already carries settings for this game version. When it does
+// not, the mod is asked to author them (SUSAMUNE_CFG_FLAG_NO_CONFIG).
+static bool SawSettingsSection = false;
 
 static void ParseIni(char *text, struct SusamuneCfg *cfg)
 {
 	char *line = text;
 	enum IniSection section = SECTION_OTHER;
+
+	SawSettingsSection = false;
 
 	while (*line)
 	{
@@ -245,12 +295,9 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 				char *name;
 				*close = '\0';
 				name = Trim(line + 1);
-				if (strcmp(name, SUSAMUNE_INI_SECTION_SETTINGS) == 0)
-					section = SECTION_SETTINGS;
-				else if (strcmp(name, SUSAMUNE_INI_SECTION_BINDS) == 0)
-					section = SECTION_BINDS;
-				else
-					section = SECTION_OTHER;
+				section = ClassifySection(name);
+				if (section == SECTION_SETTINGS)
+					SawSettingsSection = true;
 			}
 			line = next;
 			continue;
@@ -314,84 +361,210 @@ static u32 FormatBindMask(char *buf, u16 mask)
 	return n;
 }
 
-static u32 WriteIniText(char *buf, u32 cap, const struct SusamuneCfg *cfg)
+// Append to an output file, latching the first error so the caller can check
+// once at the end instead of after every line.
+static void Emit(FIL *f, int *err, const char *s, u32 len)
 {
-	u32 n = 0;
-	u32 i;
-	u32 count = cfg->count;
-	u32 bindCount = cfg->bindCount;
-	char combo[64];
+	UINT wrote;
+	int  ret;
+
+	if (*err != FR_OK)
+		return;
+
+	ret = f_write(f, s, len, &wrote);
+	if (ret == FR_OK && wrote != len)
+		ret = FR_DISK_ERR;
+	*err = ret;
+}
+
+static void EmitStr(FIL *f, int *err, const char *s)
+{
+	Emit(f, err, s, (u32)strlen(s));
+}
+
+// Write out this version's [settings_<region>] section, header included.
+static void EmitSettingsSection(FIL *f, int *err, const struct SusamuneCfg *cfg)
+{
+	char line[96];
+	u32  count = cfg->count;
+	u32  i;
 
 	if (count > SETTING_KEY_COUNT)
 		count = SETTING_KEY_COUNT;
-	if (bindCount > BIND_KEY_COUNT)
-		bindCount = BIND_KEY_COUNT;
 
-	n += (u32)_sprintf(buf + n,
-	                   "; susamune settings\r\n"
-	                   "; Written by the susamune launcher. Values are edited in-game\r\n"
-	                   "; from the mod menu; this file is rewritten whenever the menu is\r\n"
-	                   "; closed with changes pending, so comments added here are lost.\r\n"
-	                   ";\r\n"
-	                   "; [binds] values are button combinations like Y+Start, or none.\r\n"
-	                   "; menu_toggle is what opens the mod menu -- if you rebind it to\r\n"
-	                   "; something you cannot reproduce, set it back here.\r\n"
-	                   "\r\n"
-	                   "[" SUSAMUNE_INI_SECTION_NINTENDONT "]\r\n"
-	                   "\r\n"
-	                   "[" SUSAMUNE_INI_SECTION_SETTINGS "]\r\n");
+	EmitStr(f, err, "[");
+	EmitStr(f, err, SettingsSection);
+	EmitStr(f, err, "]\r\n");
 
 	for (i = 0; i < count; i++)
 	{
 		if (cfg->values[i] == SUSAMUNE_CFG_UNSET)
 			continue;
-		if (n + 64 > cap)
-			break;
-		n += (u32)_sprintf(buf + n, "%s = %u\r\n", SettingKeys[i], cfg->values[i]);
+		Emit(f, err, line,
+		     (u32)_sprintf(line, "%s = %u\r\n", SettingKeys[i], cfg->values[i]));
 	}
+}
 
-	if (n + 64 <= cap)
-		n += (u32)_sprintf(buf + n, "\r\n[" SUSAMUNE_INI_SECTION_BINDS "]\r\n");
+static void EmitBindsSection(FIL *f, int *err, const struct SusamuneCfg *cfg)
+{
+	char line[128];
+	char combo[64];
+	u32  bindCount = cfg->bindCount;
+	u32  i;
+
+	if (bindCount > BIND_KEY_COUNT)
+		bindCount = BIND_KEY_COUNT;
+
+	EmitStr(f, err, "[");
+	EmitStr(f, err, BindsSection);
+	EmitStr(f, err, "]\r\n");
 
 	for (i = 0; i < bindCount; i++)
 	{
 		if (cfg->binds[i] == SUSAMUNE_CFG_BIND_UNSET)
 			continue;
-		if (n + 96 > cap)
-			break;
 		FormatBindMask(combo, cfg->binds[i]);
-		n += (u32)_sprintf(buf + n, "%s = %s\r\n", BindKeys[i], combo);
+		Emit(f, err, line,
+		     (u32)_sprintf(line, "%s = %s\r\n", BindKeys[i], combo));
 	}
-
-	return n;
 }
 
+static const char kIniBanner[] =
+	"; susamune settings\r\n"
+	"; Written by the susamune launcher. Values are edited in-game from the\r\n"
+	"; mod menu; the section for the game version you are running is rewritten\r\n"
+	"; whenever the menu is closed with changes pending, so comments added\r\n"
+	"; inside it are lost. Everything else in this file is preserved.\r\n"
+	";\r\n"
+	"; Each supported disc has its own [settings_<region>] and\r\n"
+	"; [binds_<region>] pair -- jp = GMSJ, us = GMSE, pal = GMSP.\r\n"
+	";\r\n"
+	"; Bind values are button combinations like Y+Start, or none. menu_toggle\r\n"
+	"; is what opens the mod menu -- if you rebind it to something you cannot\r\n"
+	"; reproduce, set it back here.\r\n"
+	"\r\n"
+	"[" SUSAMUNE_INI_SECTION_NINTENDONT "]\r\n";
+
+// Rewrite the ini with this version's two sections replaced.
+//
+// The whole point of the copy-through is that the other versions' settings are
+// never materialised: they exist only as the text we are reading back here.
+// Everything outside our two sections -- other regions, [nintendont], comments,
+// blank lines -- lands in the output unchanged and in its original order.
 static int WriteIniFile(const struct SusamuneCfg *cfg)
 {
 	FIL   f;
 	char *buf;
-	u32   len;
-	UINT  wrote;
+	char *line;
+	UINT  read = 0;
 	int   ret;
+	int   err = FR_OK;
+	bool  skipping = false;
+	bool  wroteSettings = false;
+	bool  wroteBinds = false;
 
 	buf = (char*)malloca(SUSAMUNE_INI_BUF_SIZE, 32);
 	if (buf == NULL)
 		return FR_NOT_ENOUGH_CORE;
+	buf[0] = '\0';
 
-	len = WriteIniText(buf, SUSAMUNE_INI_BUF_SIZE, cfg);
-
-	ret = f_open_char(&f, SUSAMUNE_INI_PATH, FA_WRITE | FA_CREATE_ALWAYS);
+	ret = f_open_char(&f, SUSAMUNE_INI_PATH, FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)
 	{
-		f_lseek(&f, 0);
-		ret = f_write(&f, buf, len, &wrote);
-		if (ret == FR_OK && wrote != len)
-			ret = FR_DISK_ERR;
+		// Refuse rather than truncate: a partial copy-through would silently
+		// delete another version's settings.
+		if (f_size(&f) >= SUSAMUNE_INI_BUF_SIZE)
+		{
+			f_close(&f);
+			free(buf);
+			return FR_NOT_ENOUGH_CORE;
+		}
+		if (f_read(&f, buf, SUSAMUNE_INI_BUF_SIZE - 1, &read) != FR_OK)
+			read = 0;
+		buf[read] = '\0';
 		f_close(&f);
 	}
 
+	ret = f_open_char(&f, SUSAMUNE_INI_PATH, FA_WRITE | FA_CREATE_ALWAYS);
+	if (ret != FR_OK)
+	{
+		free(buf);
+		return ret;
+	}
+
+	if (read == 0)
+		Emit(&f, &err, kIniBanner, (u32)(sizeof(kIniBanner) - 1));
+
+	line = buf;
+	while (*line)
+	{
+		char *next;
+		char *text;
+
+		next = strchr(line, '\n');
+		if (next)
+			*next++ = '\0';
+		else
+			next = line + strlen(line);
+
+		text = Trim(line);  // also drops the \r of a CRLF file
+
+		if (text[0] == '[')
+		{
+			char *close = strchr(text, ']');
+			if (close)
+			{
+				// Copy the name out rather than punching a NUL into the line:
+				// the OTHER branch below has to emit it back verbatim.
+				char sect[SUSAMUNE_SECTION_NAME_MAX];
+				enum IniSection kind = SECTION_OTHER;
+				u32  len = (u32)(close - text - 1);
+
+				if (len < sizeof(sect))
+				{
+					memcpy(sect, text + 1, len);
+					sect[len] = '\0';
+					kind = ClassifySection(Trim(sect));
+				}
+
+				skipping = (kind != SECTION_OTHER);
+				if (kind == SECTION_SETTINGS)
+				{
+					EmitSettingsSection(&f, &err, cfg);
+					wroteSettings = true;
+				}
+				else if (kind == SECTION_BINDS)
+				{
+					EmitBindsSection(&f, &err, cfg);
+					wroteBinds = true;
+				}
+			}
+		}
+
+		if (!skipping)
+		{
+			EmitStr(&f, &err, text);
+			EmitStr(&f, &err, "\r\n");
+		}
+		line = next;
+	}
+
+	// Absent sections (a fresh file, or a version this card has not run yet)
+	// are appended.
+	if (!wroteSettings)
+	{
+		EmitStr(&f, &err, "\r\n");
+		EmitSettingsSection(&f, &err, cfg);
+	}
+	if (!wroteBinds)
+	{
+		EmitStr(&f, &err, "\r\n");
+		EmitBindsSection(&f, &err, cfg);
+	}
+
+	f_close(&f);
 	free(buf);
-	return ret;
+	return err;
 }
 
 // ---------------------------------------------------------------------
@@ -401,13 +574,31 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 void SusamuneCfgInit(void)
 {
 	struct SusamuneCfg *cfg = CfgBlock();
+	const char *region = SUSAMUNE_MOD_REGION_TAG(GAME_ID);
 	FIL   f;
 	char *buf;
 	UINT  read;
 	u32   i;
 	int   ret;
 
+	// Zero the block unconditionally: it survives across app launches, and a
+	// stale one left by an earlier boot would be adopted wholesale by a mod
+	// that happens to be running now.
 	memset(cfg, 0, sizeof(struct SusamuneCfg));
+
+	if (region == NULL)
+	{
+		// Not one of the supported discs, so there is no mod asking for
+		// settings and no section of the ini that belongs to this run. Leaving
+		// magic zeroed is what makes the mod (if any) report "no launcher".
+		sync_after_write(cfg, sizeof(struct SusamuneCfg));
+		CfgReady = false;
+		return;
+	}
+
+	BuildSectionName(SettingsSection, SUSAMUNE_INI_SECTION_SETTINGS, region);
+	BuildSectionName(BindsSection, SUSAMUNE_INI_SECTION_BINDS, region);
+
 	for (i = 0; i < SUSAMUNE_CFG_MAX_SETTINGS; i++)
 		cfg->values[i] = SUSAMUNE_CFG_UNSET;
 	for (i = 0; i < SUSAMUNE_CFG_MAX_BINDS; i++)
@@ -432,13 +623,18 @@ void SusamuneCfgInit(void)
 			free(buf);
 		}
 		f_close(&f);
-		dbgprintf("Susamune: loaded " SUSAMUNE_INI_PATH "\r\n");
+		if (!SawSettingsSection)
+		{
+			// The file exists but has never been written by this game version.
+			cfg->flags |= SUSAMUNE_CFG_FLAG_NO_CONFIG;
+		}
+		dbgprintf("Susamune: loaded " SUSAMUNE_INI_PATH " [%s]\r\n", SettingsSection);
 	}
 	else
 	{
 		// Every value stays UNSET, so the mod keeps its compiled-in defaults
 		// and -- seeing this flag -- writes the file out for us.
-		cfg->flags |= SUSAMUNE_CFG_FLAG_NO_FILE;
+		cfg->flags |= SUSAMUNE_CFG_FLAG_NO_CONFIG;
 		dbgprintf("Susamune: no " SUSAMUNE_INI_PATH " (%d), using defaults\r\n", ret);
 	}
 

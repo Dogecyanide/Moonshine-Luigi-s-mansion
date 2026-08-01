@@ -7,8 +7,10 @@
 # headers, data blobs, the fatfs-ppc lib). The final boot.dol is packaged into the
 # HBC app zip.
 #
-# Normally driven by the root project's `launcher` target (which passes the mod
-# manifest + inject header), but also configurable standalone for launcher dev.
+# Nothing here is version-specific: the mod ships as mod_<region>.bin files
+# packaged alongside boot.dol and read at runtime. Normally driven by the root
+# project's `launcher` target (which passes those bins in), but also configurable
+# standalone for launcher dev, in which case the app is packaged without them.
 
 cmake_minimum_required(VERSION 3.21)
 project(susamune_launcher NONE)
@@ -29,20 +31,10 @@ set(LAUNCHER_SCRIPTS_DIR "${_repo_root}/scripts" CACHE PATH "repo scripts/ dir")
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "meta.xml default load source (di/sd/usb)")
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
 
-# The mod's inject header dir. In the integrated build the root project generates
-# susamune_inject.h and points us at it; standalone we drop an empty one so the
-# kernel's __has_include fallback compiles cleanly.
-if(NOT SUSAMUNE_INJECT_DIR)
-    set(SUSAMUNE_INJECT_DIR "${CMAKE_BINARY_DIR}/inject")
-    file(MAKE_DIRECTORY "${SUSAMUNE_INJECT_DIR}")
-    if(NOT EXISTS "${SUSAMUNE_INJECT_DIR}/susamune_inject.h")
-        # No SUSAMUNE_GAME_ID => the PatchSusamune* paths compile out to no-ops.
-        # SUSAMUNE_ARENA_RESERVE is used by one helper outside that guard, so give
-        # it a harmless value to keep a standalone build compiling.
-        file(WRITE "${SUSAMUNE_INJECT_DIR}/susamune_inject.h"
-            "// standalone launcher build: no mod injected\n#define SUSAMUNE_ARENA_RESERVE 0u\n")
-    endif()
-endif()
+# mod_<region>.bin files to ship inside the HBC app dir. Empty for a standalone
+# launcher build: the kernel then finds no staged blob at boot and runs the game
+# unmodified, which is exactly what stock Nintendont does.
+set(SUSAMUNE_MOD_BINS "" CACHE STRING "mod_<region>.bin files to package")
 
 # --- Shared output locations, produced by one group and consumed by others -----
 set(_shared    "${CMAKE_BINARY_DIR}/shared")
@@ -82,7 +74,6 @@ ExternalProject_Add(arm
     CMAKE_GENERATOR "${CMAKE_GENERATOR}"
     CMAKE_ARGS
         "-DCMAKE_TOOLCHAIN_FILE=${_cmake_dir}/toolchain-devkitARM.cmake"
-        "-DSUSAMUNE_INJECT_DIR=${SUSAMUNE_INJECT_DIR}"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
         ${_common_args}
     DEPENDS ppc
@@ -105,14 +96,18 @@ ExternalProject_Add(wii
     USES_TERMINAL_CONFIGURE ON
     USES_TERMINAL_BUILD ON)
 
-# --- Package boot.dol into the HBC app zip (region/icon/meta from the manifest) -
-if(SUSAMUNE_MANIFEST AND LAUNCHER_OUTPUT_ZIP)
+# --- Package boot.dol + the mod bins into the HBC app zip ---------------------
+if(LAUNCHER_OUTPUT_ZIP)
+    set(_mod_bin_args "")
+    if(SUSAMUNE_MOD_BINS)
+        set(_mod_bin_args --mod-bins ${SUSAMUNE_MOD_BINS})
+    endif()
     add_custom_target(package ALL
         COMMAND "${LAUNCHER_PYTHON}" "${LAUNCHER_SCRIPTS_DIR}/package_launcher.py"
-            --manifest "${SUSAMUNE_MANIFEST}"
             --boot-dol "${_boot_dol}"
             --out-zip  "${LAUNCHER_OUTPUT_ZIP}"
             --source   "${LAUNCHER_DEFAULT_SOURCE}"
+            ${_mod_bin_args}
         COMMENT "Packaging launcher HBC app zip"
         VERBATIM)
     add_dependencies(package wii)

@@ -187,12 +187,13 @@ void Settings::init() {
     mSaveSeq   = cfg->saveSeq;
     mSaveState = SETTINGS_SAVE_IDLE;
 
-    // First boot on this SD card: the kernel found no susamune.ini and cannot
-    // author one, because the defaults live here rather than in the launcher.
-    // Write it out now so the user has a file to look at (and to hand-edit)
-    // without having to visit the menu first. Fire-and-forget -- the menu that
-    // would report the result does not exist this early.
-    if (cfg->flags & SUSAMUNE_CFG_FLAG_NO_FILE) {
+    // First boot of this game version on this SD card: the kernel found no
+    // sections for it and cannot author defaults, because those live here
+    // rather than in the launcher. Write them out now so the user has
+    // something to look at (and to hand-edit) without having to visit the menu
+    // first. Fire-and-forget -- the menu that would report the result does not
+    // exist this early.
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_NO_CONFIG) {
         save();
     }
 }

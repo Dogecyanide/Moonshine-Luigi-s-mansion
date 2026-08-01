@@ -52,12 +52,13 @@
 // distinct from it.
 #define SUSAMUNE_CFG_BIND_UNSET   0xFFFFu
 
-// No susamune.ini existed on the SD card. The kernel cannot write a default
-// file itself -- the default values live in kSettingDescs on the mod side, and
-// duplicating them in the launcher would be a second source of truth -- so it
-// raises this flag and the mod answers by issuing a save() during init, which
-// creates the file with a complete set of defaults.
-#define SUSAMUNE_CFG_FLAG_NO_FILE 0x1u
+// susamune.ini had nothing for the running game version -- either the file is
+// absent entirely, or it has no [settings_<region>] section for this disc. The
+// kernel cannot author defaults itself -- they live in kSettingDescs on the mod
+// side, and duplicating them in the launcher would be a second source of truth
+// -- so it raises this flag and the mod answers by issuing a save() during
+// init, which fills in this version's sections without disturbing the others.
+#define SUSAMUNE_CFG_FLAG_NO_CONFIG 0x1u
 
 struct SusamuneCfg {
     // --- cache line 0: written by the kernel at boot, by the mod on save ---
@@ -92,11 +93,20 @@ struct SusamuneCfg {
 // and friends) that will replace the loader's command-line flags; the kernel
 // parses and rewrites it today but has no keys in it yet.
 #define SUSAMUNE_INI_SECTION_NINTENDONT "nintendont"
+//
+// Settings and binds are per game version, because a JP route's binds and a PAL
+// route's are not the same thing and one launcher now serves all three discs:
+// the section names carry the region tag (settings_jp, binds_pal, ...). Only the
+// running version's sections are ever parsed or materialised -- the block in
+// MEM2 holds exactly one set of values -- so a rewrite copies the other
+// versions' sections through as text rather than round-tripping them.
 #define SUSAMUNE_INI_SECTION_SETTINGS   "settings"
-// [binds] holds one `key = A+DUp` line per configurable action; the button
-// tokens are SUSAMUNE_BIND_BUTTON_LIST (binds_list.h), so both sides spell
-// them the same way.
+// One `key = A+DUp` line per configurable action; the button tokens are
+// SUSAMUNE_BIND_BUTTON_LIST (binds_list.h), so both sides spell them the same
+// way.
 #define SUSAMUNE_INI_SECTION_BINDS      "binds"
+// settings_jp / binds_pal / ...
+#define SUSAMUNE_INI_SECTION_SEPARATOR  '_'
 
 // Portable compile-time checks (no C11 dependency): a negative array size
 // fails the build if the layout the three toolchains agree on ever drifts.

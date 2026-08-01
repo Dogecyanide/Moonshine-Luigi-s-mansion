@@ -275,11 +275,6 @@ int _main( int argc, char *argv[] )
 	BootStatus(7, s_size, s_cnt);
 	ConfigInit();
 
-	// Parse susamune.ini into the MEM2 handoff block. Must happen before the
-	// game is patched and started: the mod reads the block from
-	// TApplication::initialize, i.e. before the first frame is drawn.
-	SusamuneCfgInit();
-
 	if (ConfigGetConfig(NIN_CFG_LOG))
 		SDisInit = 1;  // Looks okay after threading fix
 	dbgprintf("Game path: %s\r\n", ConfigGetGamePath());
@@ -304,6 +299,14 @@ int _main( int argc, char *argv[] )
 	thread_continue(DI_Thread);
 
 	DIinit(true);
+
+	// Parse this disc's sections of susamune.ini into the MEM2 handoff block.
+	// After DIinit because that is what publishes GAME_ID, and settings are per
+	// game version now; before the PPC is released, because the mod reads the
+	// block from TApplication::initialize, i.e. before the first frame is
+	// drawn. Nothing else touches FatFS at this point -- the DI thread exists
+	// but is parked on its queue until the game starts asking for reads.
+	SusamuneCfgInit();
 
 	BootStatus(10, s_size, s_cnt);
 
