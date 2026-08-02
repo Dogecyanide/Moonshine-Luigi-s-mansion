@@ -328,9 +328,11 @@ const Patch kForcePlaza[] = {
 
 #define FEAT(id, arr) { arr, (u8)(id), (u8)(sizeof(arr) / sizeof((arr)[0])), 0 }
 // A feature that has to be installed before the app state machine runs at all.
-// featuresApplyEarly() (from onAppInit) applies only these rows; the rest wait
-// for the per-frame pass, which is where a row that patches heap words (Fast
-// Text) can capture an original worth restoring.
+// featuresApplyEarly() (from onAppInit) writes these rows once and the
+// per-frame pass ignores them entirely, so they carry no captured original and
+// no installed-state byte: their sites have already run by the time the menu
+// exists, which makes restoring them pointless. Off simply does not write, and
+// the next boot loads the game's own code from disc.
 #define FEAT_EARLY(id, arr) \
     { arr, (u8)(id), (u8)(sizeof(arr) / sizeof((arr)[0])), 1 }
 
@@ -359,16 +361,20 @@ constexpr Feature kFeatures[] = {
 };
 constexpr int kNumFeatures = (int)(sizeof(kFeatures) / sizeof(kFeatures[0]));
 
+// Early features are excluded: they are never restored, so they need no slot
+// in any of the three state arrays below.
 constexpr int countFeaturePatches() {
     int count = 0;
     for (int i = 0; i < kNumFeatures; i++) {
-        count += kFeatures[i].num;
+        if (!kFeatures[i].early) {
+            count += kFeatures[i].num;
+        }
     }
     return count;
 }
 constexpr int kNumPatches = countFeaturePatches();
-// Retail word at each patch site, flattened across every feature in table
-// order and captured lazily on first apply. Whether a slot has been captured
+// Retail word at each patch site, flattened across the per-frame features in
+// table order and captured lazily on first apply. Whether a slot has been captured
 // needs its own bit rather than an `orig == 0` sentinel: the Fast Text
 // message-buffer rows patch heap words that are legitimately zero.
 u32 gPatchOrig[kNumPatches];
@@ -676,41 +682,58 @@ void resolveFastTextPalMsg() {
 }
 #endif
 
-void applyPatches(bool earlyOnly) {
+// One pass over the table; `early` picks which half of it to handle, so the
+// two callers share everything but the state handling. Early rows keep no
+// state at all -- no capture, no restore, no gPatch* slot -- so `idx` walks the
+// per-frame features only, and this must stay the only writer of gPatch*.
+void applyPatches(bool early) {
 #if defined(SUSAMUNE_VERSION_PAL)
-    if (!earlyOnly && gSettings.getBool(SETTING_FAST_TEXT)) {
+    if (!early && gSettings.getBool(SETTING_FAST_TEXT)) {
         resolveFastTextPalMsg();
     }
 #endif
     int idx = 0;
     for (int f = 0; f < kNumFeatures; f++) {
         const Feature &feat = kFeatures[f];
-        if (idx + feat.num > kNumPatches) {
-            return;
-        }
-        if (earlyOnly && !feat.early) {
-            idx += feat.num;  // gPatchOrig/On are indexed across all features
+        if ((bool)feat.early != early) {
             continue;
         }
+        if (!early && idx + feat.num > kNumPatches) {
+            return;
+        }
         bool on = gSettings.getBool((SettingId)feat.id);
-        for (int j = 0; j < feat.num; j++, idx++) {
+        for (int j = 0; j < feat.num; j++) {
             const Patch &p    = feat.patches[j];
             u32          addr = patchAddr(p);
+            u32          word;
 
-            if (addr == 0) {
-                continue;  // unresolved (PAL Fast Text message buffer)
+            if (early) {
+                // Write-once: an off row has nothing to put back.
+                if (!on || addr == 0) {
+                    continue;
+                }
+                word = *reinterpret_cast<volatile u32 *>(addr);
+            } else {
+                // The slot is claimed even by an unresolved row (PAL Fast
+                // Text's message buffer), which resolves on a later pass.
+                int i = idx++;
+                if (addr == 0) {
+                    continue;
+                }
+                if (takeOnce(gPatchCaptured, i)) {
+                    gPatchOrig[i] = *reinterpret_cast<volatile u32 *>(addr);
+                }
+                if (on == (bool)gPatchOn[i]) {
+                    continue;
+                }
+                gPatchOn[i] = on;
+                word        = gPatchOrig[i];
+                if (!on) {
+                    writeGameCode(addr, word);  // restore the retail word
+                    continue;
+                }
             }
-
-            if (takeOnce(gPatchCaptured, idx)) {
-                gPatchOrig[idx] = *reinterpret_cast<volatile u32 *>(addr);
-            }
-            if (on == (bool)gPatchOn[idx]) {
-                continue;
-            }
-
-            u32 orig = gPatchOrig[idx];
-            writeGameCode(addr, on ? ((orig & ~patchMask(p)) | p.value) : orig);
-            gPatchOn[idx] = on;
+            writeGameCode(addr, (word & ~patchMask(p)) | p.value);
         }
     }
 }

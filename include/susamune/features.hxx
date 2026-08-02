@@ -16,8 +16,10 @@
 void featuresApply();
 
 // Apply the features that have to be live before the app state machine runs
-// (Intro Skip). Call once from onAppInit, right after gSettings.init(); the
-// per-frame featuresApply() keeps them in sync with the toggle from then on.
+// (Intro Skip). Call once from onAppInit, right after gSettings.init().
+// featuresApply() does not touch these rows and nothing restores them: their
+// sites have run long before the menu exists, so turning one off takes effect
+// on the next boot, when the game's own code is loaded from disc again.
 void featuresApplyEarly();
 
 // Reset per-stage feature state. Call on every stage load (from onSetup).

@@ -151,11 +151,17 @@ the logo and title app states as well — but not further back than
 feature whose sites are already directing by then needs the patch installed
 sooner. `FEAT_EARLY(...)` marks such a row and `featuresApplyEarly()` — called
 from `onAppInit`, the last point before `TApplication::proc()` starts the
-app-state machine — applies **only** those rows. Intro Skip is the one today,
-and on the per-frame pass alone the logos still play. Do not widen this to the
-whole table: rows that patch heap words (Fast Text) would capture their
-"original" out of heap the game has not filled in yet, and write that garbage
-back when toggled off.
+app-state machine — writes **only** those rows. Intro Skip is the one today,
+and on the per-frame pass alone the logos still play.
+
+Early rows are **write-once**: `featuresApply()` skips them, they hold no slot
+in the captured-original / installed-state arrays, and nothing ever restores
+them. That is not a shortcut — restoring is meaningless for a site that has
+already run by the time the menu can be opened, and a reboot reloads the game's
+own code from disc anyway. So turning such a setting off applies at the next
+boot, not immediately. Do not widen `FEAT_EARLY` to the whole table: rows that
+patch heap words (Fast Text) would capture their "original" out of heap the
+game has not filled in yet, and write that garbage back when toggled off.
 
 Because capture is lazy-on-first-apply and `featuresApply()` is the only writer
 of these addresses, the first read is guaranteed to be the retail value. All
