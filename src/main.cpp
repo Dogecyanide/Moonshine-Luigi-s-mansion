@@ -62,7 +62,8 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
         state = director->mCurState;
     }
 
-    state = LevelWarp::kick(director, state);
+    if (!gSettings.getBool(SETTING_DISABLE_WARPS))
+        state = LevelWarp::kick(director, state);
 
 #if ENABLE_DEBUG_WARPS
     if (Warp::pending()) {
@@ -114,7 +115,8 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     gBinds.update();
     // Before direct(): while the wheel is open it takes the pad away from
     // the game.
-    WarpWheel::update(gpApplication.mGamePads[0]);
+    if (!gSettings.getBool(SETTING_DISABLE_WARPS))
+        WarpWheel::update(gpApplication.mGamePads[0]);
 
     // Freeze the stage while an overlay is up. direct() runs the movement and
     // animation perform lists only outside the pause and stage-exit states, so
@@ -132,7 +134,8 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
         gpMarDirector->mCurState = TMarDirector::STATE_NORMAL;
         state = 0;
     }
-    state = LevelWarp::onDirected(state);
+    if (!gSettings.getBool(SETTING_DISABLE_WARPS))
+        state = LevelWarp::onDirected(state);
 
     // Apply/restore the toggled memory-patch features (ported gecko codes).
     // Runs every frame like the gecko handler; no-ops when nothing changed.
@@ -155,8 +158,8 @@ extern "C" void afterDraw() {
     // immediately afterward: director, fader, audio, and the current frame's
     // GPU work are all complete, while the next game frame has not begun.
     THPPlayerDrawDone();
-    if (gSavestateMgr)
-        gSavestateMgr->processPendingLoad();
+    if (gSavestateMgr) gSavestateMgr->processPendingLoad();
+
     {
         J2DOrthoGraph ortho(0, 0, 640, 480);
         ortho.setup2D();
@@ -170,7 +173,8 @@ extern "C" void afterDraw() {
         
         if (gMenu)
             gMenu->draw(&ortho);
-        WarpWheel::draw();
+        if (!gSettings.getBool(SETTING_DISABLE_WARPS))
+            WarpWheel::draw();
 #if ENABLE_SAVESTATE_DBG
         if (gSavestateMgr)
             gSavestateMgr->draw(&ortho);

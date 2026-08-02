@@ -63,11 +63,12 @@
     X(SETTING_FORCE_PLAZA_EVENTS,   "force_plaza_events")                     \
     X(SETTING_NOZZLE_LOCK,          "nozzle_lock")                            \
     X(SETTING_STAGE_INTRO_SKIP,     "stage_intro_skip")                       \
-    X(SETTING_NO_SHINE_ANIM,        "no_shine_anim")                         \
+    X(SETTING_NO_SHINE_ANIM,        "no_shine_anim")                          \
     X(SETTING_SHOW_BGM_SLOTS,       "show_bgm_slots")                         \
     /* -- Quality-of-life (appended for persistence compatibility) -- */      \
     X(SETTING_DISABLE_Z_MENU,       "disable_z_menu")                         \
     X(SETTING_AREA_LOCK,            "area_lock")                              \
-    X(SETTING_INTRO_SKIP,           "intro_skip")
+    X(SETTING_INTRO_SKIP,           "intro_skip")                             \
+    X(SETTING_DISABLE_WARPS,        "disable_warps")                     
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

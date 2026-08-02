@@ -78,6 +78,7 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     // the boot prompt that picks progressive / 50-60Hz mode, so that has to be
     // set with this off.
     SBOOL("Intro skip", 1, SETTING_CAT_QOL),
+    SBOOL("Disable Susamune Warps", 0, SETTING_CAT_MISC)
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'

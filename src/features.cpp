@@ -682,10 +682,6 @@ void resolveFastTextPalMsg() {
 }
 #endif
 
-// One pass over the table; `early` picks which half of it to handle, so the
-// two callers share everything but the state handling. Early rows keep no
-// state at all -- no capture, no restore, no gPatch* slot -- so `idx` walks the
-// per-frame features only, and this must stay the only writer of gPatch*.
 void applyPatches(bool early) {
 #if defined(SUSAMUNE_VERSION_PAL)
     if (!early && gSettings.getBool(SETTING_FAST_TEXT)) {

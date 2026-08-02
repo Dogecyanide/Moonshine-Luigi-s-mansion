@@ -26,11 +26,12 @@
 - [ ] update readme its not just savestates anymore. update credits to people who made the codes
 - [ ] sound fix (warspyking)
 - [ ] Restore the Nintendont menu and give a way to select the version, and configure the directory.
-- [ ] Reset button restarts the level.... bruh
 - [ ] Shine get timer maxes out at 99
 - [ ] intermittent crash?? only happened once, with the 64KiB thing
 - [ ] move bss out of MEM1
 - [ ] fix icon (should not have jp flag anymore)
+- [ ] Fast text broken on US 
+- [ ] option to disable warp wheel
 
 ### Bindings
 
