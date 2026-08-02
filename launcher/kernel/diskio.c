@@ -179,6 +179,14 @@ DRESULT disk_write_usb (
 /* Miscellaneous Functions                                               */
 /*-----------------------------------------------------------------------*/
 
+// Sector size of drive 1, which exists only when susamune.ini lives on a
+// different physical device from the game (see SetConfigDiskFunctions).
+// Drive 0 keeps reading s_size as it always has -- that global is not just a
+// reporting value, it is the transfer unit USBStorage_Read/WriteSectors
+// multiplies by, so it has to stay the USB device's sector size whichever
+// drive USB happens to be. The SD driver derives nothing from it.
+static u32 ConfigDriveSectorSize = PAGE_SIZE512;
+
 DRESULT disk_ioctl (
 	BYTE pdrv,		/* Physical drive nmuber (0..) */
 	BYTE cmd,		/* Control code */
@@ -186,7 +194,7 @@ DRESULT disk_ioctl (
 )
 {
 	if(cmd == GET_SECTOR_SIZE)
-		*(WORD*)buff = s_size;
+		*(WORD*)buff = (pdrv == 1) ? ConfigDriveSectorSize : s_size;
 
 	return RES_OK;
 }
@@ -226,16 +234,56 @@ DWORD get_fattime(void)
 
 DiskReadFunc disk_read;
 DiskWriteFunc disk_write;
+
+// Per-drive drivers. Only consulted through the dispatchers below, which are
+// installed only once a second volume exists.
+static DiskReadFunc DriveRead[2];
+static DiskWriteFunc DriveWrite[2];
+
+static DRESULT disk_read_multi(BYTE pdrv, BYTE *buff, DWORD sector, UINT count)
+{
+	return DriveRead[pdrv & 1](pdrv, buff, sector, count);
+}
+
+static DRESULT disk_write_multi(BYTE pdrv, const BYTE *buff, DWORD sector, UINT count)
+{
+	return DriveWrite[pdrv & 1](pdrv, buff, sector, count);
+}
+
 void SetDiskFunctions(DWORD usb)
 {
 	if(usb == 1)
 	{
-		disk_read = disk_read_usb;
-		disk_write = disk_write_usb;
+		DriveRead[0] = disk_read_usb;
+		DriveWrite[0] = disk_write_usb;
 	}
 	else
 	{
-		disk_read = disk_read_sd;
-		disk_write = disk_write_sd;
+		DriveRead[0] = disk_read_sd;
+		DriveWrite[0] = disk_write_sd;
 	}
+
+	// One volume: call the driver directly, exactly as before. The dispatch
+	// indirection only appears if a second volume is later mounted, so the
+	// common single-device boot is unchanged on the ISO streaming path.
+	disk_read = DriveRead[0];
+	disk_write = DriveWrite[0];
+}
+
+void SetConfigDiskFunctions(DWORD usb, DWORD sectorSize)
+{
+	if(usb == 1)
+	{
+		DriveRead[1] = disk_read_usb;
+		DriveWrite[1] = disk_write_usb;
+	}
+	else
+	{
+		DriveRead[1] = disk_read_sd;
+		DriveWrite[1] = disk_write_sd;
+	}
+
+	ConfigDriveSectorSize = sectorSize;
+	disk_read = disk_read_multi;
+	disk_write = disk_write_multi;
 }

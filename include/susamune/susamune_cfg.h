@@ -92,12 +92,14 @@ struct SusamuneCfg {
 #define SUSAMUNE_CFG_PPC_PTR  ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PPC_BASE)
 #define SUSAMUNE_CFG_PHYS_PTR ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PHYS_BASE)
 
-// Path of the ini on the SD card root.
+// Path of the ini, at the root of whichever device holds it. That is the device
+// the launcher was run from, which the kernel may have had to mount as a second
+// volume -- see SusamuneCfgIniPath().
 #define SUSAMUNE_INI_PATH "/susamune.ini"
 
-// Section headers. [nintendont] is reserved for launcher-side keys (ISO path
-// and friends) that will replace the loader's command-line flags; the kernel
-// parses and rewrites it today but has no keys in it yet.
+// Section headers. [nintendont] holds the launcher's own options (game version,
+// per-version disc image paths, and the Nintendont settings that used to live in
+// nincfg.bin); the loader owns it and the kernel only copies it through.
 #define SUSAMUNE_INI_SECTION_NINTENDONT "nintendont"
 //
 // Settings and binds are per game version, because a JP route's binds and a PAL

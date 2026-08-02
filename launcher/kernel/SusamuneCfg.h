@@ -21,4 +21,10 @@ bool SusamuneCfgPending(void);
 // GCNCard_Save) -- FatFS is not reentrant against the DI thread.
 void SusamuneCfgService(void);
 
+// Path to open susamune.ini by. The ini lives on the device the launcher was
+// run from, which is drive 1 when that is not the device the game is read from
+// and drive 0 (i.e. the unprefixed path) when it is. Defined in main.c, next to
+// the mount that decides it.
+const char *SusamuneCfgIniPath(void);
+
 #endif

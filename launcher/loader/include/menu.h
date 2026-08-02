@@ -70,12 +70,6 @@ void HandleSTMEvent(u32 event);
 void HandleWiiMoteEvent(s32 chan);
 
 /**
- * Select the source device and game.
- * @return TRUE to save settings; FALSE if no settings have been changed.
- */
-bool SelectDevAndGame(void);
-
-/**
  * Show a single message screen.
  * @param msg Message.
  */

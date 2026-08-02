@@ -50,6 +50,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "b64/cdecode.h"
 #include "vi_encoder.h"
 #include "SusamuneMod.h"
+#include "SusamuneIni.h"
+#include "SusamuneMenu.h"
 #include "susamune/mem2_map.h"
 
 #include "ff_utf8.h"
@@ -990,7 +992,6 @@ char launch_dir[MAXPATHLEN] = {0};
 extern void __exception_closeall();
 static u8 loader_stub[0x1800]; //save internally to prevent overwriting
 static ioctlv IOCTL_Buf ALIGNED(32);
-static const char ARGSBOOT_STR[9] ALIGNED(0x10) = {'a','r','g','s','b','o','o','t','\0'}; //makes it easier to go through the file
 static const char NIN_BUILD_STRING[] ALIGNED(32) = NIN_VERSION_STRING; // Version detection string used by nintendont launchers "$$Version:x.xxx"
 
 bool isWiiVC = false;
@@ -1080,6 +1081,39 @@ void changeToDefaultDrive()
 {
 	f_chdrive(primaryDevice);
 	f_chdir_char("/");
+}
+
+/**
+ * Mount one device if it is not already mounted, making it the default drive
+ * if it is the first one up.
+ * @return True if the device is mounted afterwards.
+ */
+static bool MountDeviceOnce(int dev)
+{
+	const WCHAR *devNameFF;
+
+	//only SD exists on Wii VC
+	if (dev == DEV_USB && isWiiVC)
+		return false;
+	if (devices[dev])
+		return true;
+
+	devNameFF = MountDevice(dev);
+	if (devNameFF == NULL)
+		return false;
+
+	if (primaryDevice == NULL)
+	{
+		primaryDevice = devNameFF;
+		changeToDefaultDrive();
+	}
+	return true;
+}
+
+// The device the launcher was run from, i.e. the one UseSD currently names.
+static bool MountLauncherDevice(void)
+{
+	return MountDeviceOnce(UseSD ? DEV_SD : DEV_USB);
 }
 
 /**
@@ -1507,90 +1541,25 @@ int main(int argc, char **argv)
 	//tell devkitPPC r29 that we use UTF-8
 	setlocale(LC_ALL,"C.UTF-8");
 
+	// Command-line configuration is gone: susamune.ini is the only place
+	// launcher settings live, and a second way to set them was a second
+	// source of truth. argv[0] is still read further down for launch_dir,
+	// which is how mod_<region>.bin is found next to boot.dol.
 	memset((void*)ncfg, 0, sizeof(NIN_CFG));
-	bool argsboot = false;
-	bool base64args = false;
-	if(argc > 1) //every 0x00 gets counted as one arg so just make sure its more than the path and copy
-	{
-		if (strncmp("AQcM", argv[1], 4) == 0) {
- 			// argv[1] is a base64 encoded string
- 			base64args = true;
- 			void* decode_buffer = malloc(strlen(argv[1]) * 6 / 8 + 1);
- 			if (decode_buffer)
- 			{
- 				base64_decodestate state;
- 				base64_init_decodestate(&state);
- 				base64_decode_block(argv[1], strlen(argv[1]), decode_buffer, &state);
- 				memcpy(ncfg, decode_buffer, sizeof(NIN_CFG));
- 				free(decode_buffer);
- 			}
- 		}
-		else if(strncmp("sd:/", argv[1], 4) == 0 || strncmp("usb:/", argv[1], 5) == 0 || strncmp("di:", argv[1], 3) == 0) {
-			// build the config
-			ncfg->Magicbytes = 0x01070CF6;
-			ncfg->Version = NIN_CFG_VERSION;
-
-		//	(void)"/games/Animal Crossing [GAFE01]/game.iso";
-
-			if(argv[1][0] == 'u') {
-				ncfg->Config |= NIN_CFG_USB;
-				snprintf(ncfg->GamePath, sizeof(ncfg->GamePath), "%s", &argv[1][4]);
-			} else if(argv[1][0] == 'd') {
-				// Boot from the real GameCube disc drive. The kernel keys off
-				// GamePath == "di" to init RealDI; storage (cheats/config) stays
-				// on the device the launcher was run from.
-				snprintf(ncfg->GamePath, sizeof(ncfg->GamePath), "di");
-			} else
-				snprintf(ncfg->GamePath, sizeof(ncfg->GamePath), "%s", &argv[1][3]);
-			
-			ncfg->Config |= NIN_CFG_MEMCARDEMU;
-			ncfg->Config |= NIN_CFG_MC_MULTI;
-			ncfg->MemCardBlocks = 2;
-			
-			if(argc > 2) {
-				if(strncmp("--cheats", argv[2], 8) == 0)
-					ncfg->Config |= NIN_CFG_CHEATS;
-			}
-			if(argc > 3) {
-				if(strncmp("--noIPL", argv[3], 7) == 0)
-					ncfg->Config |= NIN_CFG_SKIP_IPL;
-			}
-			if(argc > 4) {
-				if(strncmp("--mcd", argv[4], 5) == 0) {
-					ncfg->Config &= ~NIN_CFG_MC_MULTI;
-					ncfg->MemCardBlocks = 0;
-				}
-			}
-			
-			ncfg->Config |= NIN_CFG_ARCADE_MODE;
-			ncfg->Config |= NIN_CFG_REMLIMIT;
-			ncfg->Config |= NIN_CFG_AUTO_BOOT;
-			ncfg->Config |= NIN_CFG_NATIVE_SI;
-			ncfg->VideoMode |= NIN_VID_AUTO;
-			ncfg->Language |= NIN_LAN_AUTO;
-			ncfg->MaxPads = NIN_CFG_MAXPAD;
-			//ncfg->GameID = ; // this is set already
-			//ncfg->Config |= NIN_CFG_LOG;
- 		}
-		else
- 		{
- 			memcpy(ncfg, argv[1], sizeof(NIN_CFG));
- 		}
-		UpdateNinCFG(); //support for old versions with this
-		if(ncfg->Magicbytes == 0x01070CF6 && ncfg->Version == NIN_CFG_VERSION && ncfg->MaxPads <= NIN_CFG_MAXPAD)
-		{
-			if(ncfg->Config & NIN_CFG_AUTO_BOOT)
-			{	//do NOT remove, this can be used to see if nintendont knows args
-				gprintf(ARGSBOOT_STR);
-				argsboot = true;
-			}
-		}
-	}
+	ncfg->Magicbytes = 0x01070CF6;
+	ncfg->Version = NIN_CFG_VERSION;
+	ncfg->MaxPads = NIN_CFG_MAXPAD;
+	ncfg->VideoMode |= NIN_VID_AUTO;
+	ncfg->Config |= NIN_CFG_ARCADE_MODE;
+	// NIN_CFG_AUTO_BOOT is deliberately never set: it is what suppresses the
+	// menu, and the menu is the whole interface now. The branch below is kept
+	// so a "hold a button at startup to get back into the GUI" boot is a small
+	// change rather than a resurrection.
 
 	//Meh, doesnt do anything anymore anyways
 	//STM_RegisterEventHandler(HandleSTMEvent);
 
-	Initialise(argsboot);
+	Initialise(false);
 
 	//for BT.c
 	CONF_GetPadDevices((conf_pads*)0x932C0000);
@@ -1616,8 +1585,7 @@ int main(int argc, char **argv)
 	if(!isWiiVC)
 	{
 		// Preparing IOS58 Kernel...
-		if(argsboot == false)
-			ShowMessageScreen("Preparing IOS58 Kernel...");
+		ShowMessageScreen("Preparing IOS58 Kernel...");
 
 		u32 u;
 		//Disables MEMPROT for patches
@@ -1659,8 +1627,7 @@ int main(int argc, char **argv)
 		DCFlushRange( (void*)0x939F0348, sizeof(ESBootPatch) );
 
 		// Loading IOS58 Kernel...
-		if(argsboot == false)
-			ShowMessageScreen("Loading IOS58 Kernel...");
+		ShowMessageScreen("Loading IOS58 Kernel...");
 
 		//libogc still has that, lets close it
 		__ES_Close();
@@ -1682,8 +1649,7 @@ int main(int argc, char **argv)
 	//}
 
 	// Preparing Nintendont Kernel...
-	if(argsboot == false)
-		ShowMessageScreen("Preparing Nintendont Kernel...");
+	ShowMessageScreen("Preparing Nintendont Kernel...");
 
 	//inject nintendont thread
 	void *kernel_bin = NULL;
@@ -1697,8 +1663,7 @@ int main(int argc, char **argv)
 	memcpy((void*)0x92FFFE00,kernelboot_bin,kernelboot_bin_size);
 	DCFlushRange((void*)0x92FFFE00,kernelboot_bin_size);
 	//Loading Nintendont Kernel...
-	if(argsboot == false)
-		ShowMessageScreen("Loading Nintendont Kernel...");
+	ShowMessageScreen("Loading Nintendont Kernel...");
 	//close in case this is wii vc
 	__ES_Close();
 	memset( STATUS, 0, 0x20 );
@@ -1716,8 +1681,7 @@ int main(int argc, char **argv)
 	fd = IOS_Open( dev_es, 0 );
 	IOS_IoctlvAsync(fd, 0x1F, 0, 0, &IOCTL_Buf, NULL, NULL);
 	//Waiting for Nintendont...
-	if(argsboot == false)
-		ShowMessageScreen("Waiting for Nintendont...");
+	ShowMessageScreen("Waiting for Nintendont...");
 	while(1)
 	{
 		DCInvalidateRange( STATUS, 0x20 );
@@ -1733,40 +1697,6 @@ int main(int argc, char **argv)
 	gprintf("Nintendont at your service!\r\n%s\r\n", NIN_BUILD_STRING);
 	KernelLoaded = 1;
 
-	// Checking for storage devices...
-	if(argsboot == false)
-		ShowMessageScreen("Checking storage devices...");
-
-	// Initialize devices.
-	// TODO: Only mount the device Nintendont was launched from
-	// Mount the other device asynchronously.
-	bool foundOneDevice = false;
-	int i;
-	for (i = DEV_SD; i <= DEV_USB; i++)
-	{
-		//only check SD on Wii VC
-		if(i == DEV_USB && isWiiVC)
-			break;
-		//check SD and USB on Wii and WiiU
-		const WCHAR *devNameFF = MountDevice(i);
-		if (devNameFF && !foundOneDevice)
-		{
-			// Set this device as primary.
-			primaryDevice = devNameFF;
-			changeToDefaultDrive();
-			foundOneDevice = true;
-		}
-	}
-
-	// FIXME: Show this information in the menu instead of
-	// aborting here.
-	if (!devices[DEV_SD] && !devices[DEV_USB])
-	{
-		ClearScreen();
-		gprintf("No FAT device found!\n");
-		PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, 232, "No FAT device found!");
-		ExitToLoader(1);
-	}
 	// Seems like some programs start without any args
 	if(argc > 0 && argv != NULL && argv[0] != NULL)
 	{
@@ -1774,6 +1704,30 @@ int main(int argc, char **argv)
 		if (first_slash != NULL) strncpy(launch_dir, argv[0], first_slash-argv[0]+1);
 	}
 	gprintf("launch_dir = %s\r\n", launch_dir);
+
+	// Checking for storage devices...
+	ShowMessageScreen("Checking storage devices...");
+
+	// Mount the launcher's own device first and nothing else: susamune.ini is
+	// there, and until it has been read we do not know whether the user wants
+	// the menu (which needs both devices listed) or an auto boot (which needs
+	// only the one the game is on). Bringing USB up costs seconds -- it has a
+	// 10 second init timeout -- so an all-SD auto boot must not pay for it.
+	UseSD = (strncmp(launch_dir, "usb:", 4) != 0);
+	if (MountLauncherDevice() == false)
+	{
+		// Whatever launch_dir said, that device is not there. Try the other.
+		UseSD = !UseSD;
+		MountLauncherDevice();
+	}
+
+	if (!devices[DEV_SD] && !devices[DEV_USB])
+	{
+		ClearScreen();
+		gprintf("No FAT device found!\n");
+		PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, 232, "No FAT device found!");
+		ExitToLoader(1);
+	}
 
 	// Initialize controllers.
 	// FIXME: Initialize before storage devices.
@@ -1795,51 +1749,24 @@ int main(int argc, char **argv)
 	//gprintf("Font: 0x1AFF00 starts with %.4s, 0x1FCF00 with %.4s\n", (char*)0x93100000, (char*)0x93100000 + 0x4D000);
 
 	// Update meta.xml.
-	if (argsboot == false || base64args == false)
-	{
-		updateMetaXml();
-	}
+	updateMetaXml();
 
-	if(argsboot == false)
-	{
-		// Load titles.txt.
-	//	LoadTitles();
-
-		if (LoadNinCFG() == false)
-		{
-			memset(ncfg, 0, sizeof(NIN_CFG));
-
-			ncfg->Magicbytes = 0x01070CF6;
-			ncfg->Version = NIN_CFG_VERSION;
-			ncfg->Language = NIN_LAN_AUTO;
-			ncfg->MaxPads = NIN_CFG_MAXPAD;
-			ncfg->MemCardBlocks = 0x2;//251 blocks
-			ncfg->Config |= NIN_CFG_REMLIMIT;
-		}
-
-		// Prevent autobooting if B is pressed
-		/*int i = 0;
-		while((ncfg->Config & NIN_CFG_AUTO_BOOT) && i < 1000000) // wait for wiimote re-synch
-		{
-			if (i == 0) {
-				PrintInfo();
-				PrintFormat(DEFAULT_SIZE, BLACK, 320 - 90, MENU_POS_Y + 20*10, "B: Cancel Autoboot");
-				GRRLIB_Render();
-				ClearScreen();
-			}
-			
-			FPAD_Update();
-
-			if (FPAD_Cancel(0)) {
-				ncfg->Config &= ~NIN_CFG_AUTO_BOOT;
-				break;
-			}
-
-			i++;
-		}*/
-	}
+	// susamune.ini is the only launcher config; nincfg.bin is gone. The kernel
+	// takes NIN_CFG through the MEM2 handoff, so the file was never anything
+	// but loader-side persistence, and keeping it would have left a second
+	// place the four migrated options could disagree from.
+	SusamuneIniLoad(GetRootDevice());
 	ReconfigVideo(rmode);
-	UseSD = (ncfg->Config & NIN_CFG_USB) == 0;
+
+	// Can the ini be written back? Probe once so the menu can say so up front
+	// rather than only failing when the user changes something.
+	bool LauncherCanSave = SusamuneIniWritable(GetRootDevice());
+	if (LauncherCanSave && SusamuneIniNeedsWrite())
+	{
+		// First run on this card: author [nintendont] so the keys are there to
+		// be hand-edited, the way the mod does for its own sections.
+		SusamuneIniSave(GetRootDevice());
+	}
 
 	bool progressive = (CONF_GetProgressiveScan() > 0) && VIDEO_HaveComponentCable();
 	if(progressive) //important to prevent blackscreens
@@ -1847,19 +1774,46 @@ int main(int argc, char **argv)
 	else
 		ncfg->VideoMode &= ~NIN_VID_PROG;
 
-	bool SaveSettings = false;
+	if(gIni.autoboot)
+	{
+		// B cancels an auto boot, following the button Nintendont's own
+		// autoboot used. Poll for a moment rather than sampling once: the pads
+		// have only just been initialised and the first SI poll may not have
+		// landed yet.
+		int poll;
+		bool cancel = false;
+		for (poll = 0; poll < 10 && !cancel; poll++)
+		{
+			FPAD_Update();
+			cancel = FPAD_Cancel(1);
+			usleep(20000);
+		}
+
+		if (!cancel)
+		{
+			// Mount the game's device too if it is the other one; leave it
+			// alone otherwise. This is the whole point of auto boot being
+			// fast -- no scan of a device nothing is going to be read from.
+			int gameDev = SusamuneAutoBootDevice();
+			if (gameDev >= 0)
+				MountDeviceOnce(gameDev);
+
+			if (SusamuneAutoBoot(GetRootDevice()))
+				ncfg->Config |= NIN_CFG_AUTO_BOOT;
+			// Otherwise fall through to the menu, which shows why.
+		}
+	}
+
 	if(!(ncfg->Config & NIN_CFG_AUTO_BOOT))
 	{
-		// Not autobooting, i.e. no valid game path was resolved.
-		// The SD/USB device+game picker doesn't work with the controller
-		// setup on this fork, so show a message instead of that menu.
-		char NotFoundMsg[300];
-		snprintf(NotFoundMsg, sizeof(NotFoundMsg), "File not found: %s:%s", GetRootDevice(), ncfg->GamePath);
-		ShowMessageScreenAndWaitForPower(NotFoundMsg);
+		// The menu lists both devices, so the one auto boot skipped has to
+		// come up now.
+		MountDeviceOnce(DEV_SD);
+		MountDeviceOnce(DEV_USB);
+		SusamuneMenuRun(GetRootDevice(), LauncherCanSave);
 	}
 	else
 	{
-		// Autobooting.
 		gprintf("Autobooting:\"%s\"\r\n", ncfg->GamePath );
 		PrintInfo();
 		GRRLIB_Render();
@@ -1870,8 +1824,7 @@ int main(int argc, char **argv)
 	u32 CurDICMD = 0;
 	if( memcmp(ncfg->GamePath, "di", 3) == 0 )
 	{
-		if(argsboot == false)
-			ShowLoadingScreen();
+		ShowLoadingScreen();
 		if(isWiiVC)
 		{
 			if(WDVD_Init() != 0)
@@ -1938,43 +1891,22 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if(SaveSettings)
+	// The disc image case was checked in the menu; a real disc only reports
+	// its ID once DI is up, which has just happened.
+	if( CurDICMD || wiiVCInternal )
 	{
-		// TODO: If the boot device is the same as the game device,
-		// don't write it twice.
-
-		// Write config to the boot device, which is loaded on next launch.
-		FIL cfg;
-		if (f_open_char(&cfg, "/nincfg.bin", FA_WRITE|FA_OPEN_ALWAYS) == FR_OK)
+		if( !SusamuneCheckGameID(ncfg->GameID) )
 		{
-			// Reserve space in the file.
-			if (f_size(&cfg) < sizeof(NIN_CFG)) {
-				f_expand(&cfg, sizeof(NIN_CFG), 1);
-			}
-
-			// Write nincfg.bin.
-			UINT wrote;
-			f_write(&cfg, ncfg, sizeof(NIN_CFG), &wrote);
-			f_close(&cfg);
+			char WrongDisc[160];
+			snprintf(WrongDisc, sizeof(WrongDisc),
+				 "Disc is %.4s, but %s is selected%s",
+				 (const char*)&ncfg->GameID, SusamuneSelectedVersionName(),
+				 // By this point DI is up and the menu is behind us, so an
+				 // auto boot cannot be sent back to it -- name the way out.
+				 gIni.autoboot ? ". Hold B at startup for the menu."
+					       : " in the launcher.");
+			ShowMessageScreenAndWaitForPower(WrongDisc);
 		}
-
-		// Write config to the game device, used by the Nintendont kernel.
-		char ConfigPath[20];
-		snprintf(ConfigPath, sizeof(ConfigPath), "%s:/nincfg.bin", GetRootDevice());
-		if (f_open_char(&cfg, ConfigPath, FA_WRITE|FA_OPEN_ALWAYS) == FR_OK)
-		{
-			// Reserve space in the file.
-			if (f_size(&cfg) < sizeof(NIN_CFG)) {
-				f_expand(&cfg, sizeof(NIN_CFG), 1);
-			}
-
-			// Write nincfg.bin.
-			UINT wrote;
-			f_write(&cfg, ncfg, sizeof(NIN_CFG), &wrote);
-			f_close(&cfg);
-		}
-
-		FlushDevices();
 	}
 
 	// Get multi-game and region code information.
@@ -2328,7 +2260,6 @@ int main(int argc, char **argv)
 		if( STATUS_LOADING == 0xdeadbeef )
 			break;
 
-		if(argsboot == false)
 		{
 			PrintInfo();
 
@@ -2454,13 +2385,10 @@ int main(int argc, char **argv)
 		while((STATUS_LOADING < -1) && (STATUS_LOADING > -20)) //displaying a fatal error
 				; //do nothing wait for shutdown
 	}
-	if(argsboot == false)
-	{
-		DrawBuffer(); // Draw all status messages
-		PrintFormat(DEFAULT_SIZE, BLACK, MENU_POS_X, MENU_POS_Y + 20*17, "Nintendont kernel looping, loading game...");
-		GRRLIB_Render();
-		DrawBuffer(); // Draw all status messages
-	}
+	DrawBuffer(); // Draw all status messages
+	PrintFormat(DEFAULT_SIZE, BLACK, MENU_POS_X, MENU_POS_Y + 20*17, "Nintendont kernel looping, loading game...");
+	GRRLIB_Render();
+	DrawBuffer(); // Draw all status messages
 //	memcpy( (void*)0x80000000, (void*)0x90140000, 0x1200000 );
 	GRRLIB_FreeTexture(background);
 	GRRLIB_FreeTexture(screen_buffer);

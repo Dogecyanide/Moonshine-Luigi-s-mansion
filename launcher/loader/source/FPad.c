@@ -166,114 +166,114 @@ bool FPAD_Up( bool ILock )
 {
 	if( !ILock && SLock ) return false;
 
-	/*if((WPAD_Pressed & (WPAD_BUTTON_UP|WPAD_CLASSIC_BUTTON_UP)) || (PAD_Pressed & PAD_BUTTON_UP) || (WiiDRC_Pressed & WIIDRC_BUTTON_UP) || (PAD_Stick_Y > 30))
+	if(((PAD_Pressed & PAD_BUTTON_UP) || (WiiDRC_Pressed & WIIDRC_BUTTON_UP) || (PAD_Stick_Y > 30)))
 	{
 		Repeat = 2;
 		SLock = true;
 		return true;
-	}*/
+	}
 	return false;
 }
 
 bool FPAD_Down( bool ILock )
 {
 	if( !ILock && SLock ) return false;
-/*
-	if( (WPAD_Pressed & (WPAD_BUTTON_DOWN|WPAD_CLASSIC_BUTTON_DOWN)) || (PAD_Pressed & PAD_BUTTON_DOWN) || (WiiDRC_Pressed & WIIDRC_BUTTON_DOWN) || (PAD_Stick_Y < -30))
+
+	if(((PAD_Pressed & PAD_BUTTON_DOWN) || (WiiDRC_Pressed & WIIDRC_BUTTON_DOWN) || (PAD_Stick_Y < -30)))
 	{
 		Repeat = 2;
 		SLock = true;
 		return true;
-	}*/
+	}
 	return false;
 }
 
 bool FPAD_Left( bool ILock )
 {
 	if( !ILock && SLock ) return false;
-/*
-	if((WPAD_Pressed & (WPAD_BUTTON_LEFT|WPAD_CLASSIC_BUTTON_LEFT)) || (PAD_Pressed & PAD_BUTTON_LEFT) || (WiiDRC_Pressed & WIIDRC_BUTTON_LEFT) || (PAD_Stick_X < -30))
+
+	if(((PAD_Pressed & PAD_BUTTON_LEFT) || (WiiDRC_Pressed & WIIDRC_BUTTON_LEFT) || (PAD_Stick_X < -30)))
 	{
 		Repeat = 2;
 		SLock = true;
 		return true;
-	}*/
+	}
 	return false;
 }
 bool FPAD_Right( bool ILock )
 {
 	if( !ILock && SLock ) return false;
-/*
-	if( (WPAD_Pressed & (WPAD_BUTTON_RIGHT|WPAD_CLASSIC_BUTTON_RIGHT)) || (PAD_Pressed & PAD_BUTTON_RIGHT) || (WiiDRC_Pressed & WIIDRC_BUTTON_RIGHT) || ( PAD_Stick_X > 30 ))
+
+	if(((PAD_Pressed & PAD_BUTTON_RIGHT) || (WiiDRC_Pressed & WIIDRC_BUTTON_RIGHT) || (PAD_Stick_X > 30)))
 	{
 		Repeat = 2;
 		SLock = true;
 		return true;
-	}*/
+	}
 	return false;
 }
 bool FPAD_OK( bool ILock )
 {
 	if( !ILock && SLock ) return false;
-/*
-	if( (WPAD_Pressed & (WPAD_BUTTON_A|WPAD_CLASSIC_BUTTON_A)) || ( PAD_Pressed & PAD_BUTTON_A ) || (WiiDRC_Pressed & WIIDRC_BUTTON_A) )
+
+	if((PAD_Pressed & PAD_BUTTON_A) || (WiiDRC_Pressed & WIIDRC_BUTTON_A))
 	{
 		Repeat = 0;
 		SLock = true;
 		return true;
-	}*/
+	}
 	return false;
 }
 
 bool FPAD_X( bool ILock )
 {
 	if( !ILock && SLock ) return false;
-/*
-	if( (WPAD_Pressed & (WPAD_BUTTON_1|WPAD_CLASSIC_BUTTON_X)) || ( PAD_Pressed & PAD_BUTTON_X ) || (WiiDRC_Pressed & WIIDRC_BUTTON_X) )
+
+	if((PAD_Pressed & PAD_BUTTON_X) || (WiiDRC_Pressed & WIIDRC_BUTTON_X))
 	{
 		Repeat = 0;
 		SLock = true;
 		return true;
-	}*/
+	}
 	return false;
 }
 
 bool FPAD_Y( bool ILock )
 {
 	if( !ILock && SLock ) return false;
-/*
-	if( (WPAD_Pressed & (WPAD_BUTTON_2|WPAD_CLASSIC_BUTTON_Y)) || ( PAD_Pressed & PAD_BUTTON_Y ) || (WiiDRC_Pressed & WIIDRC_BUTTON_Y) )
+
+	if((PAD_Pressed & PAD_BUTTON_Y) || (WiiDRC_Pressed & WIIDRC_BUTTON_Y))
 	{
 		Repeat = 0;
 		SLock = true;
 		return true;
-	}*/
+	}
 	return false;
 }
 
 bool FPAD_Cancel( bool ILock )
 {
 	if( !ILock && SLock ) return false;
-/*
-	if( (WPAD_Pressed & (WPAD_BUTTON_B|WPAD_CLASSIC_BUTTON_B)) || ( PAD_Pressed & PAD_BUTTON_B ) || (WiiDRC_Pressed & WIIDRC_BUTTON_B) )
+
+	if((PAD_Pressed & PAD_BUTTON_B) || (WiiDRC_Pressed & WIIDRC_BUTTON_B))
 	{
 		Repeat = 0;
 		SLock = true;
 		return true;
-	}*/
+	}
 	return false;
 }
 
 bool FPAD_Start( bool ILock )
 {
 	if( !ILock && SLock ) return false;
-/*
-	if( WPAD_Pressed & (WPAD_BUTTON_HOME|WPAD_CLASSIC_BUTTON_HOME) || (WiiDRC_Pressed & WIIDRC_BUTTON_HOME) || ( PAD_Pressed & PAD_BUTTON_START ) )
+
+	if((PAD_Pressed & PAD_BUTTON_START) || (WiiDRC_Pressed & WIIDRC_BUTTON_HOME))
 	{
 		Repeat = 0;
 		SLock = true;
 		return true;
-	}*/
+	}
 	return false;
 }
 

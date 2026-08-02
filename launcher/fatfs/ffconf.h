@@ -166,13 +166,13 @@
 / Drive/Volume Configurations
 /---------------------------------------------------------------------------*/
 
-#ifdef __PPC__
-// Nintendont loader: Support both SD and USB at the same time.
+// Both sides support two volumes. On the loader they are SD and USB.
+// On the kernel, drive 0 is the storage device the game is read from and
+// drive 1 -- mounted only when it is a different physical device -- is the
+// device susamune.ini lives on, i.e. the one the launcher was run from.
+// Kernel paths are unprefixed and therefore all bind to drive 0, which is
+// what keeps every pre-existing path working unchanged.
 #define _VOLUMES	2
-#else /* !__PPC__ */
-// Nintendont kernel: Only one device at a time.
-#define _VOLUMES	1
-#endif /* __PPC__ */
 /* Number of volumes (logical drives) to be used. */
 
 

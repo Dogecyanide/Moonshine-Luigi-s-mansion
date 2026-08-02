@@ -59,10 +59,20 @@ extern DiskReadFunc disk_read;
 extern DiskWriteFunc disk_write;
 
 /**
- * Initialize disk drive functions.
+ * Bind drive 0, the device the game is read from.
  * @param usb 1 for USB; 0 for SD.
  */
 void SetDiskFunctions(DWORD usb);
+
+/**
+ * Bind drive 1, the device susamune.ini lives on. Only called when that is a
+ * different physical device from the one SetDiskFunctions() bound; until then
+ * drive 1 does not exist and disk_read/disk_write go straight to drive 0's
+ * driver with no dispatch in between.
+ * @param usb 1 for USB; 0 for SD.
+ * @param sectorSize Sector size reported by that device.
+ */
+void SetConfigDiskFunctions(DWORD usb, DWORD sectorSize);
 #endif /* __PPC__ */
 
 DRESULT disk_ioctl (BYTE pdrv, BYTE cmd, void* buff);

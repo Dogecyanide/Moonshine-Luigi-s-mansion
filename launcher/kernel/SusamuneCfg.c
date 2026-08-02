@@ -16,9 +16,14 @@ The ini is plain text. [settings_<region>] holds the in-game options, keyed by
 the stable names in settings_list.h -- shared with the mod, so the key table
 here cannot drift from the mod's SettingId order. [binds_<region>] holds one
 button combination per configurable action, keyed by binds_list.h and written as
-`+`-joined button tokens ("X+DUp") from the same shared list. [nintendont] is
-reserved for launcher options (ISO path and friends) that will eventually
-replace the loader's command-line flags; it is recognised but has no keys yet.
+`+`-joined button tokens ("X+DUp") from the same shared list. [nintendont] holds
+the launcher's own options -- game version, per-version disc image paths, and
+the four Nintendont settings that used to live in nincfg.bin -- and belongs to
+the loader (SusamuneIni.c); this side only copies it through.
+
+The file lives on the device the launcher was run from, which is not
+necessarily the one the game is read from; SusamuneCfgIniPath() (main.c) names
+the drive it ended up on.
 
 One launcher now serves GMSJ/GMSE/GMSP, and each keeps its own settings and
 binds, hence the region tag on the section names. Only the running version's
@@ -468,7 +473,7 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 		return FR_NOT_ENOUGH_CORE;
 	buf[0] = '\0';
 
-	ret = f_open_char(&f, SUSAMUNE_INI_PATH, FA_READ | FA_OPEN_EXISTING);
+	ret = f_open_char(&f, SusamuneCfgIniPath(), FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)
 	{
 		// Refuse rather than truncate: a partial copy-through would silently
@@ -485,7 +490,7 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 		f_close(&f);
 	}
 
-	ret = f_open_char(&f, SUSAMUNE_INI_PATH, FA_WRITE | FA_CREATE_ALWAYS);
+	ret = f_open_char(&f, SusamuneCfgIniPath(), FA_WRITE | FA_CREATE_ALWAYS);
 	if (ret != FR_OK)
 	{
 		free(buf);
@@ -609,7 +614,7 @@ void SusamuneCfgInit(void)
 	cfg->count     = (u16)SETTING_KEY_COUNT;
 	cfg->bindCount = (u16)BIND_KEY_COUNT;
 
-	ret = f_open_char(&f, SUSAMUNE_INI_PATH, FA_READ | FA_OPEN_EXISTING);
+	ret = f_open_char(&f, SusamuneCfgIniPath(), FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)
 	{
 		buf = (char*)malloca(SUSAMUNE_INI_BUF_SIZE, 32);

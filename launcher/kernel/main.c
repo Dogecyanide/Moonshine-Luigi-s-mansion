@@ -37,6 +37,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "TRI.h"
 #include "Patch.h"
 #include "SusamuneCfg.h"
+#include "susamune/susamune_cfg.h"
 
 #include "diskio.h"
 #include "usbstorage.h"
@@ -55,6 +56,19 @@ extern u32 s_cnt;
 static FATFS *fatfs = NULL;
 //this is just a single / as u16, easier to write in hex
 static const WCHAR fatDevName[2] = { 0x002F, 0x0000 };
+
+// Drive 1, the device susamune.ini lives on. Mounted only when that is not the
+// device the game is read from; NULL otherwise, which is what makes
+// SusamuneCfgIniPath() fall back to the unprefixed (drive 0) path.
+static FATFS *ConfigFatFS = NULL;
+//"1:" as u16
+static const WCHAR cfgDevName[3] = { 0x0031, 0x003A, 0x0000 };
+
+// Path susamune.ini should be opened by, in this boot's drive numbering.
+const char *SusamuneCfgIniPath(void)
+{
+	return ConfigFatFS ? "1:" SUSAMUNE_INI_PATH : SUSAMUNE_INI_PATH;
+}
 
 // Moved to kernel/global.h
 //#define HW_RESETS (0xd800000 + 0x194)
@@ -242,6 +256,51 @@ int _main( int argc, char *argv[] )
 		Shutdown();
 	}
 	
+	// susamune.ini lives on the device the launcher was run from, which need
+	// not be the device the game is read from. When it is not, bring that
+	// device up as drive 1 as well -- the alternative is making the user keep
+	// a copy of the ini per device, which is worse. Everything else in the
+	// kernel uses unprefixed paths and so keeps binding to drive 0.
+	if (ConfigGetConfig(NIN_CFG_CFG_ON_USB) != (UseUSB != 0))
+	{
+		u32 cfgOnUSB = ConfigGetConfig(NIN_CFG_CFG_ON_USB) ? 1 : 0;
+		u32 cfgSectorSize = PAGE_SIZE512;
+		s32 cfgRet;
+
+		if (cfgOnUSB)
+		{
+			// USBStorage_Startup publishes the sector size through s_size,
+			// which the USB driver itself multiplies by on every transfer --
+			// so it has to keep the USB value even though USB is drive 1 here.
+			// The SD driver reads nothing from it.
+			cfgRet = USBStorage_Startup();
+			cfgSectorSize = s_size;
+		}
+		else
+		{
+			cfgRet = SDHCInit();
+		}
+
+		if (cfgRet != 1)
+		{
+			// Not fatal: the game still boots, the mod just falls back to its
+			// compiled-in defaults and cannot persist changes.
+			dbgprintf("Susamune: config device init failed:%d\r\n", cfgRet);
+		}
+		else
+		{
+			SetConfigDiskFunctions(cfgOnUSB, cfgSectorSize);
+			ConfigFatFS = (FATFS*)malloca( sizeof(FATFS), 32 );
+			res = f_mount( ConfigFatFS, cfgDevName, 1 );
+			if( res != FR_OK )
+			{
+				dbgprintf("Susamune: config device mount failed:%d\r\n", res );
+				free(ConfigFatFS);
+				ConfigFatFS = NULL;
+			}
+		}
+	}
+
 	BootStatus(4, 0, 0);
 
 	BootStatus(5, 0, 0);
@@ -825,10 +884,26 @@ int _main( int argc, char *argv[] )
 	free(fatfs);
 	fatfs = NULL;
 
+	if(ConfigFatFS)
+	{
+		f_mount(NULL, cfgDevName, 1);
+		free(ConfigFatFS);
+		ConfigFatFS = NULL;
+	}
+
 	if(UseUSB)
 		USBStorage_Shutdown();
 	else
 		SDHCShutdown();
+
+	// The config device, when it is the other one, was brought up separately.
+	if(ConfigGetConfig(NIN_CFG_CFG_ON_USB) != (UseUSB != 0))
+	{
+		if(ConfigGetConfig(NIN_CFG_CFG_ON_USB))
+			USBStorage_Shutdown();
+		else
+			SDHCShutdown();
+	}
 
 //make sure drive led is off before quitting
 	if( access_led ) clear32(HW_GPIO_OUT, GPIO_SLOT_LED);

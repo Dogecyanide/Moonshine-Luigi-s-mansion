@@ -54,6 +54,11 @@ enum ninconfigbitpos
 	NIN_CFG_BIT_ARCADE_MODE = (16),
 	NIN_CFG_BIT_CC_RUMBLE	= (17),
 	NIN_CFG_BIT_SKIP_IPL	= (18),
+	// Susamune: which physical device holds susamune.ini, i.e. the one the
+	// launcher was run from. Independent of NIN_CFG_BIT_USB, which names the
+	// device the game is read from; when the two differ the kernel mounts a
+	// second volume for the ini rather than making the user keep two copies.
+	NIN_CFG_BIT_CFG_ON_USB	= (19),
 
 	// Internal kernel settings.
 	NIN_CFG_BIT_MC_SLOTB	= (31),	// Slot B image is loaded
@@ -82,6 +87,7 @@ enum ninconfig
 	NIN_CFG_ARCADE_MODE	= (1<<NIN_CFG_BIT_ARCADE_MODE),
 	NIN_CFG_CC_RUMBLE	= (1<<NIN_CFG_BIT_CC_RUMBLE),
 	NIN_CFG_SKIP_IPL	= (1<<NIN_CFG_BIT_SKIP_IPL),
+	NIN_CFG_CFG_ON_USB	= (1<<NIN_CFG_BIT_CFG_ON_USB),
 
 	NIN_CFG_MC_SLOTB	= (1<<NIN_CFG_BIT_MC_SLOTB),
 };
