@@ -46,6 +46,9 @@ extern "C" void* getArenaLo() {
 extern "C" void onAppInit(TApplication* app) {
     app->initialize();
     gSettings.init();
+    // Intro Skip patches the logo director, which is already directing by the
+    // time the first onUpdate reaches featuresApply().
+    featuresApplyEarly();
 }
 
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {

@@ -145,6 +145,18 @@ code handler re-applies each frame):
   steady state costs only reads. When a word does change we `DCFlushRange` +
   `ICInvalidateRange` the 4 bytes so instruction patches take effect.
 
+This pass reaches back further than "gameplay" — `proc()` runs `gameLoop()` for
+the logo and title app states as well — but not further back than
+`director->direct()`, which `onUpdate` calls *before* `featuresApply()`. A
+feature whose sites are already directing by then needs the patch installed
+sooner. `FEAT_EARLY(...)` marks such a row and `featuresApplyEarly()` — called
+from `onAppInit`, the last point before `TApplication::proc()` starts the
+app-state machine — applies **only** those rows. Intro Skip is the one today,
+and on the per-frame pass alone the logos still play. Do not widen this to the
+whole table: rows that patch heap words (Fast Text) would capture their
+"original" out of heap the game has not filled in yet, and write that garbage
+back when toggled off.
+
 Because capture is lazy-on-first-apply and `featuresApply()` is the only writer
 of these addresses, the first read is guaranteed to be the retail value. All
 target addresses are in the main DOL's `.text`/`.data`, resident from boot, so
@@ -276,17 +288,21 @@ Getting this from the raw gecko alone is a trap; the map is authoritative.
 Two codes are ported as mod logic rather than as gecko bytes. Each is worth
 reading as a template for the next one.
 
-> **Intro Skip is deliberately not ported.** It was, and the port was wrong in
-> a way worth remembering: it repointed `TApplication::proc`'s app-state jump
-> table for state 4 at the gameplay case. State 4 is `APP_STATE_DONE`, not "the
-> intro movie" — boot merely *reaches* the intro through it, because that case
-> sets `mNextArea` to `AREA_OPTION` and falls through into the
-> `APP_STATE_MOVIE` body. `proc()` enters the same state whenever the app is
-> sent back to the title, which is what the console reset button does
-> (`isSomethingPushed()` -> `nextState = APP_STATE_DONE`), so the redirect
-> turned every reset into a reload of the current stage. Anything that patches
-> a shared state-machine entry for a one-off boot transition has this problem;
-> check what else reaches the state before you patch it.
+> **Intro Skip is a Class-A patch (`kIntroSkip`), not a reimplementation.** An
+> earlier hand-written port was wrong in a way worth remembering: it repointed
+> `TApplication::proc`'s app-state jump table for state 4 at the gameplay case.
+> State 4 is `APP_STATE_DONE`, not "the intro movie" — boot merely *reaches*
+> the intro through it, because that case sets `mNextArea` to `AREA_OPTION` and
+> falls through into the `APP_STATE_MOVIE` body. `proc()` enters the same state
+> whenever the app is sent back to the title, which is what the console reset
+> button does (`isSomethingPushed()` -> `nextState = APP_STATE_DONE`), so the
+> redirect turned every reset into a reload of the current stage. The upstream
+> code avoids that by rewriting the case body rather than the dispatch: it sets
+> `mCurrArea` to `AREA_OPTION` itself and only then branches into the gameplay
+> body, so every path through `APP_STATE_DONE` — reset included — has a
+> destination. Anything that patches a shared state-machine entry for a one-off
+> boot transition has this problem; check what else reaches the state, and what
+> state it leaves behind, before you patch it.
 
 ### Stage Intro Skip (`features.cpp`)
 
@@ -502,9 +518,10 @@ mid-loop.
 ## Codes ported so far
 
 - **Class A** — Infinite Lives, Unlock Nozzles, Unlock Yoshi, Any Fruit Opens
-  Yoshi Eggs, Infinite Juice, Enable Exit Area Everywhere, FMV Skips, Respawn
-  One-Time Shines, Fruit Never Time Out, Fast Text (QoL); Mute Background Music,
-  Shine Outfit, Shiny Shines, Shadow Mario HP Meter (Cosmetic).
+  Yoshi Eggs, Infinite Juice, Enable Exit Area Everywhere, FMV Skips, Intro
+  Skip, Respawn One-Time Shines, Fruit Never Time Out, Fast Text (QoL); Mute
+  Background Music, Shine Outfit, Shiny Shines, Shadow Mario HP Meter
+  (Cosmetic).
 - **Class B (`C2` hooks)** — Free Pause, Disable Blue Coin Flag, Deathless
   Blooper Surfing (QoL); Replace Episode Names (Cosmetic); Fast Piantissimo,
   Never Pause IGT, Force Plaza Events (Misc).

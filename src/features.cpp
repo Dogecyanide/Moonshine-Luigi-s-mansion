@@ -43,8 +43,9 @@ inline u32 patchMask(const Patch &p) {
 
 struct Feature {
     const Patch *patches;
-    u8           id;   // a SettingId
+    u8           id;     // a SettingId
     u8           num;
+    u8           early;  // also applied from featuresApplyEarly(), see below
 };
 
 // Whole-word patch: `val` is the on-state word.
@@ -128,6 +129,46 @@ const Patch kExitAreaEverywhere[] = {
 const Patch kFmvSkips[] = {
     FWORD(0x8010AF5C, 0x802B5EF4, 0x802ADE20, 0x38600001),
     FWORD(0x8010AFC0, 0x802B5E8C, 0x802ADE88, 0x38600001),
+};
+
+// Intro Skip: boot straight to the title screen, no logos and no intro movie.
+// FEAT_EARLY, i.e. applied from onAppInit. featuresApply() does run during the
+// logo -- gameLoop() is what onUpdate hooks, and proc() runs it for the logo
+// state too -- but it runs *after* director->direct(), and by the time it first
+// fires the logo director has already committed to playing out. Console-tested:
+// on the per-frame pass alone the logos still show.
+//
+//   direct_nlogo+0x24  the `beq` picking mState 2 (wait for fade-out) becomes
+//                      an unconditional branch, so the logo never plays out.
+//   direct+0x114       take the branch one instruction earlier, into
+//                      `li r31, 4`, so direct() reports APP_STATE_DONE instead
+//                      of advancing to the Dolby logo.
+//   proc+0x248         the APP_STATE_DONE case, five words of `mNextArea.set(
+//                      15, 0, 0)` before it falls through into the movie body.
+//                      Replaced by mCurrArea = (AREA_OPTION, 0, 0) plus a
+//                      branch back to the APP_STATE_GAMEPLAY body, which runs
+//                      that area as a stage -- i.e. the title screen.
+//
+// The mCurrArea write is what makes this safe where the old jump-table port
+// was not: APP_STATE_DONE is also where the console reset button lands, and
+// naming the destination here sends reset to the title rather than to a reload
+// of whatever stage was live. See doc/gecko_porting.md.
+//
+// Progressive/50-60Hz mode is chosen in the logo director's B-held path, so it
+// cannot be changed while this is on -- boot once with it off to set it.
+//   jp 040E8C68 / us 042956AC / pal 0428D4C4 = 480002C4 (pal 48000264)
+//   jp 040E90DC / us 04295B20 / pal 0428D9B8 = 48000014
+//   jp 060F9FE4 / us 062A65E0 / pal 0629E51C, 0x14 bytes
+const Patch kIntroSkip[] = {
+    FWORD(0x800E8C68, 0x802956AC, 0x8028D4C4,
+          SUSAMUNE_MEM1_ADDR(0x480002C4u, 0x480002C4u, 0x48000264u)),
+    FWORD(0x800E90DC, 0x80295B20, 0x8028D9B8, 0x48000014),
+    FWORD(0x800F9FE4, 0x802A65E0, 0x8029E51C, 0x38600F00),  // li r3, 0xF00
+    FWORD(0x800F9FE8, 0x802A65E4, 0x8029E520, 0x38000000),  // li r0, 0
+    FWORD(0x800F9FEC, 0x802A65E8, 0x8029E524, 0xB07F000E),  // sth r3, 0xE(r31)
+    FWORD(0x800F9FF0, 0x802A65EC, 0x8029E528, 0xB01F0010),  // sth r0, 0x10(r31)
+    FWORD(0x800F9FF4, 0x802A65F0, 0x8029E52C,
+          SUSAMUNE_MEM1_ADDR(0x4BFFFEB0u, 0x4BFFFEB0u, 0x4BFFFE94u)),  // b back
 };
 
 // Respawn One-Time Shines: a C6-style branch plus two gecko 02 halfword
@@ -285,7 +326,13 @@ const Patch kForcePlaza[] = {
     FWORD(0x8010C5F8, 0x802B7940, 0x802AF910, 0x60000000),
 };
 
-#define FEAT(id, arr) { arr, (u8)(id), (u8)(sizeof(arr) / sizeof((arr)[0])) }
+#define FEAT(id, arr) { arr, (u8)(id), (u8)(sizeof(arr) / sizeof((arr)[0])), 0 }
+// A feature that has to be installed before the app state machine runs at all.
+// featuresApplyEarly() (from onAppInit) applies only these rows; the rest wait
+// for the per-frame pass, which is where a row that patches heap words (Fast
+// Text) can capture an original worth restoring.
+#define FEAT_EARLY(id, arr) \
+    { arr, (u8)(id), (u8)(sizeof(arr) / sizeof((arr)[0])), 1 }
 
 constexpr Feature kFeatures[] = {
     FEAT(SETTING_INFINITE_LIVES, kInfiniteLives),
@@ -295,6 +342,7 @@ constexpr Feature kFeatures[] = {
     FEAT(SETTING_INFINITE_JUICE, kInfiniteJuice),
     FEAT(SETTING_EXIT_AREA_EVERYWHERE, kExitAreaEverywhere),
     FEAT(SETTING_FMV_SKIPS, kFmvSkips),
+    FEAT_EARLY(SETTING_INTRO_SKIP, kIntroSkip),
     FEAT(SETTING_RESPAWN_SHINES, kRespawnShines),
     FEAT(SETTING_FRUIT_NEVER_TIMEOUT, kFruitNeverTimeout),
     FEAT(SETTING_MUTE_BGM, kMuteBgm),
@@ -628,9 +676,9 @@ void resolveFastTextPalMsg() {
 }
 #endif
 
-void applyPatches() {
+void applyPatches(bool earlyOnly) {
 #if defined(SUSAMUNE_VERSION_PAL)
-    if (gSettings.getBool(SETTING_FAST_TEXT)) {
+    if (!earlyOnly && gSettings.getBool(SETTING_FAST_TEXT)) {
         resolveFastTextPalMsg();
     }
 #endif
@@ -639,6 +687,10 @@ void applyPatches() {
         const Feature &feat = kFeatures[f];
         if (idx + feat.num > kNumPatches) {
             return;
+        }
+        if (earlyOnly && !feat.early) {
+            idx += feat.num;  // gPatchOrig/On are indexed across all features
+            continue;
         }
         bool on = gSettings.getBool((SettingId)feat.id);
         for (int j = 0; j < feat.num; j++, idx++) {
@@ -785,8 +837,10 @@ u32 branchWord(u32 from, u32 to) {
     return 0x48000000u | ((to - from) & 0x03FFFFFCu);
 }
 
+void featuresApplyEarly() { applyPatches(true); }
+
 void featuresApply() {
-    applyPatches();
+    applyPatches(false);
     applyHooks();
     applyChoices();
 }

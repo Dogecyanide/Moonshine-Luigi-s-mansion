@@ -67,6 +67,7 @@
     X(SETTING_SHOW_BGM_SLOTS,       "show_bgm_slots")                         \
     /* -- Quality-of-life (appended for persistence compatibility) -- */      \
     X(SETTING_DISABLE_Z_MENU,       "disable_z_menu")                         \
-    X(SETTING_AREA_LOCK,            "area_lock")
+    X(SETTING_AREA_LOCK,            "area_lock")                              \
+    X(SETTING_INTRO_SKIP,           "intro_skip")
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

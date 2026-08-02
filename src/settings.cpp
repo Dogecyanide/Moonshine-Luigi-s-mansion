@@ -74,6 +74,10 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     SBOOL("Disable Z Menu", 1, SETTING_CAT_QOL),
     // Area lock: every departure restarts the area being left instead.
     SBOOL("Area lock", 0, SETTING_CAT_MISC),
+    // Intro skip: On, as in the generator's Standard preset. It also removes
+    // the boot prompt that picks progressive / 50-60Hz mode, so that has to be
+    // set with this off.
+    SBOOL("Intro skip", 1, SETTING_CAT_QOL),
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'
