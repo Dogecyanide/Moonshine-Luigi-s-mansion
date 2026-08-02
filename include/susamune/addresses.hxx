@@ -61,23 +61,6 @@
 #define SUSAMUNE_ADDR_TIME_REC_INSTANCE \
     SUSAMUNE_MEM1_ADDR(0x8040a2f8u, 0x8040e1c8u, 0x804058a0u)
 
-// `sGameInit`, the static bitfield TApplication::gameLoop uses to leave the
-// boot-logo state (Application.cpp). Bit 0 = the logo director reported it is
-// finished, bit 1 = the async setup thread has been joined; the state advances
-// only once both are set. Intro Skip pre-sets bit 0 so the logo is never
-// directed -- see onAppInit in main.cpp.
-#define SUSAMUNE_ADDR_GAME_INIT_FLAGS \
-    SUSAMUNE_MEM1_ADDR(0x8040a2c0u, 0x8040e190u, 0x80405858u)
-
-// TApplication::proc's app-state switch is a jump table indexed by mContext.
-// These are the entry for the intro-movie state (4) and the address of the
-// stage case (5) that entry is repointed at for Intro Skip -- see onAppInit.
-// Both read out of the table in each region's DOL.
-#define SUSAMUNE_ADDR_APP_STATE_JUMP_INTRO \
-    SUSAMUNE_MEM1_ADDR(0x803b4084u, 0x803df434u, 0x803d6cf0u)
-#define SUSAMUNE_ADDR_APP_PROC_STAGE_CASE \
-    SUSAMUNE_MEM1_ADDR(0x800f9ea4u, 0x802a64a0u, 0x8029e3c0u)
-
 // Arena window reserved for the injected mod.
 #define SUSAMUNE_ADDR_MOD_BASE \
     SUSAMUNE_MEM1_ADDR(0x80426020u, 0x80429800u, 0x80420d60u)

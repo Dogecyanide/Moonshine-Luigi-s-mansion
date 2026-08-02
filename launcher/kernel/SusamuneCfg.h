@@ -6,10 +6,11 @@
 // Susamune settings persistence, launcher side. See susamune_cfg.h (shared
 // with the mod) for the MEM2 block layout and the save protocol.
 
-// Parse /susamune.ini into the MEM2 handoff block. Call once at boot, after
-// the FAT device is mounted and before the game is patched -- codes that hook
-// the boot sequence (Intro Skip) need their settings live before the first
-// frame, and the mod reads the block from TApplication::initialize.
+// Parse this disc's sections of /susamune.ini into the MEM2 handoff block. Call
+// once at boot, after the FAT device is mounted and DIinit has published
+// GAME_ID (the sections are per game version), and before the game is patched:
+// the mod reads the block from TApplication::initialize, i.e. before the first
+// frame, so every feature has its setting live for the whole boot sequence.
 void SusamuneCfgInit(void);
 
 // True when the mod has rung the save doorbell. Cheap: reads one cache line.

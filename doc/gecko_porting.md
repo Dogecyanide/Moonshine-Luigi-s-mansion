@@ -72,7 +72,7 @@ Rule of thumb:
 
 - A handful of constant writes → a table row (Class A/C). Cheap and clear.
 - Anything with control flow, state, or ordering → **reimplement in C**. The
-  three "stateful" codes (Intro Skip, Stage Intro Skip, No Shine Get Animation)
+  two "stateful" codes (Stage Intro Skip, No Shine Get Animation)
   are done this way and are a fraction of the size of their gecko originals.
 
 Reimplementing needs the *semantics*, which come from `../../src/sms`, not from
@@ -273,43 +273,20 @@ Getting this from the raw gecko alone is a trap; the map is authoritative.
 
 ## Reimplemented in C
 
-Three codes are ported as mod logic rather than as gecko bytes. Each is worth
+Two codes are ported as mod logic rather than as gecko bytes. Each is worth
 reading as a template for the next one.
 
-### Intro Skip (`main.cpp`)
-
-*Skip the boot logos and the intro cutscene, landing on the title screen.*
-
-Boot runs `BOOT -> NLOGO -> intro-movie -> stage(AREA_OPTION)`, and **that last
-stage is the title screen** — it is an ordinary `TMarDirector` stage, not a menu
-director. Both halves are set up in `onAppInit` because `proc()` has not started
-yet and neither is reachable from the per-frame hooks: `onUpdate` replaces only
-the *general* `director->direct()` call in `gameLoop`, and the logo/intro states
-run before it ever fires (NLOGO calls `direct()` from a second, unhooked site).
-
-1. **Logos** — `gameLoop` directs the logo director only while bit 0 of the
-   static `sGameInit` is clear, and leaves NLOGO once `sGameInit == 3` (bit 0 =
-   logo done, bit 1 = setup thread joined). Presetting bit 0 means the logo
-   never runs. The logo *states* must still happen: their post-`gameLoop` tails
-   call `initialize_boot/nlogoAfter`, and the latter creates the stage heap.
-2. **Cutscene** — repoint `proc()`'s app-state jump table so the intro-movie
-   state dispatches straight into the stage case, bypassing `TMovieDirector`.
-3. **Destination** — the stage case reads `mCurrentScene`, which `proc()` fills
-   from `mNextScene` at the end of every earlier iteration, so staging
-   `AREA_OPTION` (15) in `onAppInit` is what makes it load the title screen.
-
-Upstream does exactly this with three writes: two branches making
-`TGCLogoDir::direct()` report "done" on frame 1 (equivalent to the `sGameInit`
-preset), and a code cave over the intro-movie case body that sets
-`mCurrentScene` and branches to the stage case.
-
-> **Do not** instead let the movie director run and rewrite `gameLoop`'s
-> returned state. Two separate failures come from that: returning *before*
-> `direct()` skips `TMovieDirector`'s first-call setup (it joins `gSetupThread`
-> and calls `initSound()`) and hangs boot on a black screen; letting it run and
-> overriding the result afterwards still executes the movie state's own body,
-> which overwrites `mNextScene` and lands you in the airstrip instead. Bypass
-> the state, do not post-process it.
+> **Intro Skip is deliberately not ported.** It was, and the port was wrong in
+> a way worth remembering: it repointed `TApplication::proc`'s app-state jump
+> table for state 4 at the gameplay case. State 4 is `APP_STATE_DONE`, not "the
+> intro movie" — boot merely *reaches* the intro through it, because that case
+> sets `mNextArea` to `AREA_OPTION` and falls through into the
+> `APP_STATE_MOVIE` body. `proc()` enters the same state whenever the app is
+> sent back to the title, which is what the console reset button does
+> (`isSomethingPushed()` -> `nextState = APP_STATE_DONE`), so the redirect
+> turned every reset into a reload of the current stage. Anything that patches
+> a shared state-machine entry for a one-off boot transition has this problem;
+> check what else reaches the state before you patch it.
 
 ### Stage Intro Skip (`features.cpp`)
 
@@ -533,7 +510,7 @@ mid-loop.
   Never Pause IGT, Force Plaza Events (Misc).
 - **Class C (multi-state)** — FLUDD in secrets (QoL, 3-state); Nozzle Lock
   (Misc, 4-state).
-- **Reimplemented in C** — Intro Skip, Stage Intro Skip, No Shine Get Animation
+- **Reimplemented in C** — Stage Intro Skip, No Shine Get Animation
   (Misc).
 - **Bind-driven actions** — Regrab Last Held Object, Spawn Yoshi (4 colours),
   Fast Forward (4x / 8x). See "Bind-driven actions" above.

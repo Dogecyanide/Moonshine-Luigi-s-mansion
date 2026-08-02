@@ -19,10 +19,11 @@ patches = [
     # Nintendo logo, the progressive-mode prompt, the title screen, gameplay --
     # happens inside proc(). Hooking the initialize() call gives us the earliest
     # point at which the heap and gamepads exist but no app state has run yet,
-    # which is where settings must be live: codes like Intro Skip patch
-    # TGCLogoDir::direct / TApplication::proc itself and so take effect before
-    # the first gameLoop(). main is at 0x80005600 with size 0x44 in all three
-    # region maps, so the call site is main+0x1c everywhere.
+    # which is where settings must be live: featuresApply() runs from the
+    # gameLoop hook, and proc() runs gameLoop for the logo and title states too,
+    # so anything later leaves every feature reading zeroed BSS through boot.
+    # main is at 0x80005600 with size 0x44 in all three region maps, so the call
+    # site is main+0x1c everywhere.
     {'jp': 0x8000561c, 'us': 0x8000561c, 'pal': 0x8000561c, 'sym': 'onAppInit', 'type': PatchType.BL},
 #   {'jp': 0x800fa110, 'us': ..., 'pal': ..., 'sym': 'onFinishAppState', 'type': PatchType.BL},
     # insert NOPs to speed up boot process

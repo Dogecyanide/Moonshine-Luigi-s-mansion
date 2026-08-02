@@ -19,8 +19,6 @@ The following Gecko codes either force some behavior statically, that should bec
 - **Fruit Never Time Out**
 - **Infinite Juice**
 - **Infinite lives**
-- **Intro Skip**
-    - This code does not make a lot of sense in case it is being implemented without settings persistence (not implemented at the time of writing), but it will be useful when that is implemented. It should still have a menu option like all the others. 
 - **Mute Background Music**
 - **Never Pause IGT**
 - **No Shine Get Animation**

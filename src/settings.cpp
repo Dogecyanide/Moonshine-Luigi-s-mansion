@@ -63,10 +63,8 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     SBOOL("Never pause IGT", 1, SETTING_CAT_MISC),
     SBOOL("Force plaza events", 1, SETTING_CAT_MISC),
     SCHOICE("Nozzle lock", 0, kNozzleLabels, SETTING_CAT_MISC),
-    // The three "stateful" ports. Unlike the patch/hook features these are
-    // implemented as game logic in main.cpp (Intro Skip, Stage Intro Skip);
-    // No Shine Get Animation is a one-word patch in features.cpp.
-    SBOOL("Intro skip", 1, SETTING_CAT_MISC),
+    // Stage Intro Skip is an asm-hook feature (features.cpp) rather than a
+    // plain patch; No Shine Get Animation is a one-word patch in the same file.
     SBOOL("Stage intro skip", 0, SETTING_CAT_MISC),
     SBOOL("No shine get animation", 0, SETTING_CAT_MISC),
     SBOOL("BGM slot counter", 0, SETTING_CAT_MISC),

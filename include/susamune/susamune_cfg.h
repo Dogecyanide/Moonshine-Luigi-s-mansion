@@ -36,7 +36,13 @@
 // =====================================================================
 
 #define SUSAMUNE_CFG_MAGIC        0x53434647u  // 'SCFG'
-#define SUSAMUNE_CFG_VERSION      1u
+// Bump whenever values[]/binds[] change meaning at a given index -- i.e. on any
+// removal or reorder in settings_list.h / binds_list.h. Since the mod now ships
+// as mod_<region>.bin separately from the launcher, a user can pair a new mod
+// with an old kernel; the version check is what makes that combination fall
+// back to defaults rather than scramble every setting.
+//   1 -> 2: SETTING_INTRO_SKIP removed, shifting the settings after it.
+#define SUSAMUNE_CFG_VERSION      2u
 
 // Capacity of values[] / binds[]. Fixed (rather than SETTING_COUNT /
 // BIND_COUNT) so the block size is stable as entries are added: a kernel and a
