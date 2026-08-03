@@ -494,6 +494,7 @@ u8 sQolBuf[sizeof(CategorySettingsTab)]        __attribute__((aligned(8)));
 u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
 u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
 u8 sSavestateBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
+u8 sUiBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sBindsBuf[sizeof(BindsTab)]                 __attribute__((aligned(8)));
 }  // namespace
 
@@ -545,6 +546,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sCosmeticBuf) CategorySettingsTab("Cosmetic", SETTING_CAT_COSMETIC);
     mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab("Misc", SETTING_CAT_MISC);
     mTabs[mNumTabs++] = new (sSavestateBuf) CategorySettingsTab("Savestate", SETTING_CAT_SAVESTATE);
+    mTabs[mNumTabs++] = new (sUiBuf) CategorySettingsTab("UI", SETTING_CAT_UI);
     mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
 }
 

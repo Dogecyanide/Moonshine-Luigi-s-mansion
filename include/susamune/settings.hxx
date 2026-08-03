@@ -40,10 +40,11 @@ enum SettingId {
 // Which menu tab a setting appears under. The menu builds one generic tab per
 // category and renders the settings tagged with it.
 enum SettingCategory {
-    SETTING_CAT_SAVESTATE,
     SETTING_CAT_QOL,
-    SETTING_CAT_COSMETIC,
+    SETTING_CAT_SAVESTATE,
     SETTING_CAT_MISC,
+    SETTING_CAT_COSMETIC,
+    SETTING_CAT_UI,
     SETTING_CAT_COUNT
 };
 

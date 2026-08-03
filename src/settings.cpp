@@ -28,57 +28,57 @@ const char *const kNozzleLabels[4] = { "Unlocked", "Rocket", "Turbo", "Hover" };
 
 // Descriptor table, indexed by SettingId. One row per setting.
 const SettingDesc kSettingDescs[SETTING_COUNT] = {
+    // Quality-of-life toggles. Defaults mirror the GCT generator's Standard
+    // preset where it has an equivalent code.
+    SBOOL("Fast text", 0, SETTING_CAT_QOL),
+    SCHOICE("FLUDD in secrets", 0, kFluddLabels, SETTING_CAT_QOL),
+    // Area lock: every departure restarts the area being left instead.
+    SBOOL("Area lock", 0, SETTING_CAT_QOL),
+    SBOOL("Infinite lives", 1, SETTING_CAT_QOL),
+    SBOOL("Disable blue coin flag", 1, SETTING_CAT_QOL),
+    SBOOL("FMV skips", 1, SETTING_CAT_QOL),
+    SBOOL("Unlock Yoshi", 0, SETTING_CAT_QOL),
+    SBOOL("Unlock nozzles", 0, SETTING_CAT_QOL),
+    SBOOL("Free pause", 1, SETTING_CAT_QOL),
+    SBOOL("Exit area everywhere", 1, SETTING_CAT_QOL),
+    SBOOL("Any fruit opens Yoshi eggs", 0, SETTING_CAT_QOL),
+    // Intro skip: On, as in the generator's Standard preset. It also removes
+    // the boot prompt that picks progressive / 50-60Hz mode, so that has to be
+    // set with this off.
+    SBOOL("Infinite juice", 0, SETTING_CAT_QOL),
+    SBOOL("Intro skip", 1, SETTING_CAT_QOL),
+    SBOOL("Respawn one-time shines", 1, SETTING_CAT_QOL),
+    SBOOL("Fast Piantissimo", 0, SETTING_CAT_QOL),
+
     // SETTING_SAVE_RNG_STATE: when On (default), a savestate load restores the
     // libc RNG seed so the RNG stream rewinds with the state -- the game's
     // historical behaviour. Off leaves the seed advancing across a load, so a
     // runner can practise varied RNG outcomes from the same snapshot.
     SBOOL("Save RNG state", 1, SETTING_CAT_SAVESTATE),
 
-    // Quality-of-life toggles. Defaults mirror the GCT generator's Standard
-    // preset where it has an equivalent code.
-    SBOOL("Infinite lives", 1, SETTING_CAT_QOL),
-    SBOOL("Unlock nozzles", 0, SETTING_CAT_QOL),
-    SBOOL("Unlock Yoshi", 0, SETTING_CAT_QOL),
-    SBOOL("Any fruit opens Yoshi eggs", 0, SETTING_CAT_QOL),
-    SBOOL("Infinite juice", 0, SETTING_CAT_QOL),
-    SBOOL("Exit area everywhere", 1, SETTING_CAT_QOL),
-    SBOOL("FMV skips", 1, SETTING_CAT_QOL),
-    SBOOL("Respawn one-time shines", 1, SETTING_CAT_QOL),
-    SBOOL("Fruit never times out", 0, SETTING_CAT_QOL),
-    SBOOL("Free pause", 1, SETTING_CAT_QOL),
-    SBOOL("Disable blue coin flag", 1, SETTING_CAT_QOL),
-    SBOOL("Deathless blooper surfing", 0, SETTING_CAT_QOL),
-    SBOOL("Fast text", 0, SETTING_CAT_QOL),
-    SCHOICE("FLUDD in secrets", 0, kFluddLabels, SETTING_CAT_QOL),
-
-    // Cosmetic toggles.
-    SBOOL("Mute background music", 0, SETTING_CAT_COSMETIC),
-    SBOOL("Shine outfit", 0, SETTING_CAT_COSMETIC),
-    SBOOL("Shiny shines", 0, SETTING_CAT_COSMETIC),
-    SBOOL("Shadow Mario HP meter", 0, SETTING_CAT_COSMETIC),
-    SBOOL("Episode names as IDs", 0, SETTING_CAT_COSMETIC),
-
     // Misc toggles.
-    SBOOL("Fast Piantissimo", 0, SETTING_CAT_MISC),
-    SBOOL("Never pause IGT", 1, SETTING_CAT_MISC),
-    SBOOL("Force plaza events", 1, SETTING_CAT_MISC),
     SCHOICE("Nozzle lock", 0, kNozzleLabels, SETTING_CAT_MISC),
+    SBOOL("Force plaza events", 1, SETTING_CAT_MISC),
+    SBOOL("Never pause IGT", 1, SETTING_CAT_MISC),
+    SBOOL("Shadow Mario HP meter", 0, SETTING_CAT_MISC),
     // Stage Intro Skip is an asm-hook feature (features.cpp) rather than a
     // plain patch; No Shine Get Animation is a one-word patch in the same file.
     SBOOL("Stage intro skip", 0, SETTING_CAT_MISC),
+    SBOOL("Deathless blooper surfing", 0, SETTING_CAT_MISC),
     SBOOL("No shine get animation", 0, SETTING_CAT_MISC),
-    SBOOL("BGM slot counter", 0, SETTING_CAT_MISC),
-
-    // Appended to preserve the persisted values[] layout.
+    SBOOL("Fruit never times out", 0, SETTING_CAT_MISC),
     // Disable Z Menu defaults on: Z is the warp wheel's bind.
-    SBOOL("Disable Z Menu", 1, SETTING_CAT_QOL),
-    // Area lock: every departure restarts the area being left instead.
-    SBOOL("Area lock", 0, SETTING_CAT_MISC),
-    // Intro skip: On, as in the generator's Standard preset. It also removes
-    // the boot prompt that picks progressive / 50-60Hz mode, so that has to be
-    // set with this off.
-    SBOOL("Intro skip", 1, SETTING_CAT_QOL),
-    SBOOL("Disable Susamune Warps", 0, SETTING_CAT_MISC)
+    SBOOL("Disable Z Menu", 1, SETTING_CAT_MISC),
+    SBOOL("Disable Susamune Warps", 0, SETTING_CAT_MISC),
+
+    // Cosmetic toggles.
+    SBOOL("Mute background music", 0, SETTING_CAT_COSMETIC),
+    SBOOL("Episode names as IDs", 0, SETTING_CAT_COSMETIC),
+    SBOOL("Shine outfit", 0, SETTING_CAT_COSMETIC),
+    SBOOL("Shiny shines", 0, SETTING_CAT_COSMETIC),
+
+    // UI settings.
+    SBOOL("Show BGM slot counter", 0, SETTING_CAT_UI)
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'

@@ -13,6 +13,7 @@
 - [x] [Bindings menu](#bindings)
 - [x] [SD card settings persistence](#sd-card-persistence)
 - [x] Dont require different channels for different regions. load a bin from SD card
+- [x] Restore the Nintendont menu and give a way to select the version, and configure the directory.
 - [ ] [Customizable GUI support](#customizable-gui)
 - [ ] Gecko code porting (gecko_codes.md)
 - [ ] Emulator autodetect.
@@ -25,13 +26,11 @@
 - [ ] Chatgpt critical review that codes have been implemented accurately
 - [ ] update readme its not just savestates anymore. update credits to people who made the codes
 - [ ] sound fix (warspyking)
-- [ ] Restore the Nintendont menu and give a way to select the version, and configure the directory.
-- [ ] Shine get timer maxes out at 99
 - [ ] intermittent crash?? only happened once, with the 64KiB thing
 - [ ] move bss out of MEM1
 - [ ] fix icon (should not have jp flag anymore)
-- [ ] Fast text broken on US 
-- [ ] option to disable warp wheel
+- [ ] Fast text broken on US
+    - Can't reproduce?
 
 ### Bindings
 

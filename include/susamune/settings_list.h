@@ -34,41 +34,42 @@
 // =====================================================================
 
 #define SUSAMUNE_SETTING_LIST(X)                                              \
-    /* -- Savestate -- */                                                     \
-    X(SETTING_SAVE_RNG_STATE,       "save_rng_state")                         \
     /* -- Quality-of-life -- */                                               \
-    X(SETTING_INFINITE_LIVES,       "infinite_lives")                         \
-    X(SETTING_UNLOCK_NOZZLES,       "unlock_nozzles")                         \
-    X(SETTING_UNLOCK_YOSHI,         "unlock_yoshi")                           \
-    X(SETTING_ANY_FRUIT_YOSHI,      "any_fruit_yoshi")                        \
-    X(SETTING_INFINITE_JUICE,       "infinite_juice")                         \
-    X(SETTING_EXIT_AREA_EVERYWHERE, "exit_area_everywhere")                   \
-    X(SETTING_FMV_SKIPS,            "fmv_skips")                              \
-    X(SETTING_RESPAWN_SHINES,       "respawn_shines")                         \
-    X(SETTING_FRUIT_NEVER_TIMEOUT,  "fruit_never_timeout")                    \
-    X(SETTING_FREE_PAUSE,           "free_pause")                             \
-    X(SETTING_DISABLE_BLUE_COIN,    "disable_blue_coin")                      \
-    X(SETTING_DEATHLESS_BLOOPER,    "deathless_blooper")                      \
     X(SETTING_FAST_TEXT,            "fast_text")                              \
     X(SETTING_FLUDD_SECRETS,        "fludd_secrets")                          \
+    X(SETTING_AREA_LOCK,            "area_lock")                              \
+    X(SETTING_INFINITE_LIVES,       "infinite_lives")                         \
+    X(SETTING_DISABLE_BLUE_COIN,    "disable_blue_coin")                      \
+    X(SETTING_FMV_SKIPS,            "fmv_skips")                              \
+    X(SETTING_UNLOCK_YOSHI,         "unlock_yoshi")                           \
+    X(SETTING_UNLOCK_NOZZLES,       "unlock_nozzles")                         \
+    X(SETTING_FREE_PAUSE,           "free_pause")                             \
+    X(SETTING_EXIT_AREA_EVERYWHERE, "exit_area_everywhere")                   \
+    X(SETTING_ANY_FRUIT_YOSHI,      "any_fruit_yoshi")                        \
+    X(SETTING_INFINITE_JUICE,       "infinite_juice")                         \
+    X(SETTING_INTRO_SKIP,           "intro_skip")                             \
+    X(SETTING_RESPAWN_SHINES,       "respawn_shines")                         \
+    X(SETTING_FAST_PIANTISSIMO,     "fast_piantissimo")                       \
+    /* -- Savestate -- */                                                     \
+    X(SETTING_SAVE_RNG_STATE,       "save_rng_state")                         \
+    /* -- Misc -- */                                                          \
+    X(SETTING_NOZZLE_LOCK,          "nozzle_lock")                            \
+    X(SETTING_FORCE_PLAZA_EVENTS,   "force_plaza_events")                     \
+    X(SETTING_NEVER_PAUSE_IGT,      "never_pause_igt")                        \
+    X(SETTING_SHADOW_MARIO_HP,      "shadow_mario_hp")                        \
+    X(SETTING_STAGE_INTRO_SKIP,     "stage_intro_skip")                       \
+    X(SETTING_DEATHLESS_BLOOPER,    "deathless_blooper")                      \
+    X(SETTING_NO_SHINE_ANIM,        "no_shine_anim")                          \
+    X(SETTING_FRUIT_NEVER_TIMEOUT,  "fruit_never_timeout")                    \
+    X(SETTING_DISABLE_Z_MENU,       "disable_z_menu")                         \
+    X(SETTING_DISABLE_WARPS,        "disable_warps")                          \
     /* -- Cosmetic -- */                                                      \
     X(SETTING_MUTE_BGM,             "mute_bgm")                               \
+    X(SETTING_REPLACE_EPISODE_NAMES, "replace_episode_names")                 \
     X(SETTING_SHINE_OUTFIT,         "shine_outfit")                           \
     X(SETTING_SHINY_SHINES,         "shiny_shines")                           \
-    X(SETTING_SHADOW_MARIO_HP,      "shadow_mario_hp")                        \
-    X(SETTING_REPLACE_EPISODE_NAMES, "replace_episode_names")                 \
-    /* -- Misc -- */                                                          \
-    X(SETTING_FAST_PIANTISSIMO,     "fast_piantissimo")                       \
-    X(SETTING_NEVER_PAUSE_IGT,      "never_pause_igt")                        \
-    X(SETTING_FORCE_PLAZA_EVENTS,   "force_plaza_events")                     \
-    X(SETTING_NOZZLE_LOCK,          "nozzle_lock")                            \
-    X(SETTING_STAGE_INTRO_SKIP,     "stage_intro_skip")                       \
-    X(SETTING_NO_SHINE_ANIM,        "no_shine_anim")                          \
-    X(SETTING_SHOW_BGM_SLOTS,       "show_bgm_slots")                         \
-    /* -- Quality-of-life (appended for persistence compatibility) -- */      \
-    X(SETTING_DISABLE_Z_MENU,       "disable_z_menu")                         \
-    X(SETTING_AREA_LOCK,            "area_lock")                              \
-    X(SETTING_INTRO_SKIP,           "intro_skip")                             \
-    X(SETTING_DISABLE_WARPS,        "disable_warps")                     
+    /* -- UI -- */                                                            \
+    X(SETTING_SHOW_BGM_SLOTS,       "show_bgm_slots")                        
+
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

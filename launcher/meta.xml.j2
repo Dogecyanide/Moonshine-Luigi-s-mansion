@@ -8,20 +8,4 @@
 	<long_description>That's right it's a launcher. It does one thing.
 {% if regions %}    Bundled mods: {{ regions | join(", ") | upper }}. The one matching the disc is loaded.{% else %}    No mod binaries bundled -- this launcher runs the game unmodified.{% endif %}</long_description>
 <ahb_access/>
-<arguments>
-{% if source == "di" %}
-<arg>di:</arg> <!-- Load from real disc -->
-<!-- If you want to load from SD instead, comment above, uncomment below and provide a path e.g. -->
-<!-- <arg>sd:/games/GMSJ01.iso</arg> -->
-<!-- or USB  -->
-<!-- <arg>usb:/games/GMSJ01.iso</arg> -->
-{% elif source == "sd" %}
-<arg>sd:/games/GMSJ01.iso</arg>
-{% elif source == "usb" %}
-<arg>usb:/games/GMSJ01.iso</arg>
-{% endif %}
-<!-- NOTE: ORDER OF THE FOLLOWING ARGUMENTS IS IMPORTANT HERE !! Don't change! -->
-<arg>--cheats</arg>
-<arg>--noIPL</arg>
-</arguments>
 </app>
