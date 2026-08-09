@@ -3943,10 +3943,13 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 			u32 viConfigureHook;
 
 			// Sunshine builds its PAL modes at runtime, beyond the mode-table patch.
+			// The VIConfigure hook also covers the logo's hard-coded interlaced mode.
 			write32(0x0033FF1C, 0x38600001); // OSGetProgressiveMode: li r3, 1
 			write32(0x0033FF20, 0x4E800020); // blr
 			write32(0x003488F8, 0x38600000); // VIGetTvFormat: li r3, 0
 			write32(0x003488FC, 0x4E800020); // blr
+			write32(0x003D6B30, read32(0x003D6B28)); // flicker -> no filter
+			write32(0x003D6B34, read32(0x003D6B2C));
 
 			if( read32(0x00347DC0) == 0x3BE30000 )
 			{

@@ -44,9 +44,7 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
-                "IS_EMULATOR": "ON",
-                "ENABLE_DEBUG_WARPS": "ON",
-                "ENABLE_SAVESTATE_DBG": "ON"
+                "IS_EMULATOR": "ON"
             },
             "hidden": false
         }

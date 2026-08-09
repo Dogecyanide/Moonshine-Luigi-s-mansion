@@ -53,7 +53,8 @@ struct Painter {
         menu->fillBox(x(lx), y(ly), scale(lw), scale(lh), c);
     }
 
-    void circleVertices(int lx, int ly, int lr, s16 *xy) const {
+    void regularVertices(int lx, int ly, int lr, s16 *xy,
+                         int count, int step) const {
         // sup39's renderer uses 32-sided n-gons. These fixed-point unit-circle
         // points reproduce that silhouette without needing a runtime trig
         // implementation in the injected mod.
@@ -72,22 +73,29 @@ struct Painter {
         int cx = x(lx);
         int cy = y(ly);
         int r  = scale(lr);
-        for (int i = 0; i < 32; i++) {
-            xy[i * 2]     = (s16)(cx + r * ux[i] / 1000);
-            xy[i * 2 + 1] = (s16)(cy + r * uy[i] / 1000);
+        for (int i = 0; i < count; i++) {
+            const int j = i * step;
+            xy[i * 2]     = (s16)(cx + r * ux[j] / 1000);
+            xy[i * 2 + 1] = (s16)(cy + r * uy[j] / 1000);
         }
     }
 
     void fillCircle(int lx, int ly, int lr, Color c) const {
         s16 xy[64];
-        circleVertices(lx, ly, lr, xy);
+        regularVertices(lx, ly, lr, xy, 32, 1);
         menu->fillPoly(xy, 32, c);
     }
 
     void strokeCircle(int lx, int ly, int lr, Color c) const {
         s16 xy[64];
-        circleVertices(lx, ly, lr, xy);
+        regularVertices(lx, ly, lr, xy, 32, 1);
         menu->strokePoly(xy, 32, kOriginalLineWidth, c);
+    }
+
+    void strokeGate(int lx, int ly, int lr, Color c) const {
+        s16 xy[16];
+        regularVertices(lx, ly, lr, xy, 8, 4);
+        menu->strokePoly(xy, 8, kOriginalLineWidth, c);
     }
 
     void button(int lx, int ly, int radius, bool down,
@@ -136,7 +144,7 @@ void InputDisplay::resetDefaults() {
     mCfg.valuePlacement = SUSAMUNE_INPUT_VALUES_BELOW;
     for (u32 i = 0; i < sizeof(mCfg.reserved); i++) mCfg.reserved[i] = 0;
 
-    mVisible          = true;
+    mVisible          = false;
     mVisibleBeforeEdit = true;
     mDirty            = false;
     mDirtyBeforeEdit  = false;
@@ -394,15 +402,15 @@ void InputDisplay::draw(Menu *menu, bool force) const {
     trigger[2] = trigger[4] = (s16)p.x(170);
     menu->strokePoly(trigger, 4, kOriginalLineWidth, triggerStroke);
 
-    // Main and C sticks: a fixed gate ring plus a knob moved by the raw sample.
+    // The reference uses round knobs inside eight-segment stick gates.
     const int mx = clampi((s8)raw.mStickX, -100, 100) * 14 / 100;
     const int my = clampi((s8)raw.mStickY, -100, 100) * 14 / 100;
     const int cx = clampi((s8)raw.mSubStickX, -100, 100) * 14 / 100;
     const int cy = clampi((s8)raw.mSubStickY, -100, 100) * 14 / 100;
     p.fillCircle(32 + mx, 52 - my, 12, p.lit(238, 238, 238, 0xef));
-    p.strokeCircle(32, 52, 19, p.lit(238, 238, 238, 0xef));
+    p.strokeGate(32, 52, 19, p.lit(238, 238, 238, 0xef));
     p.fillCircle(64 + cx, 92 - cy, 12, p.lit(255, 211, 0, 0xef));
-    p.strokeCircle(64, 92, 19, p.lit(255, 211, 0, 0xef));
+    p.strokeGate(64, 92, 19, p.lit(255, 211, 0, 0xef));
 
     p.button(138, 66, 18, buttons & JUTGamePad::A, 46, 229, 184);
     p.button(113, 89, 9, buttons & JUTGamePad::B, 255, 26, 26);
