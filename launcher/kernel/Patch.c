@@ -3938,6 +3938,24 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 					|| NinForceMode == NIN_VID_FORCE_MPAL)
 				video60hzPatch = true; //480i 60hz
 		}
+		if( GAME_ID == 0x474D5350 && ConfigGetConfig(NIN_CFG_FORCE_PROG) )
+		{
+			u32 viConfigureHook;
+
+			// Sunshine builds its PAL modes at runtime, beyond the mode-table patch.
+			write32(0x0033FF1C, 0x38600001); // OSGetProgressiveMode: li r3, 1
+			write32(0x0033FF20, 0x4E800020); // blr
+			write32(0x003488F8, 0x38600000); // VIGetTvFormat: li r3, 0
+			write32(0x003488FC, 0x4E800020); // blr
+
+			if( read32(0x00347DC0) == 0x3BE30000 )
+			{
+				viConfigureHook = PatchCopy(ForceProgressiveVIConfigure,
+						ForceProgressiveVIConfigure_size);
+				PatchBL(viConfigureHook, 0x00347DC0);
+				dbgprintf("Patch:Forced Super Mario Sunshine PAL progressive mode\r\n");
+			}
+		}
 		if(write32A(0x11224, 0x60000000, 0xB0010010, 0))
 		{
 			dbgprintf("Patch:Patched Capcom vs. SNK 2 EO NTSC-J\r\n");
@@ -3966,12 +3984,6 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 				dbgprintf("Patch:Patched SpongeBob SquarePants CFTKK NTSC-U\r\n");
 			}
 		}
-		else if ( TITLE_ID == 0x474D53 ) // Super Mario Sunshine
-		{ 
-			// TODO: generate the hook patch lines from patches.py. 
-			// Need to know the addresses of the symbols though.
-			// Also, needs to be conditional on the version of the game.
-		}   
 		else if( TITLE_ID == 0x47414C ) // Super Smash Bros Melee
 		{
 			//fix for video mode breaking

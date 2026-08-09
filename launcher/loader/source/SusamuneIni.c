@@ -35,18 +35,18 @@ SusamuneIni gIni;
 // to find and hand-edit the keys without having visited every menu first.
 static bool SawSection = false;
 
-// Defaults for a first run: JP selected, nothing configured, read speed
-// unlocked (it is the recommended setting for every game and was already
-// forced on in this fork), everything else off/auto.
+// Defaults for a first run: JP selected, nothing configured, read speed and
+// progressive enabled, everything else off/auto.
 static const SusamuneIni kIniDefaults =
 {
-	.version         = SUSA_VER_JP,
-	.path            = { "", "", "" },
-	.autoboot        = 0,
-	.nativeControls  = 0,
-	.unlockReadSpeed = 1,
-	.enableCheats    = 0,
-	.language        = NIN_LAN_AUTO,
+	.version          = SUSA_VER_JP,
+	.path             = { "", "", "" },
+	.autoboot         = 0,
+	.nativeControls   = 0,
+	.unlockReadSpeed  = 1,
+	.enableCheats     = 0,
+	.forceProgressive = 1,
+	.language         = NIN_LAN_AUTO,
 };
 
 static const char *const kVersionTags[SUSA_VER_COUNT]  = { "jp", "us", "pal" };
@@ -178,6 +178,8 @@ static void ApplyKey(const char *key, const char *value)
 		ParseBool(value, &gIni.unlockReadSpeed);
 	else if (strcmp(key, "enable_cheats") == 0)
 		ParseBool(value, &gIni.enableCheats);
+	else if (strcmp(key, "force_progressive") == 0)
+		ParseBool(value, &gIni.forceProgressive);
 	else if (strcmp(key, "language") == 0)
 		ParseLanguage(value, &gIni.language);
 }
@@ -290,6 +292,8 @@ static void EmitNintendontSection(FIL *f, int *err)
 	snprintf(line, sizeof(line), "unlock_read_speed = %u\r\n", gIni.unlockReadSpeed);
 	EmitStr(f, err, line);
 	snprintf(line, sizeof(line), "enable_cheats = %u\r\n", gIni.enableCheats);
+	EmitStr(f, err, line);
+	snprintf(line, sizeof(line), "force_progressive = %u\r\n", gIni.forceProgressive);
 	EmitStr(f, err, line);
 	snprintf(line, sizeof(line), "language = %s\r\n", LanguageToken(gIni.language));
 	EmitStr(f, err, line);

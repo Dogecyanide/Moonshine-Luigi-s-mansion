@@ -82,7 +82,8 @@ void SRAM_Init(void)
 		// Enable PAL60.
 		sram.BootMode |= 0x40;
 
-		// TODO: Set the progressive scan flag on PAL?
+		if (ConfigGetConfig(NIN_CFG_FORCE_PROG))
+			sram.Flags |= 0x80;
 	}
 	else
 	{

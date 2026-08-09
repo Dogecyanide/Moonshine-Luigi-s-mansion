@@ -162,7 +162,7 @@ static int Repeat##Key(HeldCounters *h) \
 { \
 	int ret = 0; \
 	if (FPAD_##Key(1)) { \
-		ret = (h->Key == 0 || h->Key > 10); \
+		ret = (h->Key == 0 || h->Key > 50); \
 		h->Key++; \
 	} else { \
 		h->Key = 0; \
@@ -676,6 +676,7 @@ enum
 	SET_NATIVE_CONTROLS,
 	SET_UNLOCK_READ_SPEED,
 	SET_CHEATS,
+	SET_FORCE_PROGRESSIVE,
 	SET_LANGUAGE,
 
 	SET_COUNT
@@ -687,6 +688,7 @@ static const char *const kSettingNames[SET_COUNT] =
 	"Native Controls",
 	"Unlock Read Speed",
 	"Cheats",
+	"Force Progressive",
 	"Language",
 };
 
@@ -737,6 +739,16 @@ static const char *const kHelpCheats[] =
 	"device. This is independent of the mod's own features.",
 	NULL
 };
+static const char *const kHelpForceProgressive[] =
+{
+	"Force games to render in 480p.",
+	"",
+	"For PAL Super Mario Sunshine this also patches the game's",
+	"progressive-mode check using the method from Swiss.",
+	"",
+	"Requires component video or a compatible digital adapter.",
+	NULL
+};
 static const char *const kHelpLanguage[] =
 {
 	"Set the system language.",
@@ -754,6 +766,7 @@ static const char *const *const kSettingHelp[SET_COUNT] =
 	kHelpNativeControls,
 	kHelpReadSpeed,
 	kHelpCheats,
+	kHelpForceProgressive,
 	kHelpLanguage,
 };
 
@@ -769,6 +782,8 @@ static const char *SettingValue(int setting, char *buf, u32 bufSize)
 			return gIni.unlockReadSpeed ? "On" : "Off";
 		case SET_CHEATS:
 			return gIni.enableCheats ? "On" : "Off";
+		case SET_FORCE_PROGRESSIVE:
+			return gIni.forceProgressive ? "On" : "Off";
 		case SET_LANGUAGE:
 		{
 			s32 lan = gIni.language;
@@ -805,6 +820,9 @@ static void CycleSetting(int setting)
 			break;
 		case SET_CHEATS:
 			gIni.enableCheats = !gIni.enableCheats;
+			break;
+		case SET_FORCE_PROGRESSIVE:
+			gIni.forceProgressive = !gIni.forceProgressive;
 			break;
 		case SET_LANGUAGE:
 			// Auto -> Eng -> ... -> Dut -> Auto
@@ -1062,6 +1080,11 @@ static void ApplyToNinCFG(void)
 		ncfg->Config |= NIN_CFG_CHEATS;
 	else
 		ncfg->Config &= ~NIN_CFG_CHEATS;
+
+	if (gIni.forceProgressive)
+		ncfg->Config |= NIN_CFG_FORCE_PROG;
+	else
+		ncfg->Config &= ~NIN_CFG_FORCE_PROG;
 
 	ncfg->Language = gIni.language;
 

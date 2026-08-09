@@ -51,6 +51,7 @@
 #include "asm/GXLoadTlut.h"
 #include "asm/DatelTimer.h"
 #include "asm/SonicRidersCopy.h"
+#include "asm/ForceProgressiveVIConfigure.h"
 
 #include "asm/MajoraAudioStream.h"
 #include "asm/MajoraLoadRegs.h"

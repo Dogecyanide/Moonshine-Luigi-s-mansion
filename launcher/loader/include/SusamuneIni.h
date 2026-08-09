@@ -7,7 +7,7 @@ edits: which game version to boot, where each version's disc image lives, and
 the handful of Nintendont options that used to live in nincfg.bin. nincfg.bin
 is gone -- the kernel takes NIN_CFG through the MEM2 handoff, so the file was
 only ever loader-side persistence, and keeping it would have meant two files
-disagreeing about the same four options.
+disagreeing about the same options.
 
 Reads and writes go to the device the launcher was run from, never the game's
 device. The kernel mounts that device as drive 1 when the two differ, so there
@@ -51,6 +51,7 @@ typedef struct
 	u8   nativeControls;
 	u8   unlockReadSpeed;
 	u8   enableCheats;
+	u8   forceProgressive;
 	s32  language;                       // NIN_LAN_*, NIN_LAN_AUTO for auto
 } SusamuneIni;
 

@@ -10,14 +10,6 @@
 
 ## Scratch
 
-- [x] [Bindings menu](#bindings)
-- [x] [SD card settings persistence](#sd-card-persistence)
-- [x] Dont require different channels for different regions. load a bin from SD card
-- [x] Restore the Nintendont menu and give a way to select the version, and configure the directory.
-- [ ] [Customizable GUI support](#customizable-gui)
-- [ ] Gecko code porting (gecko_codes.md)
-- [ ] Emulator autodetect.
-- [ ] Settings menu pauses the game
 - [ ] probably have a separate way to control default settings rather than autosaving? and rather than pressing a button to just save the current
     - A bit problematic to deal with because we _sorta_ need two different settings structs, and I dont want that, so we have to be more clever
 - [ ] Input tracing feature. Needs planning.
@@ -27,30 +19,5 @@
 - [ ] update readme its not just savestates anymore. update credits to people who made the codes
 - [ ] sound fix (warspyking)
 - [ ] intermittent crash?? only happened once, with the 64KiB thing
-- [ ] move bss out of MEM1
-- [ ] fix icon (should not have jp flag anymore)
-- [ ] Fast text broken on US
-    - Can't reproduce?
-
-### Bindings
-
-TODO describe
-
-Settings menu itself needs a bind. Default Y-Start. Savestate has a bind, default is d-pad left save d-pad right load (same as currently).
-
-Either do 2 (3) gui buttons or have it record inputs. 
-
-
-### SD card settings persistence
-
-TODO describe
-
-SD card save persistence / USB as backup.
-- Saved popup
-- OR failed save.
-
-popup when loading saves.
-
-### Customizable GUI
-
-TODO describe
+- [ ] Fast text broken on US (cant reproduce..)
+- [ ] write faq note about the read only sd card

@@ -1754,7 +1754,7 @@ int main(int argc, char **argv)
 	// susamune.ini is the only launcher config; nincfg.bin is gone. The kernel
 	// takes NIN_CFG through the MEM2 handoff, so the file was never anything
 	// but loader-side persistence, and keeping it would have left a second
-	// place the four migrated options could disagree from.
+	// place the migrated options could disagree from.
 	SusamuneIniLoad(GetRootDevice());
 	ReconfigVideo(rmode);
 
@@ -2482,7 +2482,8 @@ int main(int argc, char **argv)
 			// Enable PAL60.
 			sram->ntd |= 0x40;
 
-			// TODO: Set the progressive scan flag on PAL?
+			if (progressive)
+				sram->flags |= 0x80;
 		}
 		else
 		{
