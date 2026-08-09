@@ -308,18 +308,18 @@ const s16 kUnit[16][2] = {
 // eight boundary directions and each piece slid kGap out along its own centre
 // direction. kRadiusLabel is the mid-ring apothem, where the flat edges are.
 const int kCx = 320;
-const int kCy = 262;
+const int kCy = 245;
 const int kRadiusOuter = 180;
 const int kRadiusInner = 78;
 const int kRadiusLabel = 125;
 const int kGap = 6;
 
-const int kTitleY   = 44;
+const int kTitleY   = 32;
 const int kTitleSz  = 20;
 const int kLabelSz  = 12;
 const int kRootSz   = 16;
 const int kDigitSz  = 26;
-const int kFooterY  = 448;
+const int kFooterY  = 430;
 const int kFooterSz = 12;
 
 const int kCentreSlot = 8;

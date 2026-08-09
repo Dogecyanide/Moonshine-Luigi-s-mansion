@@ -15,11 +15,12 @@
 #include "susamune/binds.hxx"
 #include "susamune/glyphs.hxx"
 #include "susamune/settings.hxx"
-#include "susamune/util.hxx"
 #if ENABLE_DEBUG_WARPS
 #include "susamune/debug_warp.hxx"
 #endif
 
+#include "Dolphin/string.h"
+#include "Dolphin/printf.h"
 #include "Dolphin/GX.h"
 #include "JSystem/JAudio/JASystem/JASTrackMgr.hxx"
 #include "J2D/J2DOrthoGraph.hxx"
@@ -159,17 +160,9 @@ void bgmStatsDraw(Menu *menu) {
         }
     }
 
-    char text[20];
-    int  pos = 0;
-    text[pos++] = 'R';
-    text[pos++] = 'T';
-    text[pos++] = ':';
-    pos += Util::formatUInt(text + pos, freeRoots); 
-    text[pos++] = ' ';
-    text[pos++] = 'S';
-    text[pos++] = ':';
-    pos += Util::formatUInt(text + pos, JASystem::TrackMgr::seqRemain);
-    text[pos] = '\0';
+    char text[24];
+    snprintf(text, sizeof(text), "RT:%lu S:%lu", freeRoots,
+             JASystem::TrackMgr::seqRemain);
 
     const int size = 16;
     const int tw = Menu::textWidth(text, size);
@@ -646,7 +639,7 @@ void Menu::switchTab(int dir) {
 // =====================================================================
 
 void Menu::toast(const char *msg) {
-    Util::copyString(mToastBuf, sizeof(mToastBuf), msg);
+    strncpy(mToastBuf, msg, sizeof(mToastBuf));
     mToastFrames = kToastFrames;
 }
 
@@ -702,12 +695,8 @@ void Menu::pollSettingsSave() {
     case SETTINGS_SAVE_ERROR: {
         // FatFS FRESULT, so the failure can be looked up (7 = write protected,
         // 9 = invalid object, ...).
-        char buf[48];
-        int  n = Util::appendString(buf, "Save failed (fs ");
-        n += Util::formatUInt(buf + n, gSettings.lastError());
-        buf[n++] = ')';
-        buf[n]   = '\0';
-        toast(buf);
+        snprintf(mToastBuf, sizeof(mToastBuf), "Save failed (fs %lu)", gSettings.lastError());
+        mToastFrames = kToastFrames;
         break;
     }
     case SETTINGS_SAVE_TIMEOUT:
