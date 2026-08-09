@@ -131,7 +131,7 @@ struct SusamuneMetadataDisplayCfg {
     unsigned char  startVisible;
     unsigned char  scale;
     unsigned char  labelMode;
-    unsigned char  reserved;
+    unsigned char  backgroundAlpha;
     char           format[SUSAMUNE_METADATA_FORMAT_SIZE];
 };
 

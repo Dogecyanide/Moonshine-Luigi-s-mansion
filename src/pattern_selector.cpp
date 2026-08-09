@@ -133,15 +133,17 @@ void draw(Menu *menu) {
 
     const Color normal(255, 255, 255, 230);
     const Color cursor(255, 194, 61, 255);
-    menu->drawText("Pattern", 462, 420, 14, 14, normal);
+    const int y = 426;
+    menu->fillBox(454, 421, 178, 29, Color(0, 0, 0, 150));
+    menu->drawText("Pattern", 462, y, 14, 14, normal);
 
     char digit[2] = { '0', '\0' };
     for (int i = 0; i < 3; i++) {
         const int x = 536 + i * 30;
-        menu->drawText(i == sCursor ? SUSAMUNE_GLYPH_B : " ", x, 420,
+        menu->drawText(i == sCursor ? SUSAMUNE_GLYPH_B : " ", x, y,
                        14, 14, cursor);
         digit[0] = (char)('0' + sPattern[i]);
-        menu->drawText(digit, x + 14, 420, 16, 16, normal);
+        menu->drawText(digit, x + 14, y, 16, 16, normal);
     }
 }
 

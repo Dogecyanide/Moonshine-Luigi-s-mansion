@@ -216,28 +216,22 @@ void appendRange(char *dst, int &len, int cap, const char *src, int n) {
     dst[len] = '\0';
 }
 
-void drawCustom(Menu *menu, const SusamuneMetadataDisplayCfg &cfg, const Values &v,
-                int size, int lineH) {
-    char line[192];
+bool formatCustomLine(const SusamuneMetadataDisplayCfg &cfg, const Values &v,
+                      u32 &i, char *line, int cap) {
     int len = 0;
-    int y   = cfg.y;
     line[0] = '\0';
 
-    for (u32 i = 0; i < SUSAMUNE_METADATA_FORMAT_SIZE && cfg.format[i];) {
+    while (i < SUSAMUNE_METADATA_FORMAT_SIZE && cfg.format[i]) {
         char c = cfg.format[i];
         if (c == '\n' ||
             (c == '\\' && i + 1 < SUSAMUNE_METADATA_FORMAT_SIZE &&
              cfg.format[i + 1] == 'n')) {
-            drawLine(menu, line, cfg.x, y, size);
-            len = 0;
-            line[0] = '\0';
-            y += lineH;
             i += (c == '\\') ? 2 : 1;
-            continue;
+            return true;
         }
         if (c == '\\' && i + 1 < SUSAMUNE_METADATA_FORMAT_SIZE &&
             cfg.format[i + 1] == '\\') {
-            appendRange(line, len, sizeof(line), "\\", 1);
+            appendRange(line, len, cap, "\\", 1);
             i += 2;
             continue;
         }
@@ -265,9 +259,9 @@ void drawCustom(Menu *menu, const SusamuneMetadataDisplayCfg &cfg, const Values 
                     }
                     char value[48];
                     formatValue(value, sizeof(value), field, precision, v);
-                    append(line, len, sizeof(line), value);
+                    append(line, len, cap, value);
                 } else {
-                    appendRange(line, len, sizeof(line), &cfg.format[i],
+                    appendRange(line, len, cap, &cfg.format[i],
                                 (int)(close - i + 1));
                 }
                 i = close + 1;
@@ -275,10 +269,43 @@ void drawCustom(Menu *menu, const SusamuneMetadataDisplayCfg &cfg, const Values 
             }
         }
 
-        appendRange(line, len, sizeof(line), &cfg.format[i], 1);
+        appendRange(line, len, cap, &cfg.format[i], 1);
         i++;
     }
-    drawLine(menu, line, cfg.x, y, size);
+    return false;
+}
+
+void drawBackground(Menu *menu, const SusamuneMetadataDisplayCfg &cfg,
+                    int width, int height) {
+    if (cfg.backgroundAlpha == 0 || width <= 0 || height <= 0) return;
+    menu->fillBox(cfg.x - 3, cfg.y - 3, width + 6, height + 6,
+                  Color(0, 0, 0, cfg.backgroundAlpha));
+}
+
+void drawCustom(Menu *menu, const SusamuneMetadataDisplayCfg &cfg, const Values &v,
+                int size, int lineH) {
+    char line[192];
+    u32 pos = 0;
+    int maxWidth = 0;
+    int lines = 0;
+    bool more;
+
+    do {
+        more = formatCustomLine(cfg, v, pos, line, sizeof(line));
+        int width = Menu::textWidth(line, size);
+        if (width > maxWidth) maxWidth = width;
+        lines++;
+    } while (more);
+
+    drawBackground(menu, cfg, maxWidth, lines * lineH);
+
+    pos = 0;
+    int y = cfg.y;
+    do {
+        more = formatCustomLine(cfg, v, pos, line, sizeof(line));
+        drawLine(menu, line, cfg.x, y, size);
+        y += lineH;
+    } while (more);
 }
 
 }  // namespace
@@ -294,7 +321,7 @@ void MetadataDisplay::resetDefaults() {
     mCfg.startVisible = 0;
     mCfg.scale        = 100;
     mCfg.labelMode    = SUSAMUNE_METADATA_LABEL_SHORT;
-    mCfg.reserved     = 0;
+    mCfg.backgroundAlpha = 0;
 
     u32 i = 0;
     for (; i + 1 < SUSAMUNE_METADATA_FORMAT_SIZE && kDefaultFormat[i]; i++)
@@ -320,6 +347,8 @@ void MetadataDisplay::adopt(const volatile SusamuneMetadataDisplayCfg *src) {
         mCfg.startVisible = src->startVisible != 0;
     if (src->scale != SUSAMUNE_INPUT_CFG_U8_UNSET) mCfg.scale = src->scale;
     if (src->labelMode != SUSAMUNE_INPUT_CFG_U8_UNSET) mCfg.labelMode = src->labelMode;
+    if (src->backgroundAlpha != SUSAMUNE_INPUT_CFG_U8_UNSET)
+        mCfg.backgroundAlpha = src->backgroundAlpha;
 
     if ((u8)src->format[0] != SUSAMUNE_METADATA_FORMAT_UNSET) {
         u32 i = 0;
@@ -346,7 +375,7 @@ void MetadataDisplay::stageInto(volatile SusamuneMetadataDisplayCfg *dst) const 
     dst->startVisible = mCfg.startVisible;
     dst->scale        = mCfg.scale;
     dst->labelMode    = mCfg.labelMode;
-    dst->reserved     = 0;
+    dst->backgroundAlpha = mCfg.backgroundAlpha;
     for (u32 i = 0; i < SUSAMUNE_METADATA_FORMAT_SIZE; i++)
         dst->format[i] = mCfg.format[i];
 }
@@ -360,6 +389,7 @@ void MetadataDisplay::resetLayout() {
     mCfg.x     = 16;
     mCfg.y     = 112;
     mCfg.scale = 100;
+    mCfg.backgroundAlpha = 0;
     markDirty();
 }
 
@@ -466,6 +496,14 @@ void MetadataDisplay::updateEditor(TMarioGamePad *pad) {
         mCfg.scale = (u8)clampi((int)mCfg.scale + 2, 50, 150);
         changed = true;
     }
+    if (rapid & TMarioGamePad::X) {
+        mCfg.backgroundAlpha = (u8)clampi((int)mCfg.backgroundAlpha - 8, 0, 255);
+        changed = true;
+    }
+    if (rapid & TMarioGamePad::Y) {
+        mCfg.backgroundAlpha = (u8)clampi((int)mCfg.backgroundAlpha + 8, 0, 255);
+        changed = true;
+    }
     if (changed) markDirty();
 }
 
@@ -484,8 +522,19 @@ void MetadataDisplay::draw(Menu *menu, bool force) const {
 
     const char *const *labels = mCfg.labelMode == SUSAMUNE_METADATA_LABEL_LONG
                                     ? kLongLabels : kShortLabels;
-    int y = mCfg.y;
+    int maxWidth = 0;
+    int lines = 0;
     char text[96];
+    for (int field = 0; field < FIELD_COUNT; field++) {
+        if (!(mCfg.fieldMask & kFieldBits[field])) continue;
+        formatField(text, sizeof(text), field, labels[field], v);
+        int width = Menu::textWidth(text, size);
+        if (width > maxWidth) maxWidth = width;
+        lines++;
+    }
+    drawBackground(menu, mCfg, maxWidth, lines * lineH);
+
+    int y = mCfg.y;
     for (int field = 0; field < FIELD_COUNT; field++) {
         if (!(mCfg.fieldMask & kFieldBits[field])) continue;
         formatField(text, sizeof(text), field, labels[field], v);
@@ -497,13 +546,15 @@ void MetadataDisplay::draw(Menu *menu, bool force) const {
 void MetadataDisplay::drawEditor(Menu *menu) const {
     draw(menu, true);
 
-    char status[80];
+    char status[96];
     menu->fillBox(8, 8, 624, 70, Color(0, 0, 0, 205));
-    snprintf(status, sizeof(status), "X:%u Y:%u  Size:%u%%  Labels:%s",
-             mCfg.x, mCfg.y, mCfg.scale, kLabelModes[mCfg.labelMode]);
+    snprintf(status, sizeof(status), "X:%u Y:%u Size:%u%% BG:%u%% Labels:%s",
+             mCfg.x, mCfg.y, mCfg.scale,
+             (unsigned)mCfg.backgroundAlpha * 100u / 255u,
+             kLabelModes[mCfg.labelMode]);
     menu->drawText("Metadata Display editor", 18, 15, 16, 16,
                    Color(255, 255, 255, 255));
     menu->drawText(status, 18, 38, 11, 11, Color(190, 220, 255, 255));
-    menu->drawText("D-pad Move   L/R Size   A Save   B Cancel   Z Reset",
+    menu->drawText("D-pad Move  L/R Size  X/Y BG  A Save  B Cancel  Z Reset",
                    18, 57, 11, 11, Color(255, 255, 255, 255));
 }

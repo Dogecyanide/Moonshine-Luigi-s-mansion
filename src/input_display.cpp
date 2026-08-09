@@ -90,6 +90,23 @@ struct Painter {
         menu->strokePoly(xy, 32, kOriginalLineWidth, c);
     }
 
+    void strokeOctagon(int lx, int ly, int lr, Color c) const {
+        // The GameCube controller's stick gates have eight directional
+        // notches. Keep the moving knobs circular, but draw their gates as
+        // regular octagons with vertices at the cardinal and diagonal axes.
+        static const s16 ux[8] = { 0, 707, 1000, 707, 0, -707, -1000, -707 };
+        static const s16 uy[8] = { -1000, -707, 0, 707, 1000, 707, 0, -707 };
+        s16 xy[16];
+        const int cx = x(lx);
+        const int cy = y(ly);
+        const int r  = scale(lr);
+        for (int i = 0; i < 8; i++) {
+            xy[i * 2]     = (s16)(cx + r * ux[i] / 1000);
+            xy[i * 2 + 1] = (s16)(cy + r * uy[i] / 1000);
+        }
+        menu->strokePoly(xy, 8, kOriginalLineWidth, c);
+    }
+
     void button(int lx, int ly, int radius, bool down,
                 u8 r, u8 g, u8 b) const {
         const Color c = lit(r, g, b, 0xbf);
@@ -400,9 +417,9 @@ void InputDisplay::draw(Menu *menu, bool force) const {
     const int cx = clampi((s8)raw.mSubStickX, -100, 100) * 14 / 100;
     const int cy = clampi((s8)raw.mSubStickY, -100, 100) * 14 / 100;
     p.fillCircle(32 + mx, 52 - my, 12, p.lit(238, 238, 238, 0xef));
-    p.strokeCircle(32, 52, 19, p.lit(238, 238, 238, 0xef));
+    p.strokeOctagon(32, 52, 19, p.lit(238, 238, 238, 0xef));
     p.fillCircle(64 + cx, 92 - cy, 12, p.lit(255, 211, 0, 0xef));
-    p.strokeCircle(64, 92, 19, p.lit(255, 211, 0, 0xef));
+    p.strokeOctagon(64, 92, 19, p.lit(255, 211, 0, 0xef));
 
     p.button(138, 66, 18, buttons & JUTGamePad::A, 46, 229, 184);
     p.button(113, 89, 9, buttons & JUTGamePad::B, 255, 26, 26);

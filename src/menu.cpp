@@ -110,13 +110,24 @@ public:
 protected:
     void drawScrollHints(Menu *menu, int x, int y, int w, int h, int start, int end,
                          int count) {
+        const int cx = x + w - 7;
         if (start > 0) {
-            menu->drawText(SUSAMUNE_GLYPH_UP, x + w - 12, y - ROW_H + 2,
-                           ROW_SZ, ROW_SZ, cRowDim());
+            const int top = y - ROW_H + 5;
+            const s16 up[6] = {
+                (s16)cx,       (s16)top,
+                (s16)(cx - 6), (s16)(top + 9),
+                (s16)(cx + 6), (s16)(top + 9)
+            };
+            menu->fillPoly(up, 3, cRowDim());
         }
         if (end < count) {
-            menu->drawText(SUSAMUNE_GLYPH_DOWN, x + w - 12, y + h - ROW_SZ,
-                           ROW_SZ, ROW_SZ, cRowDim());
+            const int top = y + h - ROW_SZ + 2;
+            const s16 down[6] = {
+                (s16)(cx - 6), (s16)top,
+                (s16)(cx + 6), (s16)top,
+                (s16)cx,       (s16)(top + 9)
+            };
+            menu->fillPoly(down, 3, cRowDim());
         }
     }
 };

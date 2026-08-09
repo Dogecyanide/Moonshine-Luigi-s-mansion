@@ -360,6 +360,7 @@ static void ApplyMetadataDisplayKey(struct SusamuneMetadataDisplayCfg *cfg,
 		if (strcmp(key, "start_visible") == 0) cfg->startVisible = v8;
 		else if (strcmp(key, "scale") == 0) cfg->scale = v8;
 		else if (strcmp(key, "label_mode") == 0) cfg->labelMode = v8;
+		else if (strcmp(key, "background_alpha") == 0) cfg->backgroundAlpha = v8;
 	}
 }
 
@@ -595,6 +596,7 @@ static void EmitMetadataDisplaySection(FIL *f, int *err, const struct SusamuneCf
 	EmitInputU8(f, err, "start_visible", d->startVisible);
 	EmitInputU8(f, err, "scale", d->scale);
 	EmitInputU8(f, err, "label_mode", d->labelMode);
+	EmitInputU8(f, err, "background_alpha", d->backgroundAlpha);
 	if ((u8)d->format[0] != SUSAMUNE_METADATA_FORMAT_UNSET)
 	{
 		EmitStr(f, err, "format = ");
