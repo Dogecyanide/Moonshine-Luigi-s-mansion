@@ -100,7 +100,7 @@ DRESULT disk_write_sd (
 	//turn on drive led
 	if (access_led) set32(HW_GPIO_OUT, GPIO_SLOT_LED);
 
-	if( sdio_WriteSectors( sector, count, buff ) < 0 )
+	if( !sdio_WriteSectors( sector, count, buff ) )
 	{
 		//turn off drive led
 		if (access_led) clear32(HW_GPIO_OUT, GPIO_SLOT_LED);

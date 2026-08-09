@@ -310,13 +310,18 @@ bool _FAT_cache_flush (CACHE* cache) {
 	return true;
 }
 
-void _FAT_cache_invalidate (CACHE* cache) {
+void _FAT_cache_discard (CACHE* cache) {
 	unsigned int i;
-	_FAT_cache_flush(cache);
+
 	for (i = 0; i < cache->numberOfPages; i++) {
 		cache->cacheEntries[i].sector = CACHE_FREE;
 		cache->cacheEntries[i].last_access = 0;
 		cache->cacheEntries[i].count = 0;
 		cache->cacheEntries[i].dirty = false;
 	}
+}
+
+void _FAT_cache_invalidate (CACHE* cache) {
+	_FAT_cache_flush(cache);
+	_FAT_cache_discard(cache);
 }

@@ -162,7 +162,7 @@ static int Repeat##Key(HeldCounters *h) \
 { \
 	int ret = 0; \
 	if (FPAD_##Key(1)) { \
-		ret = (h->Key == 0 || h->Key > 50); \
+		ret = !((h->Key == 0 || h->Key > 10) ? (h->Key & 0b111) : 1); \
 		h->Key++; \
 	} else { \
 		h->Key = 0; \
@@ -206,20 +206,29 @@ static bool IsDiscPath(const char *path)
 
 /** Persistence **/
 
-static void SaveIfDirty(void)
+static bool SaveIfDirty(void)
 {
 	if (!IniDirty)
-		return;
+		return true;
 	IniDirty = false;
 
 	if (!CanSave)
-		return;
+	{
+		// Non-fatal: the user's choices still apply to this boot.
+		snprintf(ErrorLine, sizeof(ErrorLine),
+			 "Settings were not saved: %s:/susamune.ini is not writable",
+			 LauncherDev);
+		return false;
+	}
 	if (SusamuneIniSave(LauncherDev) != FR_OK)
 	{
 		// Non-fatal: the user's choices still apply to this boot.
 		snprintf(ErrorLine, sizeof(ErrorLine),
 			 "Could not write %s:/susamune.ini", LauncherDev);
+		CanSave = false;
+		return false;
 	}
+	return true;
 }
 
 /** Header **/
@@ -267,16 +276,19 @@ static void FreeEntries(BrowseEntry *list, u32 count)
 }
 
 // Read a directory into a freshly allocated, sorted array.
-static BrowseEntry *ReadDirectory(const char *path, u32 *pCount)
+static BrowseEntry *ReadDirectory(const char *path, u32 *pCount,
+				  FRESULT *pResult)
 {
 	BrowseEntry *list;
 	DIR pdir;
 	FILINFO fInfo;
+	FRESULT result;
 	u32 count = 0;
 	char open[SUSA_PATH_MAX];
 	u32 len;
 
 	*pCount = 0;
+	*pResult = FR_OK;
 
 	// f_opendir cannot take a trailing slash: create_name() parses the empty
 	// segment after it and returns FR_INVALID_NAME. Paths are carried around
@@ -284,22 +296,31 @@ static BrowseEntry *ReadDirectory(const char *path, u32 *pCount)
 	// it here -- except at a device root ("sd:/"), which needs it.
 	len = (u32)strlen(path);
 	if (len >= sizeof(open))
+	{
+		*pResult = FR_INVALID_NAME;
 		return NULL;
+	}
 	memcpy(open, path, len + 1);
 	if (len > 1 && open[len-1] == '/' && open[len-2] != ':')
 		open[len-1] = '\0';
 
-	if (f_opendir_char(&pdir, open) != FR_OK)
+	result = f_opendir_char(&pdir, open);
+	if (result != FR_OK)
+	{
+		*pResult = result;
 		return NULL;
+	}
 
 	list = (BrowseEntry*)malloc(sizeof(BrowseEntry) * BROWSE_MAX_ENTRIES);
 	if (list == NULL)
 	{
 		f_closedir(&pdir);
+		*pResult = FR_NOT_ENOUGH_CORE;
 		return NULL;
 	}
 
-	while (f_readdir(&pdir, &fInfo) == FR_OK && fInfo.fname[0] != '\0')
+	while ((result = f_readdir(&pdir, &fInfo)) == FR_OK &&
+	       fInfo.fname[0] != '\0')
 	{
 		// Skip "." / ".." and hidden entries, as the old game scanner did.
 		const char *name = wchar_to_char(fInfo.fname);
@@ -308,7 +329,10 @@ static BrowseEntry *ReadDirectory(const char *path, u32 *pCount)
 
 		list[count].name = strdup(name);
 		if (list[count].name == NULL)
+		{
+			result = FR_NOT_ENOUGH_CORE;
 			break;
+		}
 		list[count].isDir = (fInfo.fattrib & AM_DIR) ? 1 : 0;
 		list[count].size = fInfo.fsize;
 		list[count].supported = list[count].isDir ||
@@ -318,12 +342,23 @@ static BrowseEntry *ReadDirectory(const char *path, u32 *pCount)
 		if (count >= BROWSE_MAX_ENTRIES)
 			break;
 	}
-	f_closedir(&pdir);
+	if (result == FR_OK)
+		result = f_closedir(&pdir);
+	else
+		f_closedir(&pdir);
+
+	if (result != FR_OK)
+	{
+		FreeEntries(list, count);
+		*pResult = result;
+		return NULL;
+	}
 
 	if (count > 1)
 		qsort(list, count, sizeof(BrowseEntry), CompareEntries);
 
 	*pCount = count;
+	*pResult = FR_OK;
 	return list;
 }
 
@@ -458,6 +493,7 @@ static bool BrowseDevice(int dev, u8 version, char *out, u32 outSize)
 	char cwd[SUSA_PATH_MAX];
 	BrowseEntry *list = NULL;
 	u32 count = 0;
+	FRESULT browseResult = FR_OK;
 	int pos = 0, scroll = 0;
 	bool reload = true;
 	HeldCounters held;
@@ -474,7 +510,7 @@ static bool BrowseDevice(int dev, u8 version, char *out, u32 outSize)
 		{
 			if (list)
 				FreeEntries(list, count);
-			list = ReadDirectory(cwd, &count);
+			list = ReadDirectory(cwd, &count, &browseResult);
 			pos = 0;
 			scroll = 0;
 			reload = false;
@@ -609,7 +645,13 @@ static bool BrowseDevice(int dev, u8 version, char *out, u32 outSize)
 				PrintFormat(DEFAULT_SIZE, color, MENU_POS_X, y, ARROW_RIGHT);
 		}
 
-		if (count == 0)
+		if (browseResult != FR_OK)
+		{
+			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X + 20, BROWSE_Y_LIST,
+				    "Could not read this folder (error %u).",
+				    (u32)browseResult);
+		}
+		else if (count == 0)
 		{
 			PrintFormat(DEFAULT_SIZE, DARK_GRAY, MENU_POS_X + 20, BROWSE_Y_LIST,
 				    "(empty)");
@@ -621,7 +663,10 @@ static bool BrowseDevice(int dev, u8 version, char *out, u32 outSize)
 		}
 
 		DrawRule(BROWSE_Y_RULE);
-		if (count == 0)
+		if (browseResult != FR_OK)
+			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, BROWSE_Y_HELP,
+				    "The storage device may be missing or unavailable. B: go up");
+		else if (count == 0)
 			PrintFormat(DEFAULT_SIZE, BLACK, MENU_POS_X, BROWSE_Y_HELP,
 				    "B: go up");
 		else if (list[pos].isDir)
@@ -1223,7 +1268,8 @@ void SusamuneMenuRun(const char *launcherDev, bool canSave)
 					}
 					else if (ValidateSelection())
 					{
-						SaveIfDirty();
+						if (!SaveIfDirty())
+							break;
 						ApplyToNinCFG();
 						return;
 					}

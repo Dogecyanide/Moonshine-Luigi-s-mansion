@@ -693,9 +693,10 @@ void Menu::pollSettingsSave() {
         toast("Settings saved");
         break;
     case SETTINGS_SAVE_ERROR: {
-        // FatFS FRESULT, so the failure can be looked up (7 = write protected,
-        // 9 = invalid object, ...).
-        snprintf(mToastBuf, sizeof(mToastBuf), "Save failed (fs %lu)", gSettings.lastError());
+        // Keep the FatFS result for diagnosing removal vs write protection.
+        // 7 = write protection, 9 = invalid object, ...
+        snprintf(mToastBuf, sizeof(mToastBuf), "Could not write susamune.ini (fs %lu)",
+                 gSettings.lastError());
         mToastFrames = kToastFrames;
         break;
     }

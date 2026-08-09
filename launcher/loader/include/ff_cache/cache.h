@@ -115,6 +115,9 @@ Write any dirty sectors back to disc and clear out the contents of the cache
 */
 bool _FAT_cache_flush (CACHE* cache);
 
+/* Drop cached pages after a failed physical write. */
+void _FAT_cache_discard (CACHE* cache);
+
 /*
 Clear out the contents of the cache without writing any dirty sectors first
 */

@@ -16,6 +16,7 @@ section lands in the output unchanged.
 #include <string.h>
 
 #include "global.h"
+#include "diskio.h"
 #include "exi.h"
 #include "SusamuneIni.h"
 #include "ff_utf8.h"
@@ -325,6 +326,11 @@ static void BuildPath(char *out, u32 size, const char *device)
 	snprintf(out, size, "%s:" SUSAMUNE_INI_PATH, device);
 }
 
+static BYTE DeviceForName(const char *device)
+{
+	return strcmp(device, "usb") == 0 ? DEV_USB : DEV_SD;
+}
+
 bool SusamuneIniNeedsWrite(void)
 {
 	return !SawSection;
@@ -333,14 +339,53 @@ bool SusamuneIniNeedsWrite(void)
 bool SusamuneIniWritable(const char *device)
 {
 	char path[32];
-	FIL  f;
+	char probePath[32];
+	FIL f;
+	FILINFO info;
+	FRESULT ret;
+	UINT wrote;
+	u32 i;
+	BYTE dev = DeviceForName(device);
 
 	BuildPath(path, sizeof(path), device);
-	// OPEN_ALWAYS rather than CREATE_ALWAYS: this must not truncate an ini
-	// that already has the mod's settings in it.
-	if (f_open_char(&f, path, FA_WRITE | FA_OPEN_ALWAYS) != FR_OK)
+	ret = f_stat_char(path, &info);
+	if (ret == FR_OK && (info.fattrib & AM_RDO))
 		return false;
-	f_close(&f);
+	if (ret != FR_OK && ret != FR_NO_FILE)
+	{
+		if (ret == FR_DISK_ERR || ret == FR_INT_ERR)
+			RemountDevice(dev);
+		return false;
+	}
+
+	// FatFS writes through a RAM cache, so opening a file is not a write test.
+	for (i = 0; i < 4; i++)
+	{
+		snprintf(probePath, sizeof(probePath), "%s:/.susa-wr%u.tmp", device, i);
+		ret = f_open_char(&f, probePath, FA_WRITE | FA_CREATE_NEW);
+		if (ret != FR_EXIST)
+			break;
+	}
+	if (ret != FR_OK)
+	{
+		if (ret == FR_DISK_ERR || ret == FR_INT_ERR)
+			RemountDevice(dev);
+		return false;
+	}
+
+	ret = f_write(&f, "S", 1, &wrote);
+	if (ret == FR_OK && wrote != 1)
+		ret = FR_DISK_ERR;
+	if (f_close(&f) != FR_OK)
+		ret = FR_DISK_ERR;
+	if (ret == FR_OK)
+		ret = f_unlink_char(probePath);
+	if (ret != FR_OK)
+	{
+		// Discard the ghost directory/FAT changes left in the RAM cache.
+		RemountDevice(dev);
+		return false;
+	}
 	return true;
 }
 
@@ -474,9 +519,12 @@ int SusamuneIniSave(const char *device)
 		EmitNintendontSection(&f, &err);
 	}
 
-	f_close(&f);
+	ret = f_close(&f);
+	if (err == FR_OK && ret != FR_OK)
+		err = ret;
 	free(buf);
 
-	FlushDevices();
+	if (err != FR_OK)
+		RemountDevice(DeviceForName(device));
 	return err;
 }

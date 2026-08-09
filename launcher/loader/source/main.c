@@ -1765,7 +1765,17 @@ int main(int argc, char **argv)
 	{
 		// First run on this card: author [nintendont] so the keys are there to
 		// be hand-edited, the way the mod does for its own sections.
-		SusamuneIniSave(GetRootDevice());
+		if (SusamuneIniSave(GetRootDevice()) != FR_OK)
+			LauncherCanSave = false;
+	}
+	if (!LauncherCanSave && gIni.autoboot)
+	{
+		char warning[128];
+		snprintf(warning, sizeof(warning),
+			 "Warning: %s:/susamune.ini is not writable.\nSettings cannot be saved.",
+			 GetRootDevice());
+		ShowMessageScreen(warning);
+		usleep(2500000);
 	}
 
 	bool progressive = (CONF_GetProgressiveScan() > 0) && VIDEO_HaveComponentCable();
@@ -1916,14 +1926,17 @@ int main(int argc, char **argv)
 	if (ret != 0) {
 		ClearScreen();
 		PrintInfo();
-		PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*4, "CheckForMultiGameAndRegion() failed: %d", ret);
+		PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*4,
+			    "Could not launch the selected game (error %d).", ret);
 		switch (ret) {
 			case 1:
-				PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*5, "Unable to open the %s.",
-					CurDICMD == 0 ? "disc image file" : "disc drive");
+				PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*5,
+					    "Unable to open the %s.",
+					    CurDICMD == 0 ? "disc image file" : "disc drive");
 				break;
 			case 2:
-				PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*5, "Unable to read the disc header.");
+				PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*5,
+					    "Unable to read the disc image header.");
 				break;
 			case 3:
 				PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*5, "Unable to read the CISO bi2.bin area.");
@@ -1950,13 +1963,16 @@ int main(int argc, char **argv)
 					device = "DVD-R";
 					break;
 				default:
-					snprintf(unkdev, sizeof(unkdev), "Unknown (CMD: 0x%02lX)", CurDICMD);
+					snprintf(unkdev, sizeof(unkdev), "Unknown (CMD: 0x%02X)", CurDICMD);
 					device = unkdev;
 					break;
 			}
 			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*7, "Device: %s", device);
 		} else {
-			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*7, "Filename: %s:%s", GetRootDevice(), ncfg->GamePath);
+			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*7,
+				    "File: %s:%.54s", GetRootDevice(), ncfg->GamePath);
+			PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*8,
+				    "Check that the storage device is still connected.");
 		}
 
 		PrintFormat(DEFAULT_SIZE, MAROON, MENU_POS_X, MENU_POS_Y + 20*20, "Returning to loader in 10 seconds.");

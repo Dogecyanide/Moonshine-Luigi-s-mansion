@@ -561,6 +561,33 @@ const WCHAR *MountDevice(BYTE pdrv)
 	return (devices[pdrv] ? devInitInfo[pdrv].devNameFF : NULL);
 }
 
+bool RemountDevice(BYTE pdrv)
+{
+	if (/*pdrv < DEV_SD ||*/ pdrv > DEV_USB)
+		return false;
+
+	if (devices[pdrv] != NULL)
+	{
+		f_mount(NULL, devInitInfo[pdrv].devNameFF, 1);
+		free(devices[pdrv]);
+		devices[pdrv] = NULL;
+	}
+	disk_discard(pdrv);
+
+	if (disk_status(pdrv) != 0)
+		return false;
+	devices[pdrv] = (FATFS*)memalign(32, sizeof(FATFS));
+	if (devices[pdrv] == NULL)
+		return false;
+	if (f_mount(devices[pdrv], devInitInfo[pdrv].devNameFF, 1) != FR_OK)
+	{
+		free(devices[pdrv]);
+		devices[pdrv] = NULL;
+		return false;
+	}
+	return true;
+}
+
 /**
  * Unmount and shut down a device.
  * @param pdrv Device number.
@@ -602,10 +629,15 @@ void CloseDevices(void)
 /**
  * Flush all device caches.
  */
-void FlushDevices(void)
+bool FlushDevices(void)
 {
-	disk_flush(DEV_SD);
-	disk_flush(DEV_USB);
+	bool ok = true;
+
+	if (disk_flush(DEV_SD) != RES_OK)
+		ok = false;
+	if (disk_flush(DEV_USB) != RES_OK)
+		ok = false;
+	return ok;
 }
 
 /**

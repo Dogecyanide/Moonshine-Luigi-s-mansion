@@ -192,7 +192,8 @@ void AfterIOSReload(raw_irq_handler_t handle, u32 rev);
 const WCHAR *MountDevice(BYTE pdrv);
 int UnmountDevice(BYTE pdrv);
 void CloseDevices(void);
-void FlushDevices(void);
+bool FlushDevices(void);
+bool RemountDevice(BYTE pdrv);
 
 /**
  * Does a filename have a supported file extension?

@@ -567,7 +567,9 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 		EmitBindsSection(&f, &err, cfg);
 	}
 
-	f_close(&f);
+	ret = f_close(&f);
+	if (err == FR_OK && ret != FR_OK)
+		err = ret;
 	free(buf);
 	return err;
 }

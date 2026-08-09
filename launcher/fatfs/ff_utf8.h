@@ -19,9 +19,11 @@ const char *wchar_to_char(const WCHAR *wcs);
 
 FRESULT f_open_char(FIL* fp, const char* path, BYTE mode);
 FRESULT f_mount_char(FATFS* fs, const char* path, BYTE opt);
+FRESULT f_stat_char(const char* path, FILINFO* fno);
 
 #if !_FS_READONLY
 FRESULT f_mkdir_char(const char* path);
+FRESULT f_unlink_char(const char* path);
 #endif /* !_FS_READONLY */
 
 #if _FS_RPATH >= 1

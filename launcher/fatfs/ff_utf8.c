@@ -86,12 +86,26 @@ FRESULT f_mount_char(FATFS* fs, const char* path, BYTE opt)
 	return f_mount(fs, tmpwchar.u16, opt);
 }
 
+FRESULT f_stat_char(const char* path, FILINFO* fno)
+{
+	if (!char_to_wchar(path))
+		return FR_INVALID_NAME;
+	return f_stat(tmpwchar.u16, fno);
+}
+
 #if !_FS_READONLY
 FRESULT f_mkdir_char(const char* path)
 {
 	if (!char_to_wchar(path))
 		return FR_INVALID_NAME;
 	return f_mkdir(tmpwchar.u16);
+}
+
+FRESULT f_unlink_char(const char* path)
+{
+	if (!char_to_wchar(path))
+		return FR_INVALID_NAME;
+	return f_unlink(tmpwchar.u16);
 }
 #endif /* !_FS_READONLY */
 

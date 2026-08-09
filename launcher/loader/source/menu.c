@@ -97,12 +97,33 @@ void HandleSTMEvent(u32 event)
  */
 void ShowMessageScreen(const char *msg)
 {
-	const int len = strlen(msg);
-	const int x = (640 - (len*10)) / 2;
+	const char *line;
+	const char *end;
+	int lines = 1;
+	int y;
+
+	for (line = msg; *line; line++)
+	{
+		if (*line == '\n')
+			lines++;
+	}
+	y = 232 - (lines - 1) * 10;
 
 	ClearScreen();
 	PrintInfo();
-	PrintFormat(DEFAULT_SIZE, BLACK, x, 232, "%s", msg);
+	line = msg;
+	while (line != NULL)
+	{
+		int len;
+		int x;
+
+		end = strchr(line, '\n');
+		len = end ? (int)(end - line) : (int)strlen(line);
+		x = (640 - len * 10) / 2;
+		PrintFormat(DEFAULT_SIZE, BLACK, x, y, "%.*s", len, line);
+		y += 20;
+		line = end ? end + 1 : NULL;
+	}
 	GRRLIB_Render();
 	ClearScreen();
 }

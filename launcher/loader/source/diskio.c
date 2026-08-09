@@ -174,6 +174,11 @@ DRESULT disk_ioctl (
 		return ret;
 
 	switch (cmd) {
+		case CTRL_SYNC:
+			ret = (!cache[pdrv] || _FAT_cache_flush(cache[pdrv]))
+				? RES_OK : RES_ERROR;
+			break;
+
 		case GET_SECTOR_SIZE:
 			*(WORD*)buff = sectorSize[pdrv];
 			ret = RES_OK;
@@ -269,8 +274,17 @@ DRESULT disk_flush (BYTE pdrv)
 
 	if (cache[pdrv]) {
 		// Flush the cache.
-		_FAT_cache_flush(cache[pdrv]);
+		return _FAT_cache_flush(cache[pdrv]) ? RES_OK : RES_ERROR;
 	}
 
+	return RES_OK;
+}
+
+DRESULT disk_discard (BYTE pdrv)
+{
+	if (/*pdrv < DEV_SD ||*/ pdrv > DEV_USB)
+		return RES_PARERR;
+	if (cache[pdrv])
+		_FAT_cache_discard(cache[pdrv]);
 	return RES_OK;
 }
