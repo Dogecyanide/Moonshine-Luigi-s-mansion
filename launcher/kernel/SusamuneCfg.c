@@ -18,6 +18,8 @@ here cannot drift from the mod's SettingId order. [binds_<region>] holds one
 button combination per configurable action, keyed by binds_list.h and written as
 `+`-joined button tokens ("X+DUp") from the same shared list.
 [input_display_<region>] holds its wider position/colour configuration.
+[metadata_display_<region>] holds the native metadata overlay, including its
+optional hand-authored text template.
 [nintendont] holds
 the launcher's own options -- game version, per-version disc image paths, and
 the Nintendont settings that used to live in nincfg.bin -- and belongs to
@@ -33,9 +35,9 @@ sections are ever parsed: the handoff block holds one set of values, not three.
 Consequently a save cannot simply re-emit the file from the block -- it would
 drop the other versions. Instead it reads the old file back and copies every
 line through verbatim, substituting freshly written sections in place of this
-version's three. Sections the launcher does not know stay byte-for-byte intact.
+version's four. Sections the launcher does not know stay byte-for-byte intact.
 
-NOTE: keys the launcher does not recognise *inside our own three sections* are
+NOTE: keys the launcher does not recognise *inside our own four sections* are
 still dropped, since those sections are regenerated wholesale.
 
 */
@@ -75,10 +77,10 @@ static const struct BindButton BindButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAM
 
 #define BIND_BUTTON_COUNT ((u32)(sizeof(BindButtons) / sizeof(BindButtons[0])))
 
-// Enough for the whole file: ~40 keys at well under 40 bytes each per game
-// version, times three versions, plus section headers and the comment banner.
+// Enough for the whole file: the settings plus both display payloads for all
+// three versions, section headers, and the comment banner.
 // A file larger than this is refused rather than truncated (see WriteIniFile).
-#define SUSAMUNE_INI_BUF_SIZE 8192
+#define SUSAMUNE_INI_BUF_SIZE 12288
 
 // Longest section name we build: "settings" + '_' + "pal" + NUL.
 #define SUSAMUNE_SECTION_NAME_MAX 24
@@ -92,6 +94,7 @@ static u32  CfgAckSeq = 0;
 static char SettingsSection[SUSAMUNE_SECTION_NAME_MAX];
 static char BindsSection[SUSAMUNE_SECTION_NAME_MAX];
 static char InputDisplaySection[SUSAMUNE_SECTION_NAME_MAX];
+static char MetadataDisplaySection[SUSAMUNE_SECTION_NAME_MAX];
 
 // name + '_' + region tag, e.g. "settings" + "jp".
 static void BuildSectionName(char *out, const char *base, const char *region)
@@ -266,9 +269,15 @@ static bool ParseBindMask(const char *s, u16 *out)
 }
 
 // Which section the parser is currently inside. Anything that is not one of
-// this version's three sections -- [nintendont], or another version's settings --
+// this version's four sections -- [nintendont], or another version's settings --
 // is SECTION_OTHER and left alone.
-enum IniSection { SECTION_OTHER, SECTION_SETTINGS, SECTION_BINDS, SECTION_INPUT_DISPLAY };
+enum IniSection {
+	SECTION_OTHER,
+	SECTION_SETTINGS,
+	SECTION_BINDS,
+	SECTION_INPUT_DISPLAY,
+	SECTION_METADATA_DISPLAY
+};
 
 static enum IniSection ClassifySection(const char *name)
 {
@@ -278,6 +287,8 @@ static enum IniSection ClassifySection(const char *name)
 		return SECTION_BINDS;
 	if (strcmp(name, InputDisplaySection) == 0)
 		return SECTION_INPUT_DISPLAY;
+	if (strcmp(name, MetadataDisplaySection) == 0)
+		return SECTION_METADATA_DISPLAY;
 	return SECTION_OTHER;
 }
 
@@ -307,6 +318,48 @@ static void ApplyInputDisplayKey(struct SusamuneInputDisplayCfg *cfg,
 		else if (strcmp(key, "value_mode") == 0) cfg->valueMode = v8;
 		else if (strcmp(key, "value_source") == 0) cfg->valueSource = v8;
 		else if (strcmp(key, "value_position") == 0) cfg->valuePlacement = v8;
+	}
+}
+
+static void CopyMetadataFormat(char *dst, const char *src)
+{
+	u32 i = 0;
+
+	while (i + 1 < SUSAMUNE_METADATA_FORMAT_SIZE && src[i])
+	{
+		dst[i] = src[i];
+		i++;
+	}
+	dst[i] = '\0';
+}
+
+static void ApplyMetadataDisplayKey(struct SusamuneMetadataDisplayCfg *cfg,
+				    const char *key, const char *text)
+{
+	u8  v8;
+	u16 v16;
+
+	if (strcmp(key, "format") == 0)
+	{
+		CopyMetadataFormat(cfg->format, text);
+	}
+	else if (strcmp(key, "x") == 0)
+	{
+		if (ParseU16(text, &v16)) cfg->x = v16;
+	}
+	else if (strcmp(key, "y") == 0)
+	{
+		if (ParseU16(text, &v16)) cfg->y = v16;
+	}
+	else if (strcmp(key, "fields") == 0)
+	{
+		if (ParseU16(text, &v16)) cfg->fieldMask = v16;
+	}
+	else if (ParseU8(text, &v8))
+	{
+		if (strcmp(key, "start_visible") == 0) cfg->startVisible = v8;
+		else if (strcmp(key, "scale") == 0) cfg->scale = v8;
+		else if (strcmp(key, "label_mode") == 0) cfg->labelMode = v8;
 	}
 }
 
@@ -383,6 +436,10 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 		else if (section == SECTION_INPUT_DISPLAY)
 		{
 			ApplyInputDisplayKey(&cfg->inputDisplay, Trim(line), Trim(eq + 1));
+		}
+		else if (section == SECTION_METADATA_DISPLAY)
+		{
+			ApplyMetadataDisplayKey(&cfg->metadataDisplay, Trim(line), Trim(eq + 1));
 		}
 
 		line = next;
@@ -525,6 +582,27 @@ static void EmitInputDisplaySection(FIL *f, int *err, const struct SusamuneCfg *
 	EmitInputU8(f, err, "value_position", d->valuePlacement);
 }
 
+static void EmitMetadataDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cfg)
+{
+	const struct SusamuneMetadataDisplayCfg *d = &cfg->metadataDisplay;
+
+	EmitStr(f, err, "[");
+	EmitStr(f, err, MetadataDisplaySection);
+	EmitStr(f, err, "]\r\n");
+	EmitInputU16(f, err, "x", d->x);
+	EmitInputU16(f, err, "y", d->y);
+	EmitInputU16(f, err, "fields", d->fieldMask);
+	EmitInputU8(f, err, "start_visible", d->startVisible);
+	EmitInputU8(f, err, "scale", d->scale);
+	EmitInputU8(f, err, "label_mode", d->labelMode);
+	if ((u8)d->format[0] != SUSAMUNE_METADATA_FORMAT_UNSET)
+	{
+		EmitStr(f, err, "format = ");
+		EmitStr(f, err, d->format);
+		EmitStr(f, err, "\r\n");
+	}
+}
+
 static const char kIniBanner[] =
 	"; susamune settings\r\n"
 	"; Written by the susamune launcher. Values are edited in-game from the\r\n"
@@ -532,8 +610,9 @@ static const char kIniBanner[] =
 	"; whenever the menu is closed with changes pending, so comments added\r\n"
 	"; inside it are lost. Everything else in this file is preserved.\r\n"
 	";\r\n"
-	"; Each supported disc has its own [settings_<region>], [binds_<region>]\r\n"
-	"; and [input_display_<region>] sections -- jp = GMSJ, us = GMSE, pal = GMSP.\r\n"
+	"; Each disc has settings, binds, input_display and metadata_display sections.\r\n"
+	"; Their suffix is jp = GMSJ, us = GMSE, or pal = GMSP.\r\n"
+	"; Metadata format uses \\n for lines and placeholders such as <x> or <HSpd|.2>.\r\n"
 	";\r\n"
 	"; Bind values are button combinations like Y+Start, or none. menu_toggle\r\n"
 	"; is what opens the mod menu -- if you rebind it to something you cannot\r\n"
@@ -541,11 +620,11 @@ static const char kIniBanner[] =
 	"\r\n"
 	"[" SUSAMUNE_INI_SECTION_NINTENDONT "]\r\n";
 
-// Rewrite the ini with this version's three sections replaced.
+// Rewrite the ini with this version's four sections replaced.
 //
 // The whole point of the copy-through is that the other versions' settings are
 // never materialised: they exist only as the text we are reading back here.
-// Everything outside our three sections -- other regions, [nintendont], comments,
+// Everything outside our four sections -- other regions, [nintendont], comments,
 // blank lines -- lands in the output unchanged and in its original order.
 static int WriteIniFile(const struct SusamuneCfg *cfg)
 {
@@ -559,6 +638,7 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 	bool  wroteSettings = false;
 	bool  wroteBinds = false;
 	bool  wroteInputDisplay = false;
+	bool  wroteMetadataDisplay = false;
 
 	buf = (char*)malloca(SUSAMUNE_INI_BUF_SIZE, 32);
 	if (buf == NULL)
@@ -640,6 +720,11 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 					EmitInputDisplaySection(&f, &err, cfg);
 					wroteInputDisplay = true;
 				}
+				else if (kind == SECTION_METADATA_DISPLAY)
+				{
+					EmitMetadataDisplaySection(&f, &err, cfg);
+					wroteMetadataDisplay = true;
+				}
 			}
 		}
 
@@ -667,6 +752,11 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 	{
 		EmitStr(&f, &err, "\r\n");
 		EmitInputDisplaySection(&f, &err, cfg);
+	}
+	if (!wroteMetadataDisplay)
+	{
+		EmitStr(&f, &err, "\r\n");
+		EmitMetadataDisplaySection(&f, &err, cfg);
 	}
 
 	ret = f_close(&f);
@@ -708,6 +798,7 @@ void SusamuneCfgInit(void)
 	BuildSectionName(SettingsSection, SUSAMUNE_INI_SECTION_SETTINGS, region);
 	BuildSectionName(BindsSection, SUSAMUNE_INI_SECTION_BINDS, region);
 	BuildSectionName(InputDisplaySection, SUSAMUNE_INI_SECTION_INPUT_DISPLAY, region);
+	BuildSectionName(MetadataDisplaySection, SUSAMUNE_INI_SECTION_METADATA_DISPLAY, region);
 
 	for (i = 0; i < SUSAMUNE_CFG_MAX_SETTINGS; i++)
 		cfg->values[i] = SUSAMUNE_CFG_UNSET;
@@ -728,11 +819,23 @@ void SusamuneCfgInit(void)
 	cfg->inputDisplay.valueSource    = SUSAMUNE_INPUT_CFG_U8_UNSET;
 	cfg->inputDisplay.valuePlacement = SUSAMUNE_INPUT_CFG_U8_UNSET;
 
+	memset(&cfg->metadataDisplay, SUSAMUNE_METADATA_FORMAT_UNSET,
+	       sizeof(cfg->metadataDisplay));
+	cfg->metadataDisplay.magic        = SUSAMUNE_METADATA_CFG_MAGIC;
+	cfg->metadataDisplay.version      = SUSAMUNE_METADATA_CFG_VERSION;
+	cfg->metadataDisplay.x            = SUSAMUNE_INPUT_CFG_U16_UNSET;
+	cfg->metadataDisplay.y            = SUSAMUNE_INPUT_CFG_U16_UNSET;
+	cfg->metadataDisplay.fieldMask    = SUSAMUNE_INPUT_CFG_U16_UNSET;
+	cfg->metadataDisplay.startVisible = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->metadataDisplay.scale        = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->metadataDisplay.labelMode    = SUSAMUNE_INPUT_CFG_U8_UNSET;
+
 	cfg->magic     = SUSAMUNE_CFG_MAGIC;
 	cfg->version   = SUSAMUNE_CFG_VERSION;
 	cfg->count     = (u16)SETTING_KEY_COUNT;
 	cfg->bindCount = (u16)BIND_KEY_COUNT;
-	cfg->flags     = SUSAMUNE_CFG_FLAG_INPUT_DISPLAY;
+	cfg->flags     = SUSAMUNE_CFG_FLAG_INPUT_DISPLAY |
+	                 SUSAMUNE_CFG_FLAG_METADATA_DISPLAY;
 
 	ret = f_open_char(&f, SusamuneCfgIniPath(), FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)

@@ -97,6 +97,44 @@ struct SusamuneInputDisplayCfg {
     unsigned char  reserved[12];
 };
 
+// Metadata Display keeps a compact in-game configuration plus an optional
+// hand-authored template. The template is edited in susamune.ini; the game
+// menu only selects it and edits the live overlay's layout.
+#define SUSAMUNE_METADATA_CFG_MAGIC       0x534D4443u  // 'SMDC'
+#define SUSAMUNE_METADATA_CFG_VERSION     1u
+#define SUSAMUNE_METADATA_FORMAT_SIZE     240u
+#define SUSAMUNE_METADATA_FORMAT_UNSET    0xFFu
+
+#define SUSAMUNE_METADATA_LABEL_SHORT     0u
+#define SUSAMUNE_METADATA_LABEL_LONG      1u
+#define SUSAMUNE_METADATA_LABEL_CUSTOM    2u
+
+#define SUSAMUNE_METADATA_FIELD_X         (1u << 0)
+#define SUSAMUNE_METADATA_FIELD_Y         (1u << 1)
+#define SUSAMUNE_METADATA_FIELD_Z         (1u << 2)
+#define SUSAMUNE_METADATA_FIELD_ANGLE     (1u << 3)
+#define SUSAMUNE_METADATA_FIELD_HSPD      (1u << 4)
+#define SUSAMUNE_METADATA_FIELD_VSPD      (1u << 5)
+#define SUSAMUNE_METADATA_FIELD_QF        (1u << 6)
+#define SUSAMUNE_METADATA_FIELD_CANGLE    (1u << 7)
+#define SUSAMUNE_METADATA_FIELD_INVINC    (1u << 8)
+#define SUSAMUNE_METADATA_FIELD_GOOP      (1u << 9)
+#define SUSAMUNE_METADATA_FIELD_SPIN      (1u << 10)
+#define SUSAMUNE_METADATA_FIELD_ALL       ((1u << 11) - 1u)
+
+struct SusamuneMetadataDisplayCfg {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short x;
+    unsigned short y;
+    unsigned short fieldMask;
+    unsigned char  startVisible;
+    unsigned char  scale;
+    unsigned char  labelMode;
+    unsigned char  reserved;
+    char           format[SUSAMUNE_METADATA_FORMAT_SIZE];
+};
+
 // susamune.ini had nothing for the running game version -- either the file is
 // absent entirely, or it has no [settings_<region>] section for this disc. The
 // kernel cannot author defaults itself -- they live in kSettingDescs on the mod
@@ -108,6 +146,8 @@ struct SusamuneInputDisplayCfg {
 // The flag also prevents a new mod from reading stale bytes there when paired
 // with an older launcher that only initialised the shorter struct.
 #define SUSAMUNE_CFG_FLAG_INPUT_DISPLAY 0x2u
+// Kernel understands metadataDisplay and [metadata_display_<region>].
+#define SUSAMUNE_CFG_FLAG_METADATA_DISPLAY 0x4u
 
 struct SusamuneCfg {
     // --- cache line 0: written by the kernel at boot, by the mod on save ---
@@ -131,6 +171,7 @@ struct SusamuneCfg {
     unsigned char  values[SUSAMUNE_CFG_MAX_SETTINGS];
     unsigned short binds[SUSAMUNE_CFG_MAX_BINDS];
     struct SusamuneInputDisplayCfg inputDisplay;
+    struct SusamuneMetadataDisplayCfg metadataDisplay;
 };
 
 #define SUSAMUNE_CFG_PPC_PTR  ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PPC_BASE)
@@ -160,6 +201,9 @@ struct SusamuneCfg {
 // Position, scale, colour and optional numeric pad readout. This cannot use
 // the generic settings table because several values exceed one byte.
 #define SUSAMUNE_INI_SECTION_INPUT_DISPLAY "input_display"
+// Native position/angle/speed/QF overlay. Its `format` key is an optional
+// custom template containing live-value placeholders such as <x> and <HSpd>.
+#define SUSAMUNE_INI_SECTION_METADATA_DISPLAY "metadata_display"
 // settings_jp / binds_pal / ...
 #define SUSAMUNE_INI_SECTION_SEPARATOR  '_'
 
@@ -170,6 +214,8 @@ typedef char susamune_cfg_line2_check[(__builtin_offsetof(struct SusamuneCfg, va
 typedef char susamune_cfg_binds_check[(__builtin_offsetof(struct SusamuneCfg, binds) == 192) ? 1 : -1];
 typedef char susamune_input_cfg_size_check[(sizeof(struct SusamuneInputDisplayCfg) == 32) ? 1 : -1];
 typedef char susamune_cfg_input_check[(__builtin_offsetof(struct SusamuneCfg, inputDisplay) == 320) ? 1 : -1];
+typedef char susamune_metadata_cfg_size_check[(sizeof(struct SusamuneMetadataDisplayCfg) == 256) ? 1 : -1];
+typedef char susamune_cfg_metadata_check[(__builtin_offsetof(struct SusamuneCfg, metadataDisplay) == 352) ? 1 : -1];
 typedef char susamune_cfg_size_check[(sizeof(struct SusamuneCfg) <= SUSAMUNE_MEM2_CFG_SIZE) ? 1 : -1];
 
 #endif  // SUSAMUNE_CFG_H

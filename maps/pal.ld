@@ -851,6 +851,7 @@ indexToPoint__9TGraphWebCFi = 0x8004afe0;
 startIsEnd__9TGraphWebCFv = 0x8004b06c;
 initGoalIndex__9TGraphWebFRC3Vec = 0x8004b0e4;
 calcGraphDirection__9TGraphWebFi = 0x8004b1a8;
+findNearestNodeIndex__9TGraphWebCFRCQ29JGeometry8TVec3Ul = 0x8004b414;
 getRandomNextIndex__9TGraphWebCFiiUl = 0x8004c228;
 getShortestNextIndex__9TGraphWebCFiiUl = 0x8004c380;
 translateNodes__9TGraphWebFP9TRailNode = 0x8004c55c;

@@ -34,6 +34,7 @@ const u16 kA     = JUTGamePad::A;
 const u16 kB     = JUTGamePad::B;
 const u16 kX     = JUTGamePad::X;
 const u16 kY     = JUTGamePad::Y;
+const u16 kR     = JUTGamePad::R;
 const u16 kZ     = JUTGamePad::Z;
 const u16 kStart = JUTGamePad::START;
 const u16 kDUp   = JUTGamePad::DPAD_UP;
@@ -62,6 +63,12 @@ const BindDesc kBindDescs[BIND_COUNT] = {
     // occupy most convenient combinations, and silently colliding is worse
     // than asking the user to choose one.
     { "Toggle input display", 0 },
+    { "Show attempt counter", kDLeft },
+    { "Add attempt", kDRght },
+    { "Attempt -1", (u16)(kR | kX | kDLeft) },
+    { "Attempt +1", (u16)(kR | kX | kDRght) },
+    { "Success -1", (u16)(kR | kX | kDDown) },
+    { "Success +1", (u16)(kR | kX | kDUp) },
 };
 
 int popCount(u16 v) {
