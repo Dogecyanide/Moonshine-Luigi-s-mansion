@@ -15,6 +15,9 @@
 #include "susamune/actions.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
+#include "susamune/attempt_counter.hxx"
+#include "susamune/qft_timer.hxx"
+#include "susamune/pattern_selector.hxx"
 #include "susamune/warp_wheel.hxx"
 #if ENABLE_DEBUG_WARPS
 #include "susamune/debug_warp.hxx"
@@ -49,6 +52,8 @@ extern "C" void* getArenaLo() {
 extern "C" void onAppInit(TApplication* app) {
     app->initialize();
     gSettings.init();
+    gQFTTimer.init();
+    gAttemptCounter.init();
 
 #if !IS_EMULATOR
     // The launcher owns this option because Sunshine cannot persist its own
@@ -85,11 +90,7 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 #if ENABLE_DEBUG_WARPS
     if (Warp::pending()) {
         Warp::execute();
-        // QF timer reset flag
-        if (SUSAMUNE_ADDR_QF_TIMER_RESET != 0) {
-            volatile u8* flag = reinterpret_cast<volatile u8*>(SUSAMUNE_ADDR_QF_TIMER_RESET);
-            *flag = 1;
-        }
+        gQFTTimer.requestReset();
         director->moveStage();
         state = 9;
     }
@@ -108,6 +109,8 @@ extern "C" void onSetup(TMarDirector* director) {
 
     // Runs on every stage load, so this must stay above the once-only guard.
     featuresOnStageLoad();
+    gQFTTimer.onStageSetup(director);
+    gAttemptCounter.onStageSetup(director);
 
     if (inited) return; else inited = true;
 
@@ -131,6 +134,9 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     // otherwise be answered from the previous frame's sample.
     gBinds.update();
     gInputDisplay.update();
+    PatternSelector::update();
+    gQFTTimer.beginFrame();
+    gQFTTimer.update();
     // Before direct(): while the wheel is open it takes the pad away from
     // the game.
     if (!gSettings.getBool(SETTING_DISABLE_WARPS))
@@ -154,6 +160,9 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     }
     if (!gSettings.getBool(SETTING_DISABLE_WARPS))
         state = LevelWarp::onDirected(state);
+
+    gQFTTimer.update();
+    gAttemptCounter.update();
 
     // Apply/restore the toggled memory-patch features (ported gecko codes).
     // Runs every frame like the gecko handler; no-ops when nothing changed.
@@ -191,6 +200,8 @@ extern "C" void afterDraw() {
         
         if (gMenu)
             gMenu->draw(&ortho);
+        if (!gMenu || !gMenu->shown())
+            PatternSelector::draw(gMenu);
         if (!gSettings.getBool(SETTING_DISABLE_WARPS))
             WarpWheel::draw();
 #if ENABLE_SAVESTATE_DBG

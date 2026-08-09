@@ -14,6 +14,7 @@
 #include "susamune/binds.hxx"
 #include "susamune/glyphs.hxx"
 #include "susamune/menu.hxx"
+#include "susamune/qft_timer.hxx"
 #include "susamune/settings.hxx"
 
 namespace {
@@ -37,10 +38,238 @@ LevelWarp::Dest  sDest;
 LevelWarp::Dest  sLast;
 bool             sLastValid;
 bool             sTailPending;
+bool             sClassicInstantHeld;
 
 u8 currentGameInt3() { return (u8)TFlagManager::smInstance->getFlag(0x40003); }
 
+enum ClassicCommand {
+    CLASSIC_NONE,
+    CLASSIC_WARP,
+    CLASSIC_RESTART_KEEP,
+    CLASSIC_RESTART_DEFAULT,
+    CLASSIC_WARP_LAST,
+    CLASSIC_RESTART_PARENT,
+};
+
+const u16 kSelectorMods = JUTGamePad::L | JUTGamePad::R | JUTGamePad::Z |
+                          JUTGamePad::X | JUTGamePad::Y;
+const u16 kInstantBase = JUTGamePad::B | JUTGamePad::DPAD_UP;
+
+// C-stick rows from the familiar Level Select chart: seven main stages,
+// Secrets at up-left and Special in the centre.
+const u8 kMainAreas[7] = { 2, 3, 4, 5, 6, 8, 9 };
+
+const LevelWarp::Dest kSublevels[7] = {
+    { 0x37, 0, 1 },  // Windmill
+    { 0x1e, 0, 1 },  // Blooper race
+    { 0x21, 0, 3 },  // Sand bird
+    { 0x3a, 0, 7 },  // Balloons
+    { 0x0e, 0, 3 },  // Casino (episode 4)
+    { 0x2c, 0, 2 },  // Noki 3 bottle
+    { 0x39, 0, 3 },  // Eel
+};
+
+const LevelWarp::Dest kPlazas[7] = {
+    { 1, 0, 0 },  // Bianco plant
+    { 1, 1, 0 },  // Bianco chase
+    { 1, 5, 0 },  // Ricco / Gelato plants
+    { 1, 2, 0 },  // Peaceful
+    { 1, 7, 0 },  // Pinna cutscene
+    { 1, 8, 0 },  // Yoshi unlock
+    { 1, 9, 0 },  // Flooded plaza
+};
+
+// The two extra selector rows present in sup39's source but easy to miss on
+// the compact chart: X+Z selects Pinna Park scenarios, Y+Z Sirena Hotel.
+const LevelWarp::Dest kPinnaPark[7] = {
+    { 0x0d, 0, 0 }, { 0x0d, 1, 2 }, { 0x0d, 2, 4 }, { 0x0d, 3, 5 },
+    { 0x0d, 4, 6 }, { 0x0d, 5, 7 }, { 0x0d, 7, 0 },
+};
+
+const LevelWarp::Dest kSirenaHotel[7] = {
+    { 0x07, 0, 1 }, { 0x07, 1, 2 }, { 0x07, 2, 3 }, { 0x07, 2, 4 },
+    { 0x07, 3, 6 }, { 0x07, 4, 7 }, { 0x07, 0, 0 },
+};
+
+struct ModifierDest {
+    u16             mods;
+    LevelWarp::Dest dest;
+};
+
+const ModifierDest kSecrets[] = {
+    { 0,                         { 0x2f, 0, 2 } },
+    { JUTGamePad::L,             { 0x2e, 0, 5 } },
+    { JUTGamePad::R,             { 0x30, 0, 3 } },
+    { JUTGamePad::L | JUTGamePad::R, { 0x20, 0, 0 } },
+    { JUTGamePad::Z,             { 0x32, 0, 1 } },
+    { JUTGamePad::Z | JUTGamePad::L, { 0x29, 0, 5 } },
+    { JUTGamePad::Z | JUTGamePad::R, { 0x33, 0, 1 } },
+    { JUTGamePad::Z | JUTGamePad::L | JUTGamePad::R, { 0x28, 0, 3 } },
+    { JUTGamePad::X,             { 0x2a, 0, 4 } },
+    { JUTGamePad::X | JUTGamePad::L, { 0x1f, 0, 5 } },
+    { JUTGamePad::Y,             { 0x3a, 1, 0 } },
+    { JUTGamePad::Y | JUTGamePad::L, { 0x3c, 0, 0 } },
+};
+
+const ModifierDest kSpecials[] = {
+    { JUTGamePad::L,             { 0x14, 0, 0 } },
+    { JUTGamePad::R,             { 0x15, 0, 0 } },
+    { JUTGamePad::L | JUTGamePad::R, { 0x16, 0, 0 } },
+    { JUTGamePad::Z | JUTGamePad::L, { 0x17, 0, 0 } },
+    { JUTGamePad::Z | JUTGamePad::R, { 0x18, 0, 0 } },
+    { JUTGamePad::Z | JUTGamePad::L | JUTGamePad::R, { 0x1d, 0, 0 } },
+    { JUTGamePad::X,             { 0x34, 0, 0 } },
+    { JUTGamePad::X | JUTGamePad::L, { 0x00, 0, 0 } },
+    { JUTGamePad::Y | JUTGamePad::L, { 0x10, 0, 7 } },
+};
+
+int selectorStickSlot(TMarioGamePad *pad) {
+    const f32 x = pad->mCStick.mStickX;
+    const f32 y = pad->mCStick.mStickY;
+    if (x * x + y * y < 0.25f) {
+        return 8;
+    }
+
+    // Eight 45-degree wedges, clockwise from up. Avoid atan2f: this runs in
+    // the stage-exit path too, and the integer comparisons are deterministic
+    // at the diagonals runners are used to holding.
+    const f32 ax = x < 0.0f ? -x : x;
+    const f32 ay = y < 0.0f ? -y : y;
+    if (ay > ax * 2.41421356f) return y > 0.0f ? 0 : 4;
+    if (ax > ay * 2.41421356f) return x > 0.0f ? 2 : 6;
+    if (x > 0.0f) return y > 0.0f ? 1 : 3;
+    return y > 0.0f ? 7 : 5;
+}
+
+bool findModifierDest(const ModifierDest *table, u32 count, u16 mods,
+                      LevelWarp::Dest *dest) {
+    for (u32 i = 0; i < count; i++) {
+        if (table[i].mods == mods) {
+            *dest = table[i].dest;
+            return true;
+        }
+    }
+    return false;
+}
+
+ClassicCommand resolveClassicSelector(TMarioGamePad *pad, bool instant,
+                                      LevelWarp::Dest *dest) {
+    u16 buttons = JUTGamePad::mPadStatus[0].mButton;
+    const u16 allowed = (u16)(kSelectorMods | (instant ? kInstantBase : 0));
+    if ((buttons & ~allowed) != 0) {
+        return CLASSIC_NONE;
+    }
+    if (instant && (buttons & kInstantBase) != kInstantBase) {
+        return CLASSIC_NONE;
+    }
+    const u16 mods = (u16)(buttons & kSelectorMods);
+    const int slot = selectorStickSlot(pad);
+
+    if (slot < 7) {
+        if (mods == (JUTGamePad::X | JUTGamePad::Z) ||
+            mods == (JUTGamePad::X | JUTGamePad::Z | JUTGamePad::L)) {
+            *dest = kPinnaPark[slot];
+            return CLASSIC_WARP;
+        }
+        if (mods == (JUTGamePad::Y | JUTGamePad::Z) ||
+            mods == (JUTGamePad::Y | JUTGamePad::Z | JUTGamePad::L)) {
+            *dest = kSirenaHotel[slot];
+            return CLASSIC_WARP;
+        }
+        if (mods == JUTGamePad::X || mods == (JUTGamePad::X | JUTGamePad::L)) {
+            *dest = kSublevels[slot];
+            return CLASSIC_WARP;
+        }
+        if (mods == JUTGamePad::Y || mods == (JUTGamePad::Y | JUTGamePad::L)) {
+            *dest = kPlazas[slot];
+            return CLASSIC_WARP;
+        }
+
+        int episode = -1;
+        switch (mods) {
+        case 0: episode = 0; break;
+        case JUTGamePad::L: episode = 1; break;
+        case JUTGamePad::R: episode = 2; break;
+        case JUTGamePad::L | JUTGamePad::R: episode = 3; break;
+        case JUTGamePad::Z: episode = 4; break;
+        case JUTGamePad::Z | JUTGamePad::L: episode = 5; break;
+        case JUTGamePad::Z | JUTGamePad::R: episode = 6; break;
+        case JUTGamePad::Z | JUTGamePad::L | JUTGamePad::R: episode = 7; break;
+        }
+        if (episode >= 0) {
+            dest->area = kMainAreas[slot];
+            dest->episode = (u8)episode;
+            dest->gameInt3 = (u8)episode;
+            return CLASSIC_WARP;
+        }
+        return CLASSIC_NONE;
+    }
+
+    if (slot == 7) {
+        return findModifierDest(kSecrets, sizeof(kSecrets) / sizeof(kSecrets[0]),
+                                mods, dest) ? CLASSIC_WARP : CLASSIC_NONE;
+    }
+
+    // Centre-stick commands differ slightly between the original transition
+    // selector and Instant Level Select, just as the chart documents.
+    if (instant && mods == 0) return CLASSIC_RESTART_KEEP;
+    if (mods == JUTGamePad::Z) return CLASSIC_RESTART_DEFAULT;
+    if (instant && mods == JUTGamePad::Y) return CLASSIC_WARP_LAST;
+    if (!instant && mods == JUTGamePad::Y) return CLASSIC_RESTART_PARENT;
+
+    return findModifierDest(kSpecials, sizeof(kSpecials) / sizeof(kSpecials[0]),
+                            mods, dest) ? CLASSIC_WARP : CLASSIC_NONE;
+}
+
+LevelWarp::Dest currentDest(bool parent) {
+    const TGameSequence &cur = gpApplication.mCurrentScene;
+    LevelWarp::Dest dest = { cur.mAreaID, cur.mEpisodeID, currentGameInt3() };
+    if (!parent) {
+        return dest;
+    }
+
+    // Y in the transition selector returns sublevels to their parent beach;
+    // Z keeps the exact area. Main stages and standalone specials stay put.
+    switch (cur.mAreaID) {
+    case 0x37: case 0x2f: case 0x2e: dest.area = 2; break;
+    case 0x3b: case 0x1e: case 0x30: dest.area = 3; break;
+    case 0x20: case 0x21:            dest.area = 4; break;
+    case 0x3a: case 0x32: case 0x29: dest.area = 5; break;
+    case 0x33: case 0x28: case 0x38:
+    case 0x07: case 0x0e:            dest.area = 6; break;
+    case 0x2a:                       dest.area = 8; break;
+    case 0x2c: case 0x39: case 0x1f:
+    case 0x10:                       dest.area = 9; break;
+    default: return dest;
+    }
+    dest.episode = dest.gameInt3;
+    return dest;
+}
+
+bool updateClassicInstant(TMarioGamePad *pad) {
+    const u16 buttons = JUTGamePad::mPadStatus[0].mButton;
+    const bool held = (buttons & kInstantBase) == kInstantBase;
+    if (!held) {
+        sClassicInstantHeld = false;
+        return false;
+    }
+    if (sClassicInstantHeld) {
+        return false;
+    }
+    sClassicInstantHeld = true;
+
+    LevelWarp::Dest dest;
+    switch (resolveClassicSelector(pad, true, &dest)) {
+    case CLASSIC_WARP:            LevelWarp::warpTo(dest); return true;
+    case CLASSIC_RESTART_KEEP:    LevelWarp::restart(true); return true;
+    case CLASSIC_RESTART_DEFAULT: LevelWarp::restart(false); return true;
+    case CLASSIC_WARP_LAST:       LevelWarp::warpToLast(); return true;
+    default: return false;
+    }
+}
+
 void markQuickFreezeReset() {
+    gQFTTimer.requestReset();
     if (SUSAMUNE_ADDR_QF_TIMER_RESET != 0) {
         *(volatile u8 *)SUSAMUNE_ADDR_QF_TIMER_RESET = 1;
     }
@@ -135,6 +364,26 @@ s32 onDirected(s32 appState) {
         sTailPending = false;
         applyDest(sDest);
         return TApplication::CONTEXT_DIRECT_STAGE;
+    }
+
+    // Original Level Select: while an ordinary file/stage departure finishes,
+    // a held chart combination redirects the next scene. Instant Level Select
+    // uses the same resolver earlier in WarpWheel::update().
+    if (appState > 1 && gpApplication.mGamePads[0]) {
+        Dest selected;
+        ClassicCommand command =
+            resolveClassicSelector(gpApplication.mGamePads[0], false, &selected);
+        if (command == CLASSIC_RESTART_DEFAULT) {
+            selected = currentDest(false);
+            command = CLASSIC_WARP;
+        } else if (command == CLASSIC_RESTART_PARENT) {
+            selected = currentDest(true);
+            command = CLASSIC_WARP;
+        }
+        if (command == CLASSIC_WARP) {
+            applyDest(selected);
+            return TApplication::CONTEXT_DIRECT_STAGE;
+        }
     }
 
     if (appState > 1 && gSettings.getBool(SETTING_AREA_LOCK)) {
@@ -488,7 +737,10 @@ void update(TMarioGamePad *pad) {
         return;
     }
 
-    if (gBinds.wasPressed(BIND_INSTANT_RESTART)) {
+    if (updateClassicInstant(pad)) {
+        // The chart combo owns this press. In particular, C-up+B+D-up means
+        // Bianco 1 rather than the bare B+D-up restart bind.
+    } else if (gBinds.wasPressed(BIND_INSTANT_RESTART)) {
         LevelWarp::restart(true);
     } else if (gBinds.wasPressed(BIND_FULL_RESTART)) {
         LevelWarp::restart(false);

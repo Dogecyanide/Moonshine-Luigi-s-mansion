@@ -15,7 +15,7 @@ public:
 
     void clean(f32 x, f32 y, f32 z, f32 r);
     bool cleanedAll() const;
-    f32 getPollutionDegree() const;
+    u32 getPollutionDegree() const;
     u32 getPollutionType(f32 x, f32 y, f32 z) const;
     bool isPolluted(f32 x, f32 y, f32 z) const;
     void setDataAddress(TPollutionInfo *info);

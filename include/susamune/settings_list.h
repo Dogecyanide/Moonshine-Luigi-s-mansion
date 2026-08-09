@@ -71,7 +71,34 @@
     /* -- UI -- */                                                            \
     X(SETTING_SHOW_BGM_SLOTS,       "show_bgm_slots")                        \
     /* -- Appended settings (keep persisted indices stable) -- */             \
-    X(SETTING_DISABLE_THIRD_CHOMPLET_AGGRO, "disable_third_chomplet_aggro")
+    X(SETTING_DISABLE_THIRD_CHOMPLET_AGGRO, "disable_third_chomplet_aggro")   \
+    /* -- Timer -- */                                                         \
+    X(SETTING_TIMER_SUNSHINE_VISIBILITY, "timer_sunshine_visibility")         \
+    X(SETTING_TIMER_QFT_VISIBILITY,      "timer_qft_visibility")              \
+    X(SETTING_TIMER_FREEZE_DURATION,     "timer_freeze_duration")             \
+    X(SETTING_TIMER_FREEZE_YELLOW_COIN,  "timer_freeze_yellow_coin")          \
+    X(SETTING_TIMER_FREEZE_RED_COIN,     "timer_freeze_red_coin")             \
+    X(SETTING_TIMER_FREEZE_BLUE_COIN,    "timer_freeze_blue_coin")            \
+    X(SETTING_TIMER_FREEZE_ITEM,         "timer_freeze_item")                 \
+    X(SETTING_TIMER_FREEZE_TALK,         "timer_freeze_talk")                 \
+    X(SETTING_TIMER_FREEZE_DEMO,         "timer_freeze_demo")                 \
+    X(SETTING_TIMER_FREEZE_CLEANED,      "timer_freeze_cleaned")              \
+    X(SETTING_TIMER_FREEZE_BOWSER,       "timer_freeze_bowser")               \
+    X(SETTING_TIMER_FREEZE_YOSHI,        "timer_freeze_yoshi")                \
+    X(SETTING_TIMER_FREEZE_TAKE,         "timer_freeze_take")                 \
+    X(SETTING_TIMER_FREEZE_DROP,         "timer_freeze_drop")                 \
+    X(SETTING_TIMER_FREEZE_PUT,          "timer_freeze_put")                  \
+    X(SETTING_TIMER_FREEZE_TRIPLE_JUMP,  "timer_freeze_triple_jump")          \
+    X(SETTING_TIMER_FREEZE_SPIN_JUMP,    "timer_freeze_spin_jump")            \
+    X(SETTING_TIMER_FREEZE_LEDGE_GRAB,   "timer_freeze_ledge_grab")           \
+    X(SETTING_TIMER_FREEZE_WALL_KICK,    "timer_freeze_wall_kick")            \
+    X(SETTING_TIMER_FREEZE_ROPE_JUMP,    "timer_freeze_rope_jump")            \
+    X(SETTING_TIMER_FREEZE_BOUNCE,       "timer_freeze_bounce")              \
+    /* -- Attempt counter (append-only persisted ids) -- */                  \
+    X(SETTING_ATTEMPT_COUNTER,           "attempt_counter")                  \
+    X(SETTING_ATTEMPT_IN_STAGE_CONTROLS, "attempt_in_stage_controls")       \
+    /* -- Pattern selector (append-only persisted id) -- */                  \
+    X(SETTING_PATTERN_SELECTOR,          "pattern_selector")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

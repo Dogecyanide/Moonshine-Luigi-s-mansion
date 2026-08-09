@@ -15,6 +15,9 @@
 #include "susamune/binds.hxx"
 #include "susamune/glyphs.hxx"
 #include "susamune/input_display.hxx"
+#include "susamune/metadata_display.hxx"
+#include "susamune/attempt_counter.hxx"
+#include "susamune/qft_timer.hxx"
 #include "susamune/settings.hxx"
 #if ENABLE_DEBUG_WARPS
 #include "susamune/debug_warp.hxx"
@@ -107,13 +110,24 @@ public:
 protected:
     void drawScrollHints(Menu *menu, int x, int y, int w, int h, int start, int end,
                          int count) {
+        const int cx = x + w - 7;
         if (start > 0) {
-            menu->drawText(SUSAMUNE_GLYPH_UP, x + w - 12, y - ROW_H + 2,
-                           ROW_SZ, ROW_SZ, cRowDim());
+            const int top = y - ROW_H + 5;
+            const s16 up[6] = {
+                (s16)cx,       (s16)top,
+                (s16)(cx - 6), (s16)(top + 9),
+                (s16)(cx + 6), (s16)(top + 9)
+            };
+            menu->fillPoly(up, 3, cRowDim());
         }
         if (end < count) {
-            menu->drawText(SUSAMUNE_GLYPH_DOWN, x + w - 12, y + h - ROW_SZ,
-                           ROW_SZ, ROW_SZ, cRowDim());
+            const int top = y + h - ROW_SZ + 2;
+            const s16 down[6] = {
+                (s16)(cx - 6), (s16)top,
+                (s16)(cx + 6), (s16)top,
+                (s16)cx,       (s16)(top + 9)
+            };
+            menu->fillPoly(down, 3, cRowDim());
         }
     }
 };
@@ -433,6 +447,70 @@ private:
 };
 
 // ---------------------------------------------------------------------
+// Metadata Display tab
+// ---------------------------------------------------------------------
+class MetadataDisplayTab : public MenuTab {
+public:
+    MetadataDisplayTab() : mSel(0) {}
+
+    const char *title() const override { return "Metadata"; }
+    bool grabsInput() const override { return gMetadataDisplay.editing(); }
+    bool fullScreen() const override { return gMetadataDisplay.editing(); }
+
+    void update(Menu *menu, TMarioGamePad *pad) override {
+        if (gMetadataDisplay.editing()) {
+            gMetadataDisplay.updateEditor(pad);
+            return;
+        }
+
+        u32 rapid = pad->mButtons.mRapidInput;
+        if (rapid & TMarioGamePad::CSTICK_UP) {
+            mSel = wrap(mSel - 1, MetadataDisplay::menuRowCount());
+        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+            mSel = wrap(mSel + 1, MetadataDisplay::menuRowCount());
+        }
+        if ((rapid & TMarioGamePad::A) || (rapid & TMarioGamePad::CSTICK_RIGHT)) {
+            gMetadataDisplay.adjustMenuRow(mSel, +1);
+        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            gMetadataDisplay.adjustMenuRow(mSel, -1);
+        }
+    }
+
+    void draw(Menu *menu, int x, int y, int w, int h) override {
+        if (gMetadataDisplay.editing()) {
+            gMetadataDisplay.drawEditor(menu);
+            return;
+        }
+
+        const int hintY = y + h - FOOT_SZ;
+        h -= ROW_H;
+        int count = MetadataDisplay::menuRowCount();
+        int maxRows = h / ROW_H;
+        int start = listScrollStart(mSel, count, maxRows);
+        int end = start + maxRows;
+        if (end > count) end = count;
+
+        int ry = y;
+        for (int i = start; i < end; i++) {
+            bool selected = i == mSel;
+            if (selected) drawRowHighlight(menu, x, ry, w, ROW_H);
+            menu->drawText(MetadataDisplay::menuRowName(i), x + 4, ry,
+                           ROW_SZ, ROW_SZ, selected ? cRowSel() : cRow());
+            const char *val = gMetadataDisplay.menuRowValue(i);
+            int vx = x + w - Menu::textWidth(val, ROW_SZ) - 8;
+            menu->drawText(val, vx, ry, ROW_SZ, ROW_SZ, cValue());
+            ry += ROW_H;
+        }
+        drawScrollHints(menu, x, y, w, h, start, end, count);
+        menu->drawText("Custom text: edit metadata_display in susamune.ini",
+                       x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+private:
+    int mSel;
+};
+
+// ---------------------------------------------------------------------
 // Binds tab
 //
 // One row per BindId. A on a row arms gBinds' recorder, which watches the
@@ -548,7 +626,9 @@ u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
 u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
 u8 sSavestateBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sUiBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
+u8 sTimerBuf[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
 u8 sInputBuf[sizeof(InputDisplayTab)]           __attribute__((aligned(8)));
+u8 sMetadataBuf[sizeof(MetadataDisplayTab)]     __attribute__((aligned(8)));
 u8 sBindsBuf[sizeof(BindsTab)]                 __attribute__((aligned(8)));
 }  // namespace
 
@@ -601,7 +681,9 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab("Misc", SETTING_CAT_MISC);
     mTabs[mNumTabs++] = new (sSavestateBuf) CategorySettingsTab("Savestate", SETTING_CAT_SAVESTATE);
     mTabs[mNumTabs++] = new (sUiBuf) CategorySettingsTab("UI", SETTING_CAT_UI);
+    mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab("Timer", SETTING_CAT_TIMER);
     mTabs[mNumTabs++] = new (sInputBuf) InputDisplayTab();
+    mTabs[mNumTabs++] = new (sMetadataBuf) MetadataDisplayTab();
     mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
 }
 
@@ -871,7 +953,7 @@ void Menu::update(TMarioGamePad *pad) {
         // Closing with edits pending writes them back to the SD card. Gated on
         // dirty() so merely opening and closing the menu never touches storage.
         if (!mShown && (gSettings.dirty() || gBinds.dirty() ||
-                        gInputDisplay.dirty())) {
+                        gInputDisplay.dirty() || gMetadataDisplay.dirty())) {
             requestSettingsSave();
         }
         return;
@@ -894,6 +976,9 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     mOrtho = ortho;  // used by fillBox() to re-enter 2D state
     if (!mShown) {
         gInputDisplay.draw(this);
+        gMetadataDisplay.draw(this);
+        gQFTTimer.draw(this);
+        gAttemptCounter.draw(this);
         drawToast();  // still visible with the menu closed
         bgmStatsDraw(this);
         return;

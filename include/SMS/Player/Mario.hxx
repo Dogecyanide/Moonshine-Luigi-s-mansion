@@ -836,7 +836,7 @@ public:
     f32 checkRoofPlane(const Vec &, f32, const TBGCheckData **);
     void checkSink();
     bool checkStatusType(s32) const;
-    bool checkStickRotate(int *out);
+    int checkStickRotate(int *out);
     bool checkSwimJump();
     void checkThrowObject();
     void checkWallPlane(Vec *pos, f32 width, f32 height);

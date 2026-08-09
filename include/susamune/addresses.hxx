@@ -61,10 +61,23 @@
 #define SUSAMUNE_ADDR_TIME_REC_INSTANCE \
     SUSAMUNE_MEM1_ADDR(0x8040a2f8u, 0x8040e1c8u, 0x804058a0u)
 
+// Enemy vtables used by Pattern Selector. The original Gecko code compares
+// these same two values at TSpineEnemy::goToRandomNextGraphNode + 0x50.
+#define SUSAMUNE_VT_FIRE_WANWAN \
+    SUSAMUNE_MEM1_ADDR(0x803d87c0u, 0x803b3f88u, 0x803abda8u)
+#define SUSAMUNE_VT_BOSS_WANWAN \
+    SUSAMUNE_MEM1_ADDR(0x803da9c0u, 0x803b6178u, 0x803adf98u)
+
+// TGraphWeb::findNearestNodeIndex. This symbol is absent from the project's
+// generated linker scripts in some checkouts, so Pattern Selector calls the
+// verified retail address directly instead of depending on a linker alias.
+#define SUSAMUNE_ADDR_GRAPH_FIND_NEAREST_NODE \
+    SUSAMUNE_MEM1_ADDR(0x8025f410u, 0x8004c2c0u, 0x8004b414u)
+
 // Arena window reserved for the injected mod.
 #define SUSAMUNE_ADDR_MOD_BASE \
     SUSAMUNE_MEM1_ADDR(0x80426020u, 0x80429800u, 0x80420d60u)
-#define SUSAMUNE_MOD_REGION_SIZE 0x8000u
+#define SUSAMUNE_MOD_REGION_SIZE 0x10000u
 #define SUSAMUNE_SCRATCH 0x40u // idk
 #define SUSAMUNE_MOD_BLOB_MAX_SIZE (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
 
@@ -83,7 +96,7 @@
     SUSAMUNE_MEM1_ADDR(0x817f00b3u, 0x817f00b3u, 0x817f00b3u)
 
 // Scratch for the mod's asm caves. A cave can only reach a *fixed* address --
-// it has no way to find a mod global -- so this is the top 16 bytes of the
+// it has no way to find a mod global -- so this is the final 64 bytes of the
 // mod's own reserved arena window, [arena_lo, arena_lo + mod_region_size) from
 // scripts/patches.py, which getArenaLo() keeps the game's heap out of. The
 // blob starts at arena_lo; link_mod.py enforces mod_blob_max_size (this
@@ -101,5 +114,29 @@
 // One word: the frame of the last TShine::touchPlayer, for No Shine Get
 // Animation's debounce (features.cpp).
 #define SUSAMUNE_ADDR_SHINE_TOUCH_FRAME (SUSAMUNE_ADDR_MOD_SCRATCH + 0x0u)
+
+// Monotonic shine-grab event serial shared by the winDemo call-site hook and
+// No Shine Get Animation's replacement cave. AttemptCounter polls it after
+// the director update, so both paths report the same event without touching
+// the game's or Gecko's storage.
+#define SUSAMUNE_ADDR_ATTEMPT_SHINE_SERIAL \
+    (SUSAMUNE_ADDR_MOD_SCRATCH + 0x4u)
+
+// Monotonic count of moveStage calls where the game's current and previous
+// scenes differ, sampled at the same instruction as the original Gecko
+// Attempt Counter. Sampling later sees the newly selected episode and falsely
+// treats entering it as a success.
+#define SUSAMUNE_ADDR_ATTEMPT_DEPARTURE_SERIAL \
+    (SUSAMUNE_ADDR_MOD_SCRATCH + 0x8u)
+
+// Sixteen-byte native QFT state. Fixed scratch is used because the timer's
+// tiny regional asm hooks cannot address a linker-placed C++ global.
+#define SUSAMUNE_ADDR_QFT_STATE (SUSAMUNE_ADDR_MOD_SCRATCH + 0x10u)
+#define SUSAMUNE_QFT_STATE_STOP_OFF          0x0u
+#define SUSAMUNE_QFT_STATE_RESTART_OFF       0x1u
+#define SUSAMUNE_QFT_STATE_STOP_REASON_OFF   0x2u
+#define SUSAMUNE_QFT_STATE_OFFSET_OFF        0x4u
+#define SUSAMUNE_QFT_STATE_FREEZE_QF_OFF     0x8u
+#define SUSAMUNE_QFT_STATE_FREEZE_FRAMES_OFF 0xCu
 
 #endif // SUSAMUNE_ADDRESSES_HXX

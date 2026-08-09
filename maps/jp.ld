@@ -7926,6 +7926,7 @@ indexToPoint__9TGraphWebCFi = 0x8025efdc;
 startIsEnd__9TGraphWebCFv = 0x8025f068;
 initGoalIndex__9TGraphWebFRC3Vec = 0x8025f0e0;
 calcGraphDirection__9TGraphWebFi = 0x8025f1a4;
+findNearestNodeIndex__9TGraphWebCFRCQ29JGeometry8TVec3Ul = 0x8025f410;
 getRandomNextIndex__9TGraphWebCFiiUl = 0x80260224;
 getShortestNextIndex__9TGraphWebCFiiUl = 0x8026037c;
 translateNodes__9TGraphWebFP9TRailNode = 0x80260558;

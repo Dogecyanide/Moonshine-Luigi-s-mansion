@@ -58,6 +58,7 @@
 #include "susamune/addresses.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/mem2_map.h"
+#include "susamune/qft_timer.hxx"
 #include "susamune/settings.hxx"
 #if ENABLE_SAVESTATE_DBG
 #endif
@@ -513,6 +514,7 @@ bool SavestateManager::saveState() {
     unmuteAudioDma(dma);
     OSRestoreInterrupts(ints);
 
+    gQFTTimer.onSavestateSaved();
     SET_STATUS("saved");
     return true;
 }
@@ -640,14 +642,29 @@ bool SavestateManager::loadState() {
     unmuteAudioDma(dma);
     OSRestoreInterrupts(ints);
 
+    gQFTTimer.onSavestateLoaded();
     SET_STATUS("loaded");
     return true;
 }
 
 void SavestateManager::updateHook() {
-    if (gBinds.wasPressed(BIND_SAVESTATE_SAVE)) {
+    // The original optional in-stage counter uses bare D-pad Left/Right, the
+    // same defaults as full savestates. When that option is explicitly on and
+    // the live binds actually collide, the counter owns those two presses;
+    // rebinding either action removes the suppression automatically.
+    const bool counterControls =
+        gSettings.getBool(SETTING_ATTEMPT_COUNTER) &&
+        gSettings.getBool(SETTING_ATTEMPT_IN_STAGE_CONTROLS);
+    const bool counterOwnsSave =
+        counterControls && gBinds.get(BIND_ATTEMPT_SHOW) != 0 &&
+        gBinds.get(BIND_ATTEMPT_SHOW) == gBinds.get(BIND_SAVESTATE_SAVE);
+    const bool counterOwnsLoad =
+        counterControls && gBinds.get(BIND_ATTEMPT_ADD) != 0 &&
+        gBinds.get(BIND_ATTEMPT_ADD) == gBinds.get(BIND_SAVESTATE_LOAD);
+
+    if (!counterOwnsSave && gBinds.wasPressed(BIND_SAVESTATE_SAVE)) {
         saveState();
-    } else if (gBinds.wasPressed(BIND_SAVESTATE_LOAD)) {
+    } else if (!counterOwnsLoad && gBinds.wasPressed(BIND_SAVESTATE_LOAD)) {
         // TApplication still runs the fader and gpMSound->mainLoop(), then
         // submits the rest of the frame after this hook returns. Restoring here
         // made those systems consume half-live/half-restored state. Defer the

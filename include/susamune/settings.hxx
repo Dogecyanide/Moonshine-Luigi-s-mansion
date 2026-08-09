@@ -45,6 +45,7 @@ enum SettingCategory {
     SETTING_CAT_MISC,
     SETTING_CAT_COSMETIC,
     SETTING_CAT_UI,
+    SETTING_CAT_TIMER,
     SETTING_CAT_COUNT
 };
 

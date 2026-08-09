@@ -12,6 +12,10 @@ patches = [
     {'jp': 0x800f9b64, 'us': 0x802a6160, 'pal': 0x8029e070, 'sym': 'onUpdate', 'type': PatchType.BL, 'nop_count': 3},
     # direct__12TMarDirectorFv + 0x80: setupObjects() call.
     {'jp': 0x800ece3c, 'us': 0x802998b8, 'pal': 0x80291750, 'sym': 'onSetup', 'type': PatchType.BL},
+    # TMario::winDemo + 0x88: preserve fireGetStar while publishing one
+    # attempt-counter event. No Shine Get Animation temporarily replaces this
+    # call site and publishes the same event from its cave.
+    {'jp': 0x80120540, 'us': 0x80241400, 'pal': 0x8023918c, 'sym': 'onFireGetStar', 'type': PatchType.BL},
     # gameLoop__12TApplicationFv + 0x3bc: THPPlayerDrawDone() call.
     {'jp': 0x800f9d10, 'us': 0x802a630c, 'pal': 0x8029e21c, 'sym': 'afterDraw', 'type': PatchType.BL},
     # main + 0x1c: the gpApplication.initialize() call. main() is just
@@ -33,6 +37,11 @@ patches = [
     # Report a raised arena floor so the root heap starts above the mod's
     # region (see getArenaLo in src/main.cpp). Replaces OSGetArenaLo's body.
     {'jp': 0x8008dcbc, 'us': 0x8034339c, 'pal': 0x8033b51c, 'sym': 'getArenaLo', 'type': PatchType.B},
+    # Replace TSpineEnemy::goToRandomNextGraphNode with a native wrapper. It
+    # preserves the original path for every enemy, only selecting a fixed
+    # Chomplet / Chain Chomp graph node when Pattern Selector is enabled.
+    {'jp': 0x8024f2dc, 'us': 0x8003b6ac, 'pal': 0x8003b4fc,
+     'sym': 'susamuneGoToRandomNextGraphNode', 'type': PatchType.B},
 ]
 
 # The mod is linked into a region carved from the BOTTOM of the game's heap
@@ -50,7 +59,7 @@ arena_lo = {
 # Size of the carved region. Comes out of the ~19 MiB heap, so it can be
 # generous; the mod must fit within it. MUST match
 # SUSAMUNE_MOD_REGION_SIZE in addresses.hxx.
-mod_region_size = 0x8000
+mod_region_size = 0x10000
 
 # Tail of the region reserved for the asm caves' fixed-address scratch, which
 # the blob must not grow into. MUST match SUSAMUNE_SCRATCH in addresses.hxx.

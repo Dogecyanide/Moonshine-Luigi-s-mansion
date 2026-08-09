@@ -13,6 +13,7 @@
 #include "Dolphin/OS.h"  // DCInvalidateRange, DCStoreRange
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
+#include "susamune/metadata_display.hxx"
 #include "susamune/susamune_cfg.h"
 
 namespace {
@@ -22,6 +23,11 @@ namespace {
 // behaviour for the corresponding gecko code.
 const char *const kFluddLabels[3]  = { "Completed", "No FLUDD", "All secrets" };
 const char *const kNozzleLabels[4] = { "Unlocked", "Rocket", "Turbo", "Hover" };
+const char *const kSunshineTimerLabels[3] = { "Always", "Shine only", "Hidden" };
+const char *const kQftVisibilityLabels[3]  = { "Always", "On freeze", "Hidden" };
+const char *const kFreezeDurationLabels[6] = {
+    "Off", "0.5 s", "1 s", "2 s", "3 s", "5 s"
+};
 
 #define SBOOL(name, def, cat) { name, nullptr, 2, def, cat }
 #define SCHOICE(name, def, labels, cat) \
@@ -82,7 +88,41 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     SBOOL("Show BGM slot counter", 0, SETTING_CAT_UI),
 
     // Appended settings keep their persisted indices stable.
-    SBOOL("Disable 3rd Chomplet aggro", 0, SETTING_CAT_QOL)
+    SBOOL("Disable 3rd Chomplet aggro", 0, SETTING_CAT_QOL),
+
+    // Timer presentation and QFT's established freeze-event configuration.
+    // A temporary freeze snapshots the compact display only; the accurate
+    // clock and Sunshine HUD continue running in the background.
+    SCHOICE("Sunshine timer", 0, kSunshineTimerLabels, SETTING_CAT_TIMER),
+    SCHOICE("Bottom-left QFT", 1, kQftVisibilityLabels, SETTING_CAT_TIMER),
+    SCHOICE("Freeze duration", 2, kFreezeDurationLabels, SETTING_CAT_TIMER),
+    SBOOL("Freeze: yellow coin", 0, SETTING_CAT_TIMER),
+    SBOOL("Freeze: red coin", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: blue coin", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: item", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: talk", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: demo", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: clean event", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: Bowser event", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: mount Yoshi", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: take object", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: drop object", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: put object", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: triple jump", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: spin jump", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: ledge grab", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: wall kick", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: rope jump", 1, SETTING_CAT_TIMER),
+    SBOOL("Freeze: bounce", 1, SETTING_CAT_TIMER),
+
+    // Kept off by default like the generator's optional counter. The bare
+    // D-pad shortcuts are a separate opt-in because they share Susamune's
+    // default save/load buttons.
+    SBOOL("Attempt counter", 0, SETTING_CAT_MISC),
+    SBOOL("In-stage counter controls", 0, SETTING_CAT_MISC),
+
+    // Native version of sup39's Pianta 1 / Pianta 4 Pattern Selector.
+    SBOOL("Pattern selector", 0, SETTING_CAT_MISC)
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'
@@ -105,6 +145,7 @@ void Settings::resetDefaults() {
     // recorder live in binds.* -- see binds.hxx.
     gBinds.resetDefaults();
     gInputDisplay.resetDefaults();
+    gMetadataDisplay.resetDefaults();
 
     mData.magic   = kSettingsMagic;
     mData.version = kSettingsVersion;
@@ -137,6 +178,7 @@ void Settings::save() {
     mDirty     = false;
     gBinds.clearDirty();
     gInputDisplay.clearDirty();
+    gMetadataDisplay.clearDirty();
 }
 
 SettingsSaveState Settings::pollSave() { return mSaveState; }
@@ -195,6 +237,9 @@ void Settings::init() {
     if (cfg->flags & SUSAMUNE_CFG_FLAG_INPUT_DISPLAY) {
         gInputDisplay.adopt(&cfg->inputDisplay);
     }
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_METADATA_DISPLAY) {
+        gMetadataDisplay.adopt(&cfg->metadataDisplay);
+    }
 
     // set() marks dirty; adopting persisted values is not a user edit.
     mDirty     = false;
@@ -236,12 +281,15 @@ void Settings::save() {
 
     gInputDisplay.stageInto(&cfg->inputDisplay);
     gInputDisplay.clearDirty();
+    gMetadataDisplay.stageInto(&cfg->metadataDisplay);
+    gMetadataDisplay.clearDirty();
 
     // Publish the payload before the doorbell, so the kernel can never see a
     // bumped saveSeq alongside a half-written values[]/binds[]. Both live in
     // the same mod-owned run of cache lines starting at values[].
     DCStoreRange((void *)cfg->values,
-                 sizeof(cfg->values) + sizeof(cfg->binds) + sizeof(cfg->inputDisplay));
+                 sizeof(cfg->values) + sizeof(cfg->binds) + sizeof(cfg->inputDisplay) +
+                 sizeof(cfg->metadataDisplay));
 
     mSaveSeq     = cfg->saveSeq + 1;
     cfg->saveSeq = mSaveSeq;

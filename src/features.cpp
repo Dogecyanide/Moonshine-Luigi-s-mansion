@@ -505,12 +505,33 @@ u32 gCaveFreePause[] = {
 // to be patched into every lis/ori that references it.
 #define SHINE_TOUCH_LIS (0x3D800000u | (SUSAMUNE_ADDR_SHINE_TOUCH_FRAME >> 16))
 #define SHINE_TOUCH_ORI (0x618C0000u | (SUSAMUNE_ADDR_SHINE_TOUCH_FRAME & 0xFFFFu))
+#define QFT_STATE_HA ((SUSAMUNE_ADDR_QFT_STATE + 0x8000u) >> 16)
+#define QFT_STATE_LO(off) ((SUSAMUNE_ADDR_QFT_STATE + (off)) & 0xFFFFu)
+#define ATTEMPT_SERIAL_HA \
+    ((SUSAMUNE_ADDR_ATTEMPT_SHINE_SERIAL + 0x8000u) >> 16)
+#define ATTEMPT_SERIAL_LO \
+    (SUSAMUNE_ADDR_ATTEMPT_SHINE_SERIAL & 0xFFFFu)
 
 // winDemo+0x88, replacing `bl fireGetStar` (r3 = gpMarDirector).
 u32 gCaveShineNoFire[] = {
     SHINE_TOUCH_LIS, SHINE_TOUCH_ORI,  // lis/ori r12, &touch frame
     0x81630058u,               // lwz r11, 0x58(r3)   director->unk58 (frame)
     0x916C0000u,               // stw r11, 0(r12)
+    0x3D800000u | QFT_STATE_HA,
+    0x816C0000u | QFT_STATE_LO(SUSAMUNE_QFT_STATE_OFFSET_OFF),
+    0x8003005Cu,               // lwz r0, 0x5c(r3)    current QF
+    0x7D6B0214u,               // add r11, r11, r0
+    0x396B0004u,
+    0x556B003Au,               // round up to the next whole frame
+    0x916C0000u | QFT_STATE_LO(SUSAMUNE_QFT_STATE_OFFSET_OFF),
+    0x3800FFFFu,
+    0xB00C0000u | QFT_STATE_LO(SUSAMUNE_QFT_STATE_STOP_OFF),
+    0x38000001u,
+    0x980C0000u | QFT_STATE_LO(SUSAMUNE_QFT_STATE_STOP_REASON_OFF),
+    0x3D600000u | ATTEMPT_SERIAL_HA,
+    0x818B0000u | ATTEMPT_SERIAL_LO,
+    0x398C0001u,
+    0x918B0000u | ATTEMPT_SERIAL_LO,
     0x00000000u,
 };
 
@@ -530,6 +551,33 @@ u32 gCaveShineTouch[] = {
 };
 #undef SHINE_TOUCH_LIS
 #undef SHINE_TOUCH_ORI
+#undef QFT_STATE_HA
+#undef QFT_STATE_LO
+#undef ATTEMPT_SERIAL_HA
+#undef ATTEMPT_SERIAL_LO
+
+// Attempt Counter's moveStage+0x3c check. The first word is the displaced
+// region-specific instruction that materialises gpApplication in r28. The
+// original Gecko code compares the two packed scene ids at this exact point;
+// publish only genuine differences for the C++ counter to consume.
+#define DEPARTURE_SERIAL_HA \
+    ((SUSAMUNE_ADDR_ATTEMPT_DEPARTURE_SERIAL + 0x8000u) >> 16)
+#define DEPARTURE_SERIAL_LO \
+    (SUSAMUNE_ADDR_ATTEMPT_DEPARTURE_SERIAL & 0xFFFFu)
+u32 gCaveAttemptDeparture[] = {
+    SUSAMUNE_MEM1_ADDR(0x3B836000u, 0x3B839700u, 0x3B8310C0u),
+    0xA19C000Eu,               // lhz r12, current scene(r28)
+    0xA17C000Au,               // lhz r11, previous scene(r28)
+    0x7C0C5800u,               // cmpw r12, r11
+    0x41820014u,               // beq -> return to moveStage
+    0x3D600000u | DEPARTURE_SERIAL_HA,
+    0x818B0000u | DEPARTURE_SERIAL_LO,
+    0x398C0001u,
+    0x918B0000u | DEPARTURE_SERIAL_LO,
+    0x00000000u,
+};
+#undef DEPARTURE_SERIAL_HA
+#undef DEPARTURE_SERIAL_LO
 
 // winDemo+0xA4, replacing the `receiveMessage(mario, TAKE)` call (r3 = shine).
 u32 gCaveShineKeep[] = {
@@ -869,7 +917,29 @@ u32 branchWord(u32 from, u32 to) {
     return 0x48000000u | ((to - from) & 0x03FFFFFCu);
 }
 
-void featuresApplyEarly() { applyPatches(true); }
+void featuresApplyEarly() {
+    const u32 departureSite =
+        SUSAMUNE_MEM1_ADDR(0x800EAB7Cu, 0x802975C0u, 0x8028F458u);
+    const int departureWords =
+        (int)(sizeof(gCaveAttemptDeparture) / sizeof(gCaveAttemptDeparture[0]));
+    const u32 departureBack = reinterpret_cast<u32>(
+        &gCaveAttemptDeparture[departureWords - 1]);
+    gCaveAttemptDeparture[departureWords - 1] =
+        branchWord(departureBack, departureSite + 4);
+    DCFlushRange(gCaveAttemptDeparture, departureWords * sizeof(u32));
+    ICInvalidateRange(gCaveAttemptDeparture, departureWords * sizeof(u32));
+    writeGameCode(departureSite,
+                  branchWord(departureSite,
+                             reinterpret_cast<u32>(&gCaveAttemptDeparture[0])));
+
+    // Manta Fix v1.2's actual fix: preserve the split Manta's horizontal
+    // velocity. Its second Gecko hook only recoloured a HUD stripe so runners
+    // could verify the code was active; the native build does not need that.
+    writeGameCode(
+        SUSAMUNE_MEM1_ADDR(0x800E9050u, 0x80295A94u, 0x8028D92Cu),
+        SUSAMUNE_MEM1_ADDR(0xC342FFE4u, 0xC342FFF8u, 0xC342FFF8u));
+    applyPatches(true);
+}
 
 void featuresApply() {
     applyPatches(false);
