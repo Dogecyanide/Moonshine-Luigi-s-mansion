@@ -58,6 +58,10 @@ const BindDesc kBindDescs[BIND_COUNT] = {
     { "Full restart", (u16)(kZ | kB | kDUp) },
     { "Warp to last selected", (u16)(kY | kB | kDUp) },
     { "Instant restart", (u16)(kB | kDUp) },
+    // Unbound by default: the existing speedrun/practice combos deliberately
+    // occupy most convenient combinations, and silently colliding is worse
+    // than asking the user to choose one.
+    { "Toggle input display", 0 },
 };
 
 int popCount(u16 v) {

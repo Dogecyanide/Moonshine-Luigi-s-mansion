@@ -14,6 +14,7 @@
 #include "susamune/features.hxx"
 #include "susamune/actions.hxx"
 #include "susamune/binds.hxx"
+#include "susamune/input_display.hxx"
 #include "susamune/warp_wheel.hxx"
 #if ENABLE_DEBUG_WARPS
 #include "susamune/debug_warp.hxx"
@@ -21,6 +22,8 @@
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
+#include "SMS/Manager/FlagManager.hxx"
+#include "susamune/nintendont_cfg.h"
 
 SavestateManager* gSavestateMgr = nullptr;
 
@@ -46,6 +49,20 @@ extern "C" void* getArenaLo() {
 extern "C" void onAppInit(TApplication* app) {
     app->initialize();
     gSettings.init();
+
+#if !IS_EMULATOR
+    // The launcher owns this option because Sunshine cannot persist its own
+    // rumble preference without a memory card. Apply it after initialize(),
+    // when both the option flags and SMSRumbleMgr have been constructed.
+    volatile u32* ninCfgConfig = reinterpret_cast<volatile u32*>(
+        SUSAMUNE_NIN_CFG_CONFIG_PPC_ADDR);
+    DCInvalidateRange((void*)ninCfgConfig, sizeof(*ninCfgConfig));
+    if ((*ninCfgConfig & SUSAMUNE_NIN_CFG_DISABLE_RUMBLE) != 0) {
+        SMSRumbleMgr->setActive(false);
+        TFlagManager::smInstance->setFlag(0x90000u, 0);
+    }
+#endif
+
     // Intro Skip patches the logo director, which is already directing by the
     // time the first onUpdate reaches featuresApply().
     featuresApplyEarly();
@@ -113,6 +130,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     // it and asks whether the menu bind was pressed this frame, which would
     // otherwise be answered from the previous frame's sample.
     gBinds.update();
+    gInputDisplay.update();
     // Before direct(): while the wheel is open it takes the pad away from
     // the game.
     if (!gSettings.getBool(SETTING_DISABLE_WARPS))

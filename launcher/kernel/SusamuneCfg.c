@@ -16,9 +16,11 @@ The ini is plain text. [settings_<region>] holds the in-game options, keyed by
 the stable names in settings_list.h -- shared with the mod, so the key table
 here cannot drift from the mod's SettingId order. [binds_<region>] holds one
 button combination per configurable action, keyed by binds_list.h and written as
-`+`-joined button tokens ("X+DUp") from the same shared list. [nintendont] holds
+`+`-joined button tokens ("X+DUp") from the same shared list.
+[input_display_<region>] holds its wider position/colour configuration.
+[nintendont] holds
 the launcher's own options -- game version, per-version disc image paths, and
-the four Nintendont settings that used to live in nincfg.bin -- and belongs to
+the Nintendont settings that used to live in nincfg.bin -- and belongs to
 the loader (SusamuneIni.c); this side only copies it through.
 
 The file lives on the device the launcher was run from, which is not
@@ -31,9 +33,9 @@ sections are ever parsed: the handoff block holds one set of values, not three.
 Consequently a save cannot simply re-emit the file from the block -- it would
 drop the other versions. Instead it reads the old file back and copies every
 line through verbatim, substituting freshly written sections in place of this
-version's two. Sections the launcher does not know stay byte-for-byte intact.
+version's three. Sections the launcher does not know stay byte-for-byte intact.
 
-NOTE: keys the launcher does not recognise *inside our own two sections* are
+NOTE: keys the launcher does not recognise *inside our own three sections* are
 still dropped, since those sections are regenerated wholesale.
 
 */
@@ -89,6 +91,7 @@ static u32  CfgAckSeq = 0;
 // leaves CfgReady false.
 static char SettingsSection[SUSAMUNE_SECTION_NAME_MAX];
 static char BindsSection[SUSAMUNE_SECTION_NAME_MAX];
+static char InputDisplaySection[SUSAMUNE_SECTION_NAME_MAX];
 
 // name + '_' + region tag, e.g. "settings" + "jp".
 static void BuildSectionName(char *out, const char *base, const char *region)
@@ -154,6 +157,24 @@ static bool ParseU8(const char *s, u8 *out)
 	}
 
 	*out = (u8)v;
+	return true;
+}
+
+static bool ParseU16(const char *s, u16 *out)
+{
+	u32 v = 0;
+
+	if (*s == '\0')
+		return false;
+	for (; *s; s++)
+	{
+		if (*s < '0' || *s > '9')
+			return false;
+		v = v * 10 + (u32)(*s - '0');
+		if (v > 65534)  /* 0xFFFF is the unset sentinel */
+			return false;
+	}
+	*out = (u16)v;
 	return true;
 }
 
@@ -245,9 +266,9 @@ static bool ParseBindMask(const char *s, u16 *out)
 }
 
 // Which section the parser is currently inside. Anything that is not one of
-// this version's two sections -- [nintendont], or another version's settings --
+// this version's three sections -- [nintendont], or another version's settings --
 // is SECTION_OTHER and left alone.
-enum IniSection { SECTION_OTHER, SECTION_SETTINGS, SECTION_BINDS };
+enum IniSection { SECTION_OTHER, SECTION_SETTINGS, SECTION_BINDS, SECTION_INPUT_DISPLAY };
 
 static enum IniSection ClassifySection(const char *name)
 {
@@ -255,7 +276,38 @@ static enum IniSection ClassifySection(const char *name)
 		return SECTION_SETTINGS;
 	if (strcmp(name, BindsSection) == 0)
 		return SECTION_BINDS;
+	if (strcmp(name, InputDisplaySection) == 0)
+		return SECTION_INPUT_DISPLAY;
 	return SECTION_OTHER;
+}
+
+static void ApplyInputDisplayKey(struct SusamuneInputDisplayCfg *cfg,
+				 const char *key, const char *text)
+{
+	u8  v8;
+	u16 v16;
+
+	if (strcmp(key, "x") == 0)
+	{
+		if (ParseU16(text, &v16)) cfg->x = v16;
+	}
+	else if (strcmp(key, "y") == 0)
+	{
+		if (ParseU16(text, &v16)) cfg->y = v16;
+	}
+	else if (ParseU8(text, &v8))
+	{
+		if (strcmp(key, "start_visible") == 0) cfg->startVisible = v8;
+		else if (strcmp(key, "scale") == 0) cfg->scale = v8;
+		else if (strcmp(key, "background_r") == 0) cfg->bgR = v8;
+		else if (strcmp(key, "background_g") == 0) cfg->bgG = v8;
+		else if (strcmp(key, "background_b") == 0) cfg->bgB = v8;
+		else if (strcmp(key, "background_alpha") == 0) cfg->bgA = v8;
+		else if (strcmp(key, "brightness") == 0) cfg->brightness = v8;
+		else if (strcmp(key, "value_mode") == 0) cfg->valueMode = v8;
+		else if (strcmp(key, "value_source") == 0) cfg->valueSource = v8;
+		else if (strcmp(key, "value_position") == 0) cfg->valuePlacement = v8;
+	}
 }
 
 // Whether the file already carries settings for this game version. When it does
@@ -327,6 +379,10 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 			idx = FindBindKey(Trim(line));
 			if (idx >= 0 && ParseBindMask(Trim(eq + 1), &mask))
 				cfg->binds[idx] = (u16)(mask & SUSAMUNE_BIND_BUTTON_MASK);
+		}
+		else if (section == SECTION_INPUT_DISPLAY)
+		{
+			ApplyInputDisplayKey(&cfg->inputDisplay, Trim(line), Trim(eq + 1));
 		}
 
 		line = next;
@@ -434,6 +490,41 @@ static void EmitBindsSection(FIL *f, int *err, const struct SusamuneCfg *cfg)
 	}
 }
 
+static void EmitInputU8(FIL *f, int *err, const char *key, u8 value)
+{
+	char line[96];
+	if (value != SUSAMUNE_INPUT_CFG_U8_UNSET)
+		Emit(f, err, line, (u32)_sprintf(line, "%s = %u\r\n", key, value));
+}
+
+static void EmitInputU16(FIL *f, int *err, const char *key, u16 value)
+{
+	char line[96];
+	if (value != SUSAMUNE_INPUT_CFG_U16_UNSET)
+		Emit(f, err, line, (u32)_sprintf(line, "%s = %u\r\n", key, value));
+}
+
+static void EmitInputDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cfg)
+{
+	const struct SusamuneInputDisplayCfg *d = &cfg->inputDisplay;
+
+	EmitStr(f, err, "[");
+	EmitStr(f, err, InputDisplaySection);
+	EmitStr(f, err, "]\r\n");
+	EmitInputU16(f, err, "x", d->x);
+	EmitInputU16(f, err, "y", d->y);
+	EmitInputU8(f, err, "start_visible", d->startVisible);
+	EmitInputU8(f, err, "scale", d->scale);
+	EmitInputU8(f, err, "background_r", d->bgR);
+	EmitInputU8(f, err, "background_g", d->bgG);
+	EmitInputU8(f, err, "background_b", d->bgB);
+	EmitInputU8(f, err, "background_alpha", d->bgA);
+	EmitInputU8(f, err, "brightness", d->brightness);
+	EmitInputU8(f, err, "value_mode", d->valueMode);
+	EmitInputU8(f, err, "value_source", d->valueSource);
+	EmitInputU8(f, err, "value_position", d->valuePlacement);
+}
+
 static const char kIniBanner[] =
 	"; susamune settings\r\n"
 	"; Written by the susamune launcher. Values are edited in-game from the\r\n"
@@ -441,8 +532,8 @@ static const char kIniBanner[] =
 	"; whenever the menu is closed with changes pending, so comments added\r\n"
 	"; inside it are lost. Everything else in this file is preserved.\r\n"
 	";\r\n"
-	"; Each supported disc has its own [settings_<region>] and\r\n"
-	"; [binds_<region>] pair -- jp = GMSJ, us = GMSE, pal = GMSP.\r\n"
+	"; Each supported disc has its own [settings_<region>], [binds_<region>]\r\n"
+	"; and [input_display_<region>] sections -- jp = GMSJ, us = GMSE, pal = GMSP.\r\n"
 	";\r\n"
 	"; Bind values are button combinations like Y+Start, or none. menu_toggle\r\n"
 	"; is what opens the mod menu -- if you rebind it to something you cannot\r\n"
@@ -450,11 +541,11 @@ static const char kIniBanner[] =
 	"\r\n"
 	"[" SUSAMUNE_INI_SECTION_NINTENDONT "]\r\n";
 
-// Rewrite the ini with this version's two sections replaced.
+// Rewrite the ini with this version's three sections replaced.
 //
 // The whole point of the copy-through is that the other versions' settings are
 // never materialised: they exist only as the text we are reading back here.
-// Everything outside our two sections -- other regions, [nintendont], comments,
+// Everything outside our three sections -- other regions, [nintendont], comments,
 // blank lines -- lands in the output unchanged and in its original order.
 static int WriteIniFile(const struct SusamuneCfg *cfg)
 {
@@ -467,6 +558,7 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 	bool  skipping = false;
 	bool  wroteSettings = false;
 	bool  wroteBinds = false;
+	bool  wroteInputDisplay = false;
 
 	buf = (char*)malloca(SUSAMUNE_INI_BUF_SIZE, 32);
 	if (buf == NULL)
@@ -543,6 +635,11 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 					EmitBindsSection(&f, &err, cfg);
 					wroteBinds = true;
 				}
+				else if (kind == SECTION_INPUT_DISPLAY)
+				{
+					EmitInputDisplaySection(&f, &err, cfg);
+					wroteInputDisplay = true;
+				}
 			}
 		}
 
@@ -565,6 +662,11 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 	{
 		EmitStr(&f, &err, "\r\n");
 		EmitBindsSection(&f, &err, cfg);
+	}
+	if (!wroteInputDisplay)
+	{
+		EmitStr(&f, &err, "\r\n");
+		EmitInputDisplaySection(&f, &err, cfg);
 	}
 
 	ret = f_close(&f);
@@ -605,16 +707,32 @@ void SusamuneCfgInit(void)
 
 	BuildSectionName(SettingsSection, SUSAMUNE_INI_SECTION_SETTINGS, region);
 	BuildSectionName(BindsSection, SUSAMUNE_INI_SECTION_BINDS, region);
+	BuildSectionName(InputDisplaySection, SUSAMUNE_INI_SECTION_INPUT_DISPLAY, region);
 
 	for (i = 0; i < SUSAMUNE_CFG_MAX_SETTINGS; i++)
 		cfg->values[i] = SUSAMUNE_CFG_UNSET;
 	for (i = 0; i < SUSAMUNE_CFG_MAX_BINDS; i++)
 		cfg->binds[i] = SUSAMUNE_CFG_BIND_UNSET;
+	cfg->inputDisplay.magic          = SUSAMUNE_INPUT_CFG_MAGIC;
+	cfg->inputDisplay.version        = SUSAMUNE_INPUT_CFG_VERSION;
+	cfg->inputDisplay.x              = SUSAMUNE_INPUT_CFG_U16_UNSET;
+	cfg->inputDisplay.y              = SUSAMUNE_INPUT_CFG_U16_UNSET;
+	cfg->inputDisplay.startVisible   = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->inputDisplay.scale          = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->inputDisplay.bgR            = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->inputDisplay.bgG            = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->inputDisplay.bgB            = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->inputDisplay.bgA            = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->inputDisplay.brightness     = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->inputDisplay.valueMode      = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->inputDisplay.valueSource    = SUSAMUNE_INPUT_CFG_U8_UNSET;
+	cfg->inputDisplay.valuePlacement = SUSAMUNE_INPUT_CFG_U8_UNSET;
 
 	cfg->magic     = SUSAMUNE_CFG_MAGIC;
 	cfg->version   = SUSAMUNE_CFG_VERSION;
 	cfg->count     = (u16)SETTING_KEY_COUNT;
 	cfg->bindCount = (u16)BIND_KEY_COUNT;
+	cfg->flags     = SUSAMUNE_CFG_FLAG_INPUT_DISPLAY;
 
 	ret = f_open_char(&f, SusamuneCfgIniPath(), FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)

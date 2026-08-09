@@ -12,6 +12,7 @@
 
 #include "Dolphin/OS.h"  // DCInvalidateRange, DCStoreRange
 #include "susamune/binds.hxx"
+#include "susamune/input_display.hxx"
 #include "susamune/susamune_cfg.h"
 
 namespace {
@@ -78,7 +79,10 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     SBOOL("Shiny shines", 0, SETTING_CAT_COSMETIC),
 
     // UI settings.
-    SBOOL("Show BGM slot counter", 0, SETTING_CAT_UI)
+    SBOOL("Show BGM slot counter", 0, SETTING_CAT_UI),
+
+    // Appended settings keep their persisted indices stable.
+    SBOOL("Disable 3rd Chomplet aggro", 0, SETTING_CAT_QOL)
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'
@@ -100,6 +104,7 @@ void Settings::resetDefaults() {
     // they are reset, loaded and staged wherever settings are. Their table and
     // recorder live in binds.* -- see binds.hxx.
     gBinds.resetDefaults();
+    gInputDisplay.resetDefaults();
 
     mData.magic   = kSettingsMagic;
     mData.version = kSettingsVersion;
@@ -131,6 +136,7 @@ void Settings::save() {
     mSaveState = SETTINGS_SAVE_UNSUPPORTED;
     mDirty     = false;
     gBinds.clearDirty();
+    gInputDisplay.clearDirty();
 }
 
 SettingsSaveState Settings::pollSave() { return mSaveState; }
@@ -184,6 +190,11 @@ void Settings::init() {
         }
     }
     gBinds.clearDirty();
+    // An older kernel leaves the bytes beyond binds[] untouched. Its missing
+    // capability flag keeps us from interpreting that stale MEM2 as config.
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_INPUT_DISPLAY) {
+        gInputDisplay.adopt(&cfg->inputDisplay);
+    }
 
     // set() marks dirty; adopting persisted values is not a user edit.
     mDirty     = false;
@@ -223,10 +234,14 @@ void Settings::save() {
     cfg->bindCount = BIND_COUNT;
     gBinds.clearDirty();
 
+    gInputDisplay.stageInto(&cfg->inputDisplay);
+    gInputDisplay.clearDirty();
+
     // Publish the payload before the doorbell, so the kernel can never see a
     // bumped saveSeq alongside a half-written values[]/binds[]. Both live in
     // the same mod-owned run of cache lines starting at values[].
-    DCStoreRange((void *)cfg->values, sizeof(cfg->values) + sizeof(cfg->binds));
+    DCStoreRange((void *)cfg->values,
+                 sizeof(cfg->values) + sizeof(cfg->binds) + sizeof(cfg->inputDisplay));
 
     mSaveSeq     = cfg->saveSeq + 1;
     cfg->saveSeq = mSaveSeq;

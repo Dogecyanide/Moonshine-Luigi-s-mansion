@@ -34,7 +34,8 @@
     X(BIND_WARP_WHEEL,         "warp_wheel")                                  \
     X(BIND_FULL_RESTART,       "full_restart")                                \
     X(BIND_WARP_LAST,          "warp_last")                                   \
-    X(BIND_INSTANT_RESTART,    "instant_restart")
+    X(BIND_INSTANT_RESTART,    "instant_restart")                              \
+    X(BIND_TOGGLE_INPUT_DISPLAY, "toggle_input_display")
 
 // The bindable buttons, as (GameCube button bit, ini token, menu glyph). The
 // mod defines the regional glyph macros in glyphs.hxx; the launcher ignores

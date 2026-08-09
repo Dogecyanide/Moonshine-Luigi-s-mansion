@@ -47,6 +47,7 @@ static const SusamuneIni kIniDefaults =
 	.unlockReadSpeed  = 1,
 	.enableCheats     = 0,
 	.forceProgressive = 1,
+	.disableRumble    = 0,
 	.language         = NIN_LAN_AUTO,
 };
 
@@ -181,6 +182,8 @@ static void ApplyKey(const char *key, const char *value)
 		ParseBool(value, &gIni.enableCheats);
 	else if (strcmp(key, "force_progressive") == 0)
 		ParseBool(value, &gIni.forceProgressive);
+	else if (strcmp(key, "disable_rumble") == 0)
+		ParseBool(value, &gIni.disableRumble);
 	else if (strcmp(key, "language") == 0)
 		ParseLanguage(value, &gIni.language);
 }
@@ -295,6 +298,8 @@ static void EmitNintendontSection(FIL *f, int *err)
 	snprintf(line, sizeof(line), "enable_cheats = %u\r\n", gIni.enableCheats);
 	EmitStr(f, err, line);
 	snprintf(line, sizeof(line), "force_progressive = %u\r\n", gIni.forceProgressive);
+	EmitStr(f, err, line);
+	snprintf(line, sizeof(line), "disable_rumble = %u\r\n", gIni.disableRumble);
 	EmitStr(f, err, line);
 	snprintf(line, sizeof(line), "language = %s\r\n", LanguageToken(gIni.language));
 	EmitStr(f, err, line);

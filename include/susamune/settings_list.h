@@ -69,7 +69,9 @@
     X(SETTING_SHINE_OUTFIT,         "shine_outfit")                           \
     X(SETTING_SHINY_SHINES,         "shiny_shines")                           \
     /* -- UI -- */                                                            \
-    X(SETTING_SHOW_BGM_SLOTS,       "show_bgm_slots")                        
+    X(SETTING_SHOW_BGM_SLOTS,       "show_bgm_slots")                        \
+    /* -- Appended settings (keep persisted indices stable) -- */             \
+    X(SETTING_DISABLE_THIRD_CHOMPLET_AGGRO, "disable_third_chomplet_aggro")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

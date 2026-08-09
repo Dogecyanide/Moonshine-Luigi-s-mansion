@@ -4,6 +4,7 @@
 
 #include "NintendontVersion.h"
 #include "Metadata.h"
+#include "../../../include/susamune/nintendont_cfg.h"
 
 #define NIN_CFG_VERSION		0x00000008
 
@@ -59,6 +60,7 @@ enum ninconfigbitpos
 	// device the game is read from; when the two differ the kernel mounts a
 	// second volume for the ini rather than making the user keep two copies.
 	NIN_CFG_BIT_CFG_ON_USB	= (19),
+	NIN_CFG_BIT_DISABLE_RUMBLE = SUSAMUNE_NIN_CFG_BIT_DISABLE_RUMBLE,
 
 	// Internal kernel settings.
 	NIN_CFG_BIT_MC_SLOTB	= (31),	// Slot B image is loaded
@@ -88,6 +90,7 @@ enum ninconfig
 	NIN_CFG_CC_RUMBLE	= (1<<NIN_CFG_BIT_CC_RUMBLE),
 	NIN_CFG_SKIP_IPL	= (1<<NIN_CFG_BIT_SKIP_IPL),
 	NIN_CFG_CFG_ON_USB	= (1<<NIN_CFG_BIT_CFG_ON_USB),
+	NIN_CFG_DISABLE_RUMBLE = SUSAMUNE_NIN_CFG_DISABLE_RUMBLE,
 
 	NIN_CFG_MC_SLOTB	= (1<<NIN_CFG_BIT_MC_SLOTB),
 };
