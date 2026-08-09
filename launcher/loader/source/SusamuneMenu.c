@@ -722,6 +722,7 @@ enum
 	SET_UNLOCK_READ_SPEED,
 	SET_CHEATS,
 	SET_FORCE_PROGRESSIVE,
+	SET_DISABLE_RUMBLE,
 	SET_LANGUAGE,
 
 	SET_COUNT
@@ -734,6 +735,7 @@ static const char *const kSettingNames[SET_COUNT] =
 	"Unlock Read Speed",
 	"Cheats",
 	"Force Progressive",
+	"Disable Rumble",
 	"Language",
 };
 
@@ -794,6 +796,15 @@ static const char *const kHelpForceProgressive[] =
 	"Requires component video or a compatible digital adapter.",
 	NULL
 };
+static const char *const kHelpDisableRumble[] =
+{
+	"Keep Super Mario Sunshine's controller rumble disabled",
+	"automatically on every launch.",
+	"",
+	"This changes only the motor output. Controller input and",
+	"Native Control support are unaffected.",
+	NULL
+};
 static const char *const kHelpLanguage[] =
 {
 	"Set the system language.",
@@ -812,6 +823,7 @@ static const char *const *const kSettingHelp[SET_COUNT] =
 	kHelpReadSpeed,
 	kHelpCheats,
 	kHelpForceProgressive,
+	kHelpDisableRumble,
 	kHelpLanguage,
 };
 
@@ -829,6 +841,8 @@ static const char *SettingValue(int setting, char *buf, u32 bufSize)
 			return gIni.enableCheats ? "On" : "Off";
 		case SET_FORCE_PROGRESSIVE:
 			return gIni.forceProgressive ? "On" : "Off";
+		case SET_DISABLE_RUMBLE:
+			return gIni.disableRumble ? "On" : "Off";
 		case SET_LANGUAGE:
 		{
 			s32 lan = gIni.language;
@@ -868,6 +882,9 @@ static void CycleSetting(int setting)
 			break;
 		case SET_FORCE_PROGRESSIVE:
 			gIni.forceProgressive = !gIni.forceProgressive;
+			break;
+		case SET_DISABLE_RUMBLE:
+			gIni.disableRumble = !gIni.disableRumble;
 			break;
 		case SET_LANGUAGE:
 			// Auto -> Eng -> ... -> Dut -> Auto
@@ -959,7 +976,7 @@ static void SettingsScreen(void)
 				PrintFormat(DEFAULT_SIZE, color, MENU_POS_X, y, ARROW_RIGHT);
 		}
 
-		DrawRule(MENU_POS_Y + 20*12);
+		DrawRule(MENU_POS_Y + 20*(6 + SET_COUNT));
 
 		help = kSettingHelp[pos];
 		for (i = 0; help[i] != NULL; i++)
@@ -967,7 +984,7 @@ static void SettingsScreen(void)
 			if (help[i][0] == '\0')
 				continue;
 			PrintFormat(DEFAULT_SIZE, BLACK, MENU_POS_X,
-				    MENU_POS_Y + 20*13 + i*20, "%s", help[i]);
+				    MENU_POS_Y + 20*(7 + SET_COUNT) + i*20, "%s", help[i]);
 		}
 		GRRLIB_Render();
 	}
@@ -1130,6 +1147,11 @@ static void ApplyToNinCFG(void)
 		ncfg->Config |= NIN_CFG_FORCE_PROG;
 	else
 		ncfg->Config &= ~NIN_CFG_FORCE_PROG;
+
+	if (gIni.disableRumble)
+		ncfg->Config |= NIN_CFG_DISABLE_RUMBLE;
+	else
+		ncfg->Config &= ~NIN_CFG_DISABLE_RUMBLE;
 
 	ncfg->Language = gIni.language;
 

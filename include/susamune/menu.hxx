@@ -51,6 +51,9 @@ public:
     void fillBox(int x, int y, int w, int h, JUtility::TColor color);
     // Same, for a convex polygon: `xy` is `n` interleaved x,y pairs.
     void fillPoly(const s16 *xy, int n, JUtility::TColor color);
+    // Draw a closed polygon outline. `lineWidth` uses GX's native sixth-pixel
+    // units (the original input-display code uses 20, or about 3.3 pixels).
+    void strokePoly(const s16 *xy, int n, u8 lineWidth, JUtility::TColor color);
     // Pixel width of `s` at the given cell size (for right-align / tab layout).
     // Reads the font's per-glyph advances, so it matches what drawText lays
     // out -- the font is proportional and any estimate makes right-aligned

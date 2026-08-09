@@ -14,6 +14,7 @@
 #include "susamune/menu.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/glyphs.hxx"
+#include "susamune/input_display.hxx"
 #include "susamune/settings.hxx"
 #if ENABLE_DEBUG_WARPS
 #include "susamune/debug_warp.hxx"
@@ -99,6 +100,9 @@ public:
     // switching, no close combo. The binds tab needs it, since every button
     // it might record is also a menu control.
     virtual bool grabsInput() const { return false; }
+    // A live editor can temporarily replace the normal panel while retaining
+    // the menu's input grab and stage-freeze behaviour.
+    virtual bool fullScreen() const { return false; }
 
 protected:
     void drawScrollHints(Menu *menu, int x, int y, int w, int h, int start, int end,
@@ -373,6 +377,62 @@ private:
 };
 
 // ---------------------------------------------------------------------
+// Input Display tab
+// ---------------------------------------------------------------------
+class InputDisplayTab : public MenuTab {
+public:
+    InputDisplayTab() : mSel(0) {}
+
+    const char *title() const override { return "Input"; }
+    bool grabsInput() const override { return gInputDisplay.editing(); }
+    bool fullScreen() const override { return gInputDisplay.editing(); }
+
+    void update(Menu *menu, TMarioGamePad *pad) override {
+        if (gInputDisplay.editing()) {
+            gInputDisplay.updateEditor(pad);
+            return;
+        }
+
+        u32 rapid = pad->mButtons.mRapidInput;
+        if (rapid & TMarioGamePad::CSTICK_UP) {
+            mSel = wrap(mSel - 1, InputDisplay::menuRowCount());
+        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+            mSel = wrap(mSel + 1, InputDisplay::menuRowCount());
+        }
+        if ((rapid & TMarioGamePad::A) || (rapid & TMarioGamePad::CSTICK_RIGHT)) {
+            gInputDisplay.adjustMenuRow(mSel, +1);
+        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            gInputDisplay.adjustMenuRow(mSel, -1);
+        }
+    }
+
+    void draw(Menu *menu, int x, int y, int w, int h) override {
+        if (gInputDisplay.editing()) {
+            gInputDisplay.drawEditor(menu);
+            return;
+        }
+
+        int ry = y;
+        for (int i = 0; i < InputDisplay::menuRowCount(); i++) {
+            bool selected = i == mSel;
+            if (selected) drawRowHighlight(menu, x, ry, w, ROW_H);
+            menu->drawText(InputDisplay::menuRowName(i), x + 4, ry,
+                           ROW_SZ, ROW_SZ, selected ? cRowSel() : cRow());
+            const char *val = gInputDisplay.menuRowValue(i);
+            int vx = x + w - Menu::textWidth(val, ROW_SZ) - 8;
+            menu->drawText(val, vx, ry, ROW_SZ, ROW_SZ, cValue());
+            ry += ROW_H;
+        }
+
+        menu->drawText("Toggle bind changes visibility for this session only",
+                       x + 4, y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+private:
+    int mSel;
+};
+
+// ---------------------------------------------------------------------
 // Binds tab
 //
 // One row per BindId. A on a row arms gBinds' recorder, which watches the
@@ -488,6 +548,7 @@ u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
 u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
 u8 sSavestateBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sUiBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
+u8 sInputBuf[sizeof(InputDisplayTab)]           __attribute__((aligned(8)));
 u8 sBindsBuf[sizeof(BindsTab)]                 __attribute__((aligned(8)));
 }  // namespace
 
@@ -540,6 +601,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab("Misc", SETTING_CAT_MISC);
     mTabs[mNumTabs++] = new (sSavestateBuf) CategorySettingsTab("Savestate", SETTING_CAT_SAVESTATE);
     mTabs[mNumTabs++] = new (sUiBuf) CategorySettingsTab("UI", SETTING_CAT_UI);
+    mTabs[mNumTabs++] = new (sInputBuf) InputDisplayTab();
     mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
 }
 
@@ -625,6 +687,28 @@ void Menu::fillPoly(const s16 *xy, int n, Color color) {
     for (int i = 0; i < n; i++) {
         *wgU16 = (u16)xy[i * 2];
         *wgU16 = (u16)xy[i * 2 + 1];
+        *wgU16 = 0;
+        *wgU32 = packed;
+    }
+}
+
+void Menu::strokePoly(const s16 *xy, int n, u8 lineWidth, Color color) {
+    if (!mOrtho || n < 2) {
+        return;
+    }
+    volatile u16 *const wgU16 = (volatile u16 *)0xCC008000;
+    volatile u32 *const wgU32 = (volatile u32 *)0xCC008000;
+
+    mOrtho->setup2D();
+    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET);
+    GXSetLineWidth(lineWidth, GX_TO_ZERO);
+    GXBegin(GX_LINESTRIP, GX_VTXFMT0, (u16)(n + 1));
+    const u32 packed = ((u32)color.r << 24) | ((u32)color.g << 16) |
+                       ((u32)color.b << 8) | (u32)color.a;
+    for (int i = 0; i <= n; i++) {
+        const int j = (i == n) ? 0 : i;
+        *wgU16 = (u16)xy[j * 2];
+        *wgU16 = (u16)xy[j * 2 + 1];
         *wgU16 = 0;
         *wgU32 = packed;
     }
@@ -786,7 +870,8 @@ void Menu::update(TMarioGamePad *pad) {
         mShown = !mShown;
         // Closing with edits pending writes them back to the SD card. Gated on
         // dirty() so merely opening and closing the menu never touches storage.
-        if (!mShown && (gSettings.dirty() || gBinds.dirty())) {
+        if (!mShown && (gSettings.dirty() || gBinds.dirty() ||
+                        gInputDisplay.dirty())) {
             requestSettingsSave();
         }
         return;
@@ -808,8 +893,15 @@ void Menu::update(TMarioGamePad *pad) {
 void Menu::draw(J2DOrthoGraph *ortho) {
     mOrtho = ortho;  // used by fillBox() to re-enter 2D state
     if (!mShown) {
+        gInputDisplay.draw(this);
         drawToast();  // still visible with the menu closed
         bgmStatsDraw(this);
+        return;
+    }
+
+    if (mTabs[mCurTab]->fullScreen()) {
+        mTabs[mCurTab]->draw(this, 0, 0, 640, 480);
+        drawToast();
         return;
     }
 

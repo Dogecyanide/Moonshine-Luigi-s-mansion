@@ -416,6 +416,17 @@ u32 gCaveFastPiant[] = {
     0x57FFFFBE, 0x00000000,  // <- becomes b -> site+4
 };
 
+// TFireWanwan::isFindMario. Instance 1 is the far-right Chomplet in Pianta 1.
+u32 gCaveDisableThirdChompletAggro[] = {
+    0xA183007Cu,  // lhz r12, 0x7c(r3)   instance index
+    0x2C0C0001u,  // cmpwi r12, 1
+    0x4082000Cu,  // bne -> original
+    0x38600000u,  // li r3, 0
+    0x4E800020u,  // blr
+    0x7C0802A6u,  // mflr r0            displaced original
+    0x00000000u,
+};
+
 // Never Pause IGT (asm identical across regions).
 u32 gCaveNeverPause[] = {
     0x80030030, 0x2C000000,
@@ -618,6 +629,8 @@ struct AsmHook {
 const AsmHook kAsmHooks[] = {
     HOOK(SETTING_FAST_PIANTISSIMO, 0x80256A14u, 0x80043064u, 0x80042EDCu,
          gCaveFastPiant),
+    HOOK(SETTING_DISABLE_THIRD_CHOMPLET_AGGRO, 0x8029E508u, 0x8008B578u,
+         0x80084C18u, gCaveDisableThirdChompletAggro),
     HOOK(SETTING_NEVER_PAUSE_IGT, 0x8009292Cu, 0x8034800Cu, 0x80340268u,
          gCaveNeverPause),
     HOOK(SETTING_DEATHLESS_BLOOPER, 0x801397D0u, 0x8025A340u, 0x802520CCu,

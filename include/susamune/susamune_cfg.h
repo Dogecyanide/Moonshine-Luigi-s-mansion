@@ -58,6 +58,45 @@
 // distinct from it.
 #define SUSAMUNE_CFG_BIND_UNSET   0xFFFFu
 
+// Input Display has values wider than the generic one-byte settings table
+// (screen coordinates and an RGB colour), so it owns one compact, versioned
+// payload at the end of the handoff block. Each field has its own unset value:
+// a newer mod can therefore keep its defaults when paired with an older ini,
+// while a newer launcher can safely preserve a field it does not yet expose.
+#define SUSAMUNE_INPUT_CFG_MAGIC       0x53494443u  // 'SIDC'
+#define SUSAMUNE_INPUT_CFG_VERSION     1u
+#define SUSAMUNE_INPUT_CFG_U8_UNSET    0xFFu
+#define SUSAMUNE_INPUT_CFG_U16_UNSET   0xFFFFu
+
+#define SUSAMUNE_INPUT_VALUES_OFF      0u
+#define SUSAMUNE_INPUT_VALUES_STICKS   1u
+#define SUSAMUNE_INPUT_VALUES_FULL     2u
+
+#define SUSAMUNE_INPUT_SOURCE_RAW      0u
+#define SUSAMUNE_INPUT_SOURCE_PROCESSED 1u
+
+#define SUSAMUNE_INPUT_VALUES_BELOW    0u
+#define SUSAMUNE_INPUT_VALUES_ABOVE    1u
+#define SUSAMUNE_INPUT_VALUES_INSIDE   2u
+
+struct SusamuneInputDisplayCfg {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short x;
+    unsigned short y;
+    unsigned char  startVisible;
+    unsigned char  scale;
+    unsigned char  bgR;
+    unsigned char  bgG;
+    unsigned char  bgB;
+    unsigned char  bgA;
+    unsigned char  brightness;
+    unsigned char  valueMode;
+    unsigned char  valueSource;
+    unsigned char  valuePlacement;
+    unsigned char  reserved[12];
+};
+
 // susamune.ini had nothing for the running game version -- either the file is
 // absent entirely, or it has no [settings_<region>] section for this disc. The
 // kernel cannot author defaults itself -- they live in kSettingDescs on the mod
@@ -65,6 +104,10 @@
 // -- so it raises this flag and the mod answers by issuing a save() during
 // init, which fills in this version's sections without disturbing the others.
 #define SUSAMUNE_CFG_FLAG_NO_CONFIG 0x1u
+// Kernel understands the appended inputDisplay payload and its ini section.
+// The flag also prevents a new mod from reading stale bytes there when paired
+// with an older launcher that only initialised the shorter struct.
+#define SUSAMUNE_CFG_FLAG_INPUT_DISPLAY 0x2u
 
 struct SusamuneCfg {
     // --- cache line 0: written by the kernel at boot, by the mod on save ---
@@ -87,6 +130,7 @@ struct SusamuneCfg {
     // --- cache line 2+: written by the kernel at boot, by the mod on save ---
     unsigned char  values[SUSAMUNE_CFG_MAX_SETTINGS];
     unsigned short binds[SUSAMUNE_CFG_MAX_BINDS];
+    struct SusamuneInputDisplayCfg inputDisplay;
 };
 
 #define SUSAMUNE_CFG_PPC_PTR  ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PPC_BASE)
@@ -113,6 +157,9 @@ struct SusamuneCfg {
 // SUSAMUNE_BIND_BUTTON_LIST (binds_list.h), so both sides spell them the same
 // way.
 #define SUSAMUNE_INI_SECTION_BINDS      "binds"
+// Position, scale, colour and optional numeric pad readout. This cannot use
+// the generic settings table because several values exceed one byte.
+#define SUSAMUNE_INI_SECTION_INPUT_DISPLAY "input_display"
 // settings_jp / binds_pal / ...
 #define SUSAMUNE_INI_SECTION_SEPARATOR  '_'
 
@@ -121,6 +168,8 @@ struct SusamuneCfg {
 typedef char susamune_cfg_line0_check[(__builtin_offsetof(struct SusamuneCfg, ackSeq) == 32) ? 1 : -1];
 typedef char susamune_cfg_line2_check[(__builtin_offsetof(struct SusamuneCfg, values) == 64) ? 1 : -1];
 typedef char susamune_cfg_binds_check[(__builtin_offsetof(struct SusamuneCfg, binds) == 192) ? 1 : -1];
+typedef char susamune_input_cfg_size_check[(sizeof(struct SusamuneInputDisplayCfg) == 32) ? 1 : -1];
+typedef char susamune_cfg_input_check[(__builtin_offsetof(struct SusamuneCfg, inputDisplay) == 320) ? 1 : -1];
 typedef char susamune_cfg_size_check[(sizeof(struct SusamuneCfg) <= SUSAMUNE_MEM2_CFG_SIZE) ? 1 : -1];
 
 #endif  // SUSAMUNE_CFG_H

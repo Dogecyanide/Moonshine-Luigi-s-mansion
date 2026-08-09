@@ -52,6 +52,7 @@ typedef struct
 	u8   unlockReadSpeed;
 	u8   enableCheats;
 	u8   forceProgressive;
+	u8   disableRumble;
 	s32  language;                       // NIN_LAN_*, NIN_LAN_AUTO for auto
 } SusamuneIni;
 
