@@ -26,6 +26,7 @@
 #include "susamune/addresses.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
 #include "SMS/Manager/FlagManager.hxx"
+#include "SMS/Manager/PollutionManager.hxx"
 #include "susamune/nintendont_cfg.h"
 
 SavestateManager* gSavestateMgr = nullptr;
@@ -105,6 +106,11 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 
 extern "C" void onSetup(TMarDirector* director) {
     static bool inited = false;
+
+    // TPollutionManager publishes itself through gpPollution but its retail
+    // destructor never clears that global. Stages without a pollution manager
+    // would otherwise inherit a pointer into the previous stage's freed heap.
+    gpPollution = nullptr;
     director->setupObjects();
 
     // Runs on every stage load, so this must stay above the once-only guard.
