@@ -9,6 +9,7 @@
 #include "SMS/Manager/PollutionManager.hxx"
 #include "SMS/Player/Mario.hxx"
 #include "SMS/Player/MarioGamePad.hxx"
+#include "SMS/System/Application.hxx"
 #include "SMS/System/MarDirector.hxx"
 #include "susamune/glyphs.hxx"
 #include "susamune/menu.hxx"
@@ -114,7 +115,12 @@ Values readValues() {
     v.qf     = gpMarDirector ? (u8)(gpMarDirector->unk58 & 3) : 0;
     v.cameraAngle = gpCamera ? (u16)(gpCamera->mHorizontalAngle - 0x8000) : 0;
     v.invinc = (s16)(mario->mInvincibilityFrames >> 2);
-    v.goop   = gpPollution ? gpPollution->getPollutionDegree() : 0;
+    // EX maps do not have a meaningful pollution count. Some retain a global
+    // manager pointer while their scene resources are being exchanged, so do
+    // not traverse its stage-owned layer array there.
+    const u8 area = gpMarDirector ? gpMarDirector->mAreaID : 0xFF;
+    const bool exMap = area > 0x14 && area < 0x35;
+    v.goop = (gpPollution && !exMap) ? gpPollution->getPollutionDegree() : 0;
 
     int spinDirection = 0;
     v.spin = mario->checkStickRotate(&spinDirection);
@@ -510,6 +516,15 @@ void MetadataDisplay::updateEditor(TMarioGamePad *pad) {
 void MetadataDisplay::draw(Menu *menu, bool force) const {
     if (!menu || (!mCfg.startVisible && !force) || !gpMarioOriginal || !gpMarDirector)
         return;
+
+    // Only sample stage-owned objects during ordinary gameplay with no wipe
+    // in progress. A departure can begin its fade before the director reaches
+    // its final stage-exit state.
+    if (gpMarDirector->mCurState != TMarDirector::STATE_NORMAL ||
+        !gpApplication.mFader ||
+        gpApplication.mFader->mFadeStatus != TSMSFader::FADE_OFF) {
+        return;
+    }
 
     Values v = readValues();
     int size  = textSize(mCfg);
