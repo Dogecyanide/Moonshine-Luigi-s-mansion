@@ -109,6 +109,7 @@ extern "C" void onSetup(TMarDirector* director) {
 
     // Runs on every stage load, so this must stay above the once-only guard.
     featuresOnStageLoad();
+    actionsOnStageLoad();
     gQFTTimer.onStageSetup(director);
     gAttemptCounter.onStageSetup(director);
 

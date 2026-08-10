@@ -20,4 +20,7 @@
 // onUpdate, after gBinds.update().
 void actionsApply();
 
+// Drop pointers into the previous stage heap. Call after setupObjects().
+void actionsOnStageLoad();
+
 #endif  // _SUSAMUNE_ACTIONS_HXX
