@@ -442,14 +442,15 @@ the defaults", so no version bump was needed.
 1400007C 00000383   ; *(u32*)(pointer + 0x7C) = 0x383
 ```
 
-`TMario+0x7C` is `mState` and `0x383` is `MARIO_STATUS_TAKE`, so the whole code
-is "force Mario into the pick-up action" — `mHeldObject` survives a throw, so
-re-entering TAKE re-attaches whatever he last carried. One C assignment.
+`TMario+0x7C` is `mState` and `0x383` is `MARIO_STATUS_TAKE`, so the Gecko
+operation is "force Mario into the pick-up action". A throw actually clears
+`mHeldObject`, however, and TAKE only attaches an object through `mGrabTarget`.
+The native port therefore remembers the real held-object pointer, supplies it
+as the target, and lets the object's retail `HIT_MESSAGE_TAKE` handler restore
+its own holding state.
 
-Upstream re-writes the word every frame the combo is held, pinning Mario in
-TAKE for as long as you hold it; ours fires on the press edge, which is
-identical for a tap (`mState` is dispatched on the following frame) without
-that side effect.
+Susamune mirrors upstream and re-writes the word every frame while the exact
+combo is held.
 
 ### Spawn Yoshi
 

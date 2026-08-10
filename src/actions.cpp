@@ -35,6 +35,9 @@ namespace {
 // Mario status words, from the decomp's MarioStatus.hpp.
 const u32 kMarioStatusTake = 0x00000383u;  // MARIO_STATUS_TAKE
 const u32 kMarioStatusWait = 0x0C400201u;  // MARIO_STATUS_WAIT
+const u32 kHitMessageTake  = 0x00000004u;  // HIT_MESSAGE_TAKE
+
+TTakeActor *gLastHeldObject;
 
 // MARIO_STATUS_FLAG_UNK1000: set while a demo/cutscene drives Mario.
 // TMario::checkCollision returns immediately when it is set, and both Spawn
@@ -58,23 +61,35 @@ bool stageActive() {
 //   48000000 8040A398   ; pointer = gpMarioAddress
 //   1400007C 00000383   ; *(u32*)(pointer + 0x7C) = 0x383
 //
-// TMario+0x7C is mState and 0x383 is MARIO_STATUS_TAKE, so the whole code is
-// "force Mario into the pick-up action". mHeldObject is untouched by a throw,
-// so re-entering TAKE re-attaches whatever he last carried.
+// TMario+0x7C is mState and 0x383 is MARIO_STATUS_TAKE. A throw clears
+// mHeldObject, so the native port also retains the actual object and sends it
+// through its retail TAKE handler.
 //
-// Upstream re-writes the word every frame the combo is held, which pins Mario
-// in TAKE for as long as you hold it. One write on the press edge produces the
-// same result for a tap (mState is dispatched on the following frame) without
-// that side effect, so this fires on the edge.
+// Match the Gecko handler's per-frame write while the combo is held.
 // =====================================================================
 
 void regrabLastHeldObject() {
-    if (!gBinds.wasPressed(BIND_REGRAB_OBJECT) || !stageActive()) {
+    if (!stageActive()) {
         return;
     }
     TMario *mario = gpMarioAddress;
-    if (mario) {
-        mario->mState = kMarioStatusTake;
+    if (!mario) {
+        return;
+    }
+
+    if (mario->mHeldObject) {
+        gLastHeldObject = mario->mHeldObject;
+        return;
+    }
+    if (!gLastHeldObject || !gBinds.isHeld(BIND_REGRAB_OBJECT)) {
+        return;
+    }
+
+    mario->mGrabTarget = gLastHeldObject;
+    mario->mState      = kMarioStatusTake;
+    if (gLastHeldObject->receiveMessage(mario, kHitMessageTake)) {
+        mario->mHeldObject = gLastHeldObject;
+        mario->mGrabTarget = nullptr;
     }
 }
 
@@ -275,6 +290,11 @@ void fastForward() {
 }
 
 }  // namespace
+
+void actionsOnStageLoad() {
+    // Stage objects live on the heap that setupObjects replaces.
+    gLastHeldObject = nullptr;
+}
 
 extern "C" void susamuneOnEggYoshiControl(TEggYoshi *egg) {
     if (gEggKillFrames == 0 || !egg) {
