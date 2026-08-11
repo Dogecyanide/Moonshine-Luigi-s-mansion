@@ -587,11 +587,70 @@ static void ApplyMetadataDisplayKey(struct SusamuneMetadataDisplayCfg *cfg,
 	}
 }
 
+static bool ParseQftU8(const char *s, u8 *out)
+{
+	u32 v = 0;
+
+	if (*s == '\0')
+		return false;
+	for (; *s; s++)
+	{
+		if (*s < '0' || *s > '9')
+			return false;
+		v = v * 10 + (u32)(*s - '0');
+		if (v > 255)
+			return false;
+	}
+	*out = (u8)v;
+	return true;
+}
+
+static bool ParseQftRgb(const char *s, u8 out[3])
+{
+	u32 channel;
+
+	for (channel = 0; channel < 3; channel++)
+	{
+		u32 v = 0;
+		bool any = false;
+
+		while (*s == ' ' || *s == '\t') s++;
+		while (*s >= '0' && *s <= '9')
+		{
+			any = true;
+			v = v * 10 + (u32)(*s++ - '0');
+			if (v > 255) return false;
+		}
+		if (!any) return false;
+		out[channel] = (u8)v;
+		while (*s == ' ' || *s == '\t') s++;
+		if (channel < 2)
+		{
+			if (*s++ != ',') return false;
+		}
+	}
+	return *s == '\0';
+}
+
 static void ApplyQftDisplayKey(struct SusamuneQftDisplayCfg *cfg,
 			       const char *key, const char *text)
 {
 	u8  v8;
 	u16 v16;
+	u32 i;
+	u8  rgb[3];
+
+	if (strlen(key) == 10 && memcmp(key, "text_", 5) == 0 &&
+	    key[5] >= '1' && key[5] <= '9' && strcmp(key + 6, "_rgb") == 0 &&
+	    ParseQftRgb(text, rgb))
+	{
+		i = (u32)(key[5] - '1');
+		cfg->textRgb[i][0] = rgb[0];
+		cfg->textRgb[i][1] = rgb[1];
+		cfg->textRgb[i][2] = rgb[2];
+		cfg->slotPresent |= SUSAMUNE_QFT_DISPLAY_SLOT(i);
+		return;
+	}
 
 	if (strcmp(key, "x") == 0)
 	{
@@ -609,7 +668,7 @@ static void ApplyQftDisplayKey(struct SusamuneQftDisplayCfg *cfg,
 			cfg->present |= SUSAMUNE_QFT_DISPLAY_Y;
 		}
 	}
-	else if (ParseU8(text, &v8))
+	else if (ParseQftU8(text, &v8))
 	{
 		if (strcmp(key, "scale") == 0)
 		{
@@ -656,10 +715,11 @@ static void ApplyQftDisplayKey(struct SusamuneQftDisplayCfg *cfg,
 			cfg->bgA = v8;
 			cfg->present |= SUSAMUNE_QFT_DISPLAY_BG_A;
 		}
-		else if (strcmp(key, "brightness") == 0)
+		else if (strcmp(key, "text_brightness") == 0 ||
+		         strcmp(key, "brightness") == 0)
 		{
-			cfg->brightness = v8;
-			cfg->present |= SUSAMUNE_QFT_DISPLAY_BRIGHTNESS;
+			cfg->textBrightness = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_TEXT_BRIGHTNESS;
 		}
 		else if (strcmp(key, "padding") == 0)
 		{
@@ -915,7 +975,7 @@ static void EmitMetadataDisplaySection(FIL *f, int *err, const struct SusamuneCf
 }
 
 static void EmitQftU8(FIL *f, int *err, const char *key, u8 value,
-		      u16 present, u16 bit)
+		      u32 present, u32 bit)
 {
 	char line[96];
 	if (present & bit)
@@ -923,7 +983,7 @@ static void EmitQftU8(FIL *f, int *err, const char *key, u8 value,
 }
 
 static void EmitQftU16(FIL *f, int *err, const char *key, u16 value,
-		       u16 present, u16 bit)
+		       u32 present, u32 bit)
 {
 	char line[96];
 	if (present & bit)
@@ -934,6 +994,8 @@ static void EmitQftDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cf
 {
 	const struct SusamuneQftDisplayCfg *d = &cfg->qftDisplay;
 	const u16 p = d->present;
+	u32 i;
+	char line[96];
 
 	EmitStr(f, err, "[");
 	EmitStr(f, err, QftDisplaySection);
@@ -941,16 +1003,31 @@ static void EmitQftDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cf
 	EmitQftU16(f, err, "x", d->x, p, SUSAMUNE_QFT_DISPLAY_X);
 	EmitQftU16(f, err, "y", d->y, p, SUSAMUNE_QFT_DISPLAY_Y);
 	EmitQftU8(f, err, "scale", d->scale, p, SUSAMUNE_QFT_DISPLAY_SCALE);
-	EmitQftU8(f, err, "text_r", d->textR, p, SUSAMUNE_QFT_DISPLAY_TEXT_R);
-	EmitQftU8(f, err, "text_g", d->textG, p, SUSAMUNE_QFT_DISPLAY_TEXT_G);
-	EmitQftU8(f, err, "text_b", d->textB, p, SUSAMUNE_QFT_DISPLAY_TEXT_B);
+	if (d->version == 1 || d->slotPresent == 0)
+	{
+		EmitQftU8(f, err, "text_r", d->textR, p, SUSAMUNE_QFT_DISPLAY_TEXT_R);
+		EmitQftU8(f, err, "text_g", d->textG, p, SUSAMUNE_QFT_DISPLAY_TEXT_G);
+		EmitQftU8(f, err, "text_b", d->textB, p, SUSAMUNE_QFT_DISPLAY_TEXT_B);
+	}
+	else
+	{
+		for (i = 0; i < SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS; i++)
+		{
+			if (d->slotPresent & SUSAMUNE_QFT_DISPLAY_SLOT(i))
+			{
+				Emit(f, err, line, (u32)_sprintf(
+					line, "text_%u_rgb = %u,%u,%u\r\n", i + 1,
+					d->textRgb[i][0], d->textRgb[i][1], d->textRgb[i][2]));
+			}
+		}
+	}
 	EmitQftU8(f, err, "text_alpha", d->textA, p, SUSAMUNE_QFT_DISPLAY_TEXT_A);
 	EmitQftU8(f, err, "background_r", d->bgR, p, SUSAMUNE_QFT_DISPLAY_BG_R);
 	EmitQftU8(f, err, "background_g", d->bgG, p, SUSAMUNE_QFT_DISPLAY_BG_G);
 	EmitQftU8(f, err, "background_b", d->bgB, p, SUSAMUNE_QFT_DISPLAY_BG_B);
 	EmitQftU8(f, err, "background_alpha", d->bgA, p, SUSAMUNE_QFT_DISPLAY_BG_A);
-	EmitQftU8(f, err, "brightness", d->brightness, p,
-	          SUSAMUNE_QFT_DISPLAY_BRIGHTNESS);
+	EmitQftU8(f, err, "text_brightness", d->textBrightness, p,
+	          SUSAMUNE_QFT_DISPLAY_TEXT_BRIGHTNESS);
 	EmitQftU8(f, err, "padding", d->padding, p, SUSAMUNE_QFT_DISPLAY_PADDING);
 }
 
@@ -1207,6 +1284,7 @@ void SusamuneCfgInit(void)
 	cfg->qftDisplay.magic   = SUSAMUNE_QFT_DISPLAY_CFG_MAGIC;
 	cfg->qftDisplay.version = SUSAMUNE_QFT_DISPLAY_CFG_VERSION;
 	cfg->qftDisplay.present = 0;
+	cfg->qftDisplay.slotPresent = 0;
 
 	cfg->magic     = SUSAMUNE_CFG_MAGIC;
 	cfg->version   = SUSAMUNE_CFG_VERSION;

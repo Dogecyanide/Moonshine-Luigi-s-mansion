@@ -13,18 +13,16 @@ struct CreationStyle {
     u16 x;
     u16 y;
     u8  scale;
-    u8  textR;
-    u8  textG;
-    u8  textB;
     u8  textA;
     u8  bgR;
     u8  bgG;
     u8  bgB;
     u8  bgA;
-    u8  brightness;
+    u8  textBrightness;
     u8  padding;
+    u8  textRgb[9][3];
 };
-static_assert(sizeof(CreationStyle) == 16, "creation style layout changed");
+static_assert(sizeof(CreationStyle) == 40, "creation style layout changed");
 
 class CreationEditor {
 public:
@@ -42,9 +40,15 @@ public:
     bool editing() const { return mEditing; }
 
 private:
+    u32 repeatInput(TMarioGamePad *pad);
+
     CreationStyle *mStyle;
     CreationStyle  mBackup;
-    u8             mField;
+    u32            mRepeatMask;
+    u8             mOption;
+    u8             mTextTarget;
+    u8             mRepeatFrames;
+    u8             mConfirm;
     bool           mEditing;
 };
 

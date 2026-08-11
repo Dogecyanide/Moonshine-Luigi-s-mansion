@@ -15,7 +15,7 @@ int clampi(int value, int lo, int hi) {
 
 namespace LayoutEditor {
 
-bool updatePositionScale(u32 rapid, u16 &x, u16 &y, u8 &scale) {
+bool updatePositionScale(u32 rapid, u16 &x, u16 &y, u8 &scale, int maxScale) {
     if (rapid & TMarioGamePad::DPAD_LEFT) {
         x = (u16)clampi((int)x - 2, 0, 640);
     }
@@ -29,10 +29,10 @@ bool updatePositionScale(u32 rapid, u16 &x, u16 &y, u8 &scale) {
         y = (u16)clampi((int)y + 2, 0, 480);
     }
     if (rapid & TMarioGamePad::L) {
-        scale = (u8)clampi((int)scale - 2, 50, 150);
+        scale = (u8)clampi((int)scale - 2, 50, maxScale);
     }
     if (rapid & TMarioGamePad::R) {
-        scale = (u8)clampi((int)scale + 2, 50, 150);
+        scale = (u8)clampi((int)scale + 2, 50, maxScale);
     }
     const u32 controls = TMarioGamePad::DPAD_LEFT | TMarioGamePad::DPAD_RIGHT |
                          TMarioGamePad::DPAD_UP | TMarioGamePad::DPAD_DOWN |

@@ -19,6 +19,7 @@
 #include "susamune/iling.hxx"
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
+#include "susamune/qft_display.hxx"
 #include "susamune/pattern_selector.hxx"
 #include "susamune/warp_wheel.hxx"
 #include "susamune/visible_goop.hxx"
@@ -153,13 +154,15 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     // it and asks whether the menu bind was pressed this frame, which would
     // otherwise be answered from the previous frame's sample.
     gBinds.update();
-    gInputDisplay.update();
-    PatternSelector::update();
+    const bool creationEditing = gQftDisplay.editing();
+    if (!creationEditing)
+        gInputDisplay.update();
+    PatternSelector::update(!creationEditing);
     gQFTTimer.beginFrame();
     gQFTTimer.update();
     // Before direct(): while the wheel is open it takes the pad away from
     // the game.
-    if (!gSettings.getBool(SETTING_DISABLE_WARPS))
+    if (!creationEditing && !gSettings.getBool(SETTING_DISABLE_WARPS))
         WarpWheel::update(gpApplication.mGamePads[0]);
 
     // Freeze the stage while an overlay is up. direct() runs the movement and
@@ -183,15 +186,16 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
 
     gQFTTimer.update();
     ILing::update();
-    gAttemptCounter.update();
+    if (!creationEditing)
+        gAttemptCounter.update();
 
     // Apply/restore the toggled memory-patch features (ported gecko codes).
     // Runs every frame like the gecko handler; no-ops when nothing changed.
     featuresApply();
 
-    actionsApply();
+    actionsApply(!creationEditing);
 
-    if (gSavestateMgr) {
+    if (gSavestateMgr && !creationEditing) {
         gSavestateMgr->updateHook();
     }
     if (gMenu) {
@@ -209,7 +213,8 @@ extern "C" void afterDraw() {
     // immediately afterward: director, fader, audio, and the current frame's
     // GPU work are all complete, while the next game frame has not begun.
     THPPlayerDrawDone();
-    if (gSavestateMgr) gSavestateMgr->processPendingLoad();
+    if (gSavestateMgr && !gQftDisplay.editing())
+        gSavestateMgr->processPendingLoad();
     // gpPollution is stale until the async setup thread reaches onSetup.
     if (gpMarDirector && gpMarDirector->_260 != 0 &&
         gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING) {
