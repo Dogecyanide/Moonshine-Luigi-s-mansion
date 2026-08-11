@@ -533,28 +533,23 @@ private:
 static_assert(sizeof(CategorySettingsTab) == 8, "category tab must stay one slot");
 
 // ---------------------------------------------------------------------
-// Overlay configuration tabs
+// Input Display configuration tab
 // ---------------------------------------------------------------------
-class DisplayTab final : public MenuTab {
+class InputDisplayTab final : public MenuTab {
 public:
-    enum Kind : u8 {
-        INPUT,
-        METADATA,
-    };
+    InputDisplayTab() : mSel(0) {}
 
-    DisplayTab(Kind kind) : mSel(0), mKind(kind) {}
-
-    const char *title() const override { return isInput() ? "Input" : "Metadata"; }
-    bool grabsInput() const override { return editing(); }
-    bool fullScreen() const override { return editing(); }
+    const char *title() const override { return "Input"; }
+    bool grabsInput() const override { return gInputDisplay.editing(); }
+    bool fullScreen() const override { return gInputDisplay.editing(); }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
-        if (editing()) {
-            updateEditor(pad);
+        if (gInputDisplay.editing()) {
+            gInputDisplay.updateEditor(pad);
             return;
         }
 
-        const int count = rowCount();
+        const int count = InputDisplay::menuRowCount();
         u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
             mSel = (u8)wrap(mSel - 1, count);
@@ -562,21 +557,21 @@ public:
             mSel = (u8)wrap(mSel + 1, count);
         }
         if ((rapid & TMarioGamePad::A) || (rapid & TMarioGamePad::CSTICK_RIGHT)) {
-            adjustRow(mSel, +1);
+            gInputDisplay.adjustMenuRow(mSel, +1);
         } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
-            adjustRow(mSel, -1);
+            gInputDisplay.adjustMenuRow(mSel, -1);
         }
     }
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
-        if (editing()) {
-            drawEditor(menu);
+        if (gInputDisplay.editing()) {
+            gInputDisplay.drawEditor(menu);
             return;
         }
 
         const int hintY = y + h - FOOT_SZ;
         h -= ROW_H;
-        const int count = rowCount();
+        const int count = InputDisplay::menuRowCount();
         int maxRows = h / ROW_H;
         int start = listScrollStart(mSel, count, maxRows);
         int end = start + maxRows;
@@ -586,72 +581,56 @@ public:
         for (int i = start; i < end; i++) {
             bool selected = i == mSel;
             if (selected) drawRowHighlight(menu, x, ry, w, ROW_H);
-            menu->drawText(rowName(i), x + 4, ry,
+            menu->drawText(InputDisplay::menuRowName(i), x + 4, ry,
                            ROW_SZ, ROW_SZ, selected ? cRowSel() : cRow());
-            const char *val = rowValue(i);
+            const char *val = gInputDisplay.menuRowValue(i);
             int vx = x + w - Menu::textWidth(val, ROW_SZ) - 8;
             menu->drawText(val, vx, ry, ROW_SZ, ROW_SZ, cValue());
             ry += ROW_H;
         }
         drawScrollHints(menu, x, y, w, h, start, end, count);
-        menu->drawText(footer(), x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
+        menu->drawText("Toggle bind changes visibility for this session only",
+                       x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
     }
 
 private:
-    bool isInput() const { return mKind == INPUT; }
-    bool editing() const {
-        return isInput() ? gInputDisplay.editing() : gMetadataDisplay.editing();
-    }
-    void updateEditor(TMarioGamePad *pad) {
-        if (isInput()) gInputDisplay.updateEditor(pad);
-        else gMetadataDisplay.updateEditor(pad);
-    }
-    void drawEditor(Menu *menu) const {
-        if (isInput()) gInputDisplay.drawEditor(menu);
-        else gMetadataDisplay.drawEditor(menu);
-    }
-    int rowCount() const {
-        return isInput() ? InputDisplay::menuRowCount() : MetadataDisplay::menuRowCount();
-    }
-    const char *rowName(int row) const {
-        return isInput() ? InputDisplay::menuRowName(row) : MetadataDisplay::menuRowName(row);
-    }
-    const char *rowValue(int row) const {
-        return isInput() ? gInputDisplay.menuRowValue(row)
-                         : gMetadataDisplay.menuRowValue(row);
-    }
-    void adjustRow(int row, int dir) {
-        if (isInput()) gInputDisplay.adjustMenuRow(row, dir);
-        else gMetadataDisplay.adjustMenuRow(row, dir);
-    }
-    const char *footer() const {
-        return isInput() ? "Toggle bind changes visibility for this session only"
-                         : "Custom text: edit metadata_display in susamune.ini";
-    }
-
-    u8   mSel;
-    Kind mKind;
+    u8 mSel;
 };
 
-static_assert(sizeof(DisplayTab) == 8, "display tab state grew");
+static_assert(sizeof(InputDisplayTab) == 8, "input tab state grew");
 
 // ---------------------------------------------------------------------
-// Creation -- shared visual editor, initially exposed for compact QFT.
+// Creation -- shared visual editor for compact QFT and Metadata.
 // ---------------------------------------------------------------------
 class CreationTab final : public MenuTab {
 public:
+    CreationTab() : mSel(ROW_QFT_EDITOR) {}
+
     const char *title() const override { return "Creation"; }
-    bool grabsInput() const override { return gQftDisplay.editing(); }
-    bool fullScreen() const override { return gQftDisplay.editing(); }
+    bool grabsInput() const override {
+        return gQftDisplay.editing() || gMetadataDisplay.editing();
+    }
+    bool fullScreen() const override { return grabsInput(); }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
         if (gQftDisplay.editing()) {
             gQftDisplay.updateEditor(pad);
             return;
         }
+        if (gMetadataDisplay.editing()) {
+            gMetadataDisplay.updateEditor(pad);
+            return;
+        }
         const u32 rapid = menu->navigationInput(pad);
+        if (rapid & TMarioGamePad::CSTICK_UP) {
+            moveSelection(-1);
+        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+            moveSelection(+1);
+        }
         if (rapid & (TMarioGamePad::A | TMarioGamePad::CSTICK_RIGHT)) {
-            gQftDisplay.beginEditor();
+            activate(+1);
+        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            activate(-1);
         }
     }
 
@@ -660,14 +639,88 @@ public:
             gQftDisplay.drawEditor(menu);
             return;
         }
-        drawRowHighlight(menu, x, y, w, ROW_H);
-        menu->drawText("QFT timer", x + 4, y, ROW_SZ, ROW_SZ, cRowSel());
-        const char *value = "Edit";
-        menu->drawText(value, x + w - Menu::textWidth(value, ROW_SZ) - 8,
-                       y, ROW_SZ, ROW_SZ, cValue());
-        menu->drawText(SUSAMUNE_GLYPH_A " Open   Saved when the menu closes",
-                       x + 4, y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+        if (gMetadataDisplay.editing()) {
+            gMetadataDisplay.drawEditor(menu);
+            return;
+        }
+
+        const int hintY = y + h - FOOT_SZ;
+        h -= ROW_H;
+        const int count = ROW_COUNT;
+        const int maxRows = h / ROW_H;
+        const int start = listScrollStart(mSel, count, maxRows);
+        int end = start + maxRows;
+        if (end > count) end = count;
+
+        int ry = y;
+        for (int row = start; row < end; row++) {
+            if (isSeparator(row)) {
+                const char *label = row == ROW_QFT_HEADER ? "QFT" : "METADATA";
+                menu->drawText(label, x + 4, ry + 3, 13, 13, cAccent());
+                const int lineX = x + 14 + Menu::textWidth(label, 13);
+                menu->fillBox(lineX, ry + 11, x + w - lineX - 8, 1, cRowDim());
+            } else {
+                const bool selected = row == mSel;
+                if (selected) drawRowHighlight(menu, x, ry, w, ROW_H);
+                const char *name = rowName(row);
+                const char *value = rowValue(row);
+                menu->drawText(name, x + 4, ry, ROW_SZ, ROW_SZ,
+                               selected ? cRowSel() : cRow());
+                menu->drawText(value,
+                               x + w - Menu::textWidth(value, ROW_SZ) - 8,
+                               ry, ROW_SZ, ROW_SZ, cValue());
+            }
+            ry += ROW_H;
+        }
+        drawScrollHints(menu, x, y, w, h, start, end, count);
+        menu->drawText(SUSAMUNE_GLYPH_A " Open/Change   Saved when menu closes",
+                       x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
     }
+
+private:
+    enum Row {
+        ROW_QFT_HEADER,
+        ROW_QFT_EDITOR,
+        ROW_QFT_LEADING_ZERO,
+        ROW_METADATA_HEADER,
+        ROW_METADATA_FIRST,
+        ROW_COUNT = ROW_METADATA_FIRST + MetadataDisplay::FIELD_COUNT + 4,
+    };
+
+    static bool isSeparator(int row) {
+        return row == ROW_QFT_HEADER || row == ROW_METADATA_HEADER;
+    }
+
+    void moveSelection(int dir) {
+        do {
+            mSel = (u8)wrap(mSel + dir, ROW_COUNT);
+        } while (isSeparator(mSel));
+    }
+
+    void activate(int dir) {
+        if (mSel == ROW_QFT_EDITOR) {
+            gQftDisplay.beginEditor();
+        } else if (mSel == ROW_QFT_LEADING_ZERO) {
+            gQftDisplay.toggleLeadingZero();
+        } else if (mSel >= ROW_METADATA_FIRST) {
+            gMetadataDisplay.adjustMenuRow(mSel - ROW_METADATA_FIRST, dir);
+        }
+    }
+
+    const char *rowName(int row) const {
+        if (row == ROW_QFT_EDITOR) return "QFT timer";
+        if (row == ROW_QFT_LEADING_ZERO) return "QFT leading zero";
+        return gMetadataDisplay.menuRowName(row - ROW_METADATA_FIRST);
+    }
+
+    const char *rowValue(int row) const {
+        if (row == ROW_QFT_EDITOR) return "Edit";
+        if (row == ROW_QFT_LEADING_ZERO)
+            return gQftDisplay.leadingZero() ? "On" : "Off";
+        return gMetadataDisplay.menuRowValue(row - ROW_METADATA_FIRST);
+    }
+
+    u8 mSel;
 };
 
 // ---------------------------------------------------------------------
@@ -789,8 +842,7 @@ u8 sUiBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sTimerBuf[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
 u8 sCreationBuf[sizeof(CreationTab)]             __attribute__((aligned(8)));
 u8 sILingBuf[sizeof(ILingTab)]                   __attribute__((aligned(8)));
-u8 sInputBuf[sizeof(DisplayTab)]                 __attribute__((aligned(8)));
-u8 sMetadataBuf[sizeof(DisplayTab)]              __attribute__((aligned(8)));
+u8 sInputBuf[sizeof(InputDisplayTab)]            __attribute__((aligned(8)));
 u8 sBindsBuf[sizeof(BindsTab)]                 __attribute__((aligned(8)));
 }  // namespace
 
@@ -849,8 +901,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab(TITLE_TIMER, SETTING_CAT_TIMER);
     mTabs[mNumTabs++] = new (sCreationBuf) CreationTab();
     mTabs[mNumTabs++] = new (sILingBuf) ILingTab();
-    mTabs[mNumTabs++] = new (sInputBuf) DisplayTab(DisplayTab::INPUT);
-    mTabs[mNumTabs++] = new (sMetadataBuf) DisplayTab(DisplayTab::METADATA);
+    mTabs[mNumTabs++] = new (sInputBuf) InputDisplayTab();
     mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
 }
 

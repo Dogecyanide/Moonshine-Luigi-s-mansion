@@ -1,6 +1,5 @@
 // Native metadata overlay based on sup39's Customized Display data set.
-// The in-game editor stays deliberately small; arbitrary labels and layout
-// are available through one optional template in susamune.ini.
+// Arbitrary labels remain available through one optional ini template.
 
 #include "susamune/metadata_display.hxx"
 
@@ -12,7 +11,6 @@
 #include "SMS/System/Application.hxx"
 #include "SMS/System/MarDirector.hxx"
 #include "susamune/glyphs.hxx"
-#include "susamune/layout_editor.hxx"
 #include "susamune/menu.hxx"
 
 namespace {
@@ -89,8 +87,14 @@ inline int clampi(int v, int lo, int hi) {
     return v;
 }
 
-int textSize(const MetadataDisplayLiveCfg &cfg) {
-    return clampi(kBaseTextSize * (int)cfg.scale / 100, 8, 22);
+int textGlyphBytes(const char *text) {
+    const u8 c = (u8)text[0];
+    return ((c >= 0x81 && c <= 0x9f) || (c >= 0xe0 && c <= 0xfc)) && text[1]
+               ? 2 : 1;
+}
+
+int textSize(const CreationStyle &style) {
+    return clampi(kBaseTextSize * (int)style.scale / 100, 7, 28);
 }
 
 int enabledLineCount(const MetadataDisplayLiveCfg &cfg, const char *format,
@@ -155,11 +159,6 @@ Values readValues() {
     int spinDirection = 0;
     v.spin = mario->checkStickRotate(&spinDirection);
     return v;
-}
-
-void drawLine(Menu *menu, const char *text, int x, int y, int size) {
-    menu->drawText(text, x + 1, y + 1, size, size, Color(0, 0, 0, 220));
-    menu->drawText(text, x, y, size, size, Color(255, 255, 255, 255));
 }
 
 __attribute__((noinline))
@@ -296,15 +295,19 @@ bool formatCustomLine(const char *format, u32 formatLength, const Values &v,
     return false;
 }
 
-void drawBackground(Menu *menu, const MetadataDisplayLiveCfg &cfg,
+void drawBackground(Menu *menu, const CreationStyle &style,
                     int width, int height) {
-    if (cfg.backgroundAlpha == 0 || width <= 0 || height <= 0) return;
-    menu->fillBox(cfg.x - 3, cfg.y - 3, width + 6, height + 6,
-                  Color(0, 0, 0, cfg.backgroundAlpha));
+    if (style.padding == 0xff || style.bgA == 0 || width <= 0 || height <= 0)
+        return;
+    const int pad = style.padding;
+    menu->fillBox(style.x - pad, style.y - pad,
+                  width + pad * 2, height + pad * 2,
+                  Color(style.bgR, style.bgG, style.bgB, style.bgA));
 }
 
-void drawCustom(Menu *menu, const MetadataDisplayLiveCfg &cfg, const char *format,
-                u32 formatLength, const Values &v, int size, int lineH) {
+void drawCustom(Menu *menu, const CreationStyle &style, const u8 (*textRgb)[3],
+                const char *format, u32 formatLength, const Values &v,
+                int size, int lineH) {
     char line[192];
     u32 pos = 0;
     int maxWidth = 0;
@@ -318,13 +321,17 @@ void drawCustom(Menu *menu, const MetadataDisplayLiveCfg &cfg, const char *forma
         lines++;
     } while (more);
 
-    drawBackground(menu, cfg, maxWidth, lines * lineH);
+    drawBackground(menu, style, maxWidth, lines * lineH);
 
     pos = 0;
-    int y = cfg.y;
+    int y = style.y;
+    u16 slot = 0;
     do {
         more = formatCustomLine(format, formatLength, v, pos, line, sizeof(line));
-        drawLine(menu, line, cfg.x, y, size);
+        Creation::drawTextLine(menu, style, textRgb,
+                               SUSAMUNE_METADATA_STYLE_TEXT_SLOTS,
+                               line, style.x, y, size, slot, true);
+        slot = (u16)(slot + Creation::glyphCount(line));
         y += lineH;
     } while (more);
 }
@@ -332,6 +339,18 @@ void drawCustom(Menu *menu, const MetadataDisplayLiveCfg &cfg, const char *forma
 }  // namespace
 
 MetadataDisplay gMetadataDisplay;
+
+CreationStyle MetadataDisplay::defaultStyle() {
+    return CreationStyle{16, 112, 100, 255, 0, 0, 0, 0, 100, 3};
+}
+
+void MetadataDisplay::defaultTextRgb(u8 (*out)[3]) {
+    for (int i = 0; i < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS; i++) {
+        out[i][0] = 255;
+        out[i][1] = 255;
+        out[i][2] = 255;
+    }
+}
 
 void MetadataDisplay::resetDefaults() {
     mCfg.x            = 16;
@@ -341,12 +360,16 @@ void MetadataDisplay::resetDefaults() {
     mCfg.scale        = 100;
     mCfg.labelMode    = SUSAMUNE_METADATA_LABEL_SHORT;
     mCfg.backgroundAlpha = 0;
+    mStyle             = defaultStyle();
+    defaultTextRgb(mTextRgb);
     mFormat            = kDefaultFormat;
     mFormatLength      = sizeof(kDefaultFormat) - 1;
 
+    mEditor.reset();
+    mEditorPreview[0] = '\0';
+    mEditorPreviewSlots = 0;
     mDirty          = false;
     mDirtyBeforeEdit = false;
-    mEditing        = false;
 }
 
 void MetadataDisplay::adopt(const volatile SusamuneMetadataDisplayCfg *src) {
@@ -378,8 +401,40 @@ void MetadataDisplay::adopt(const volatile SusamuneMetadataDisplayCfg *src) {
 
     mCfg.fieldMask &= SUSAMUNE_METADATA_FIELD_ALL;
     mCfg.startVisible = mCfg.startVisible ? 1 : 0;
-    mCfg.scale         = (u8)clampi(mCfg.scale, 50, 150);
+    mCfg.scale         = (u8)clampi(mCfg.scale, 50, 200);
     mCfg.labelMode     = (u8)clampi(mCfg.labelMode, 0, 2);
+    mStyle.x           = mCfg.x;
+    mStyle.y           = mCfg.y;
+    mStyle.scale       = mCfg.scale;
+    mStyle.bgA         = mCfg.backgroundAlpha;
+    clampLayout();
+    mDirty = false;
+}
+
+void MetadataDisplay::adoptStyle(const volatile SusamuneMetadataStyleCfg *src) {
+    if (!src || src->magic != SUSAMUNE_METADATA_STYLE_MAGIC ||
+        src->version != SUSAMUNE_METADATA_STYLE_VERSION) {
+        return;
+    }
+
+    const u16 p = src->present;
+    if (p & SUSAMUNE_METADATA_STYLE_TEXT_A) mStyle.textA = src->textA;
+    if (p & SUSAMUNE_METADATA_STYLE_BG_R) mStyle.bgR = src->bgR;
+    if (p & SUSAMUNE_METADATA_STYLE_BG_G) mStyle.bgG = src->bgG;
+    if (p & SUSAMUNE_METADATA_STYLE_BG_B) mStyle.bgB = src->bgB;
+    if (p & SUSAMUNE_METADATA_STYLE_BG_A) mStyle.bgA = src->bgA;
+    if (p & SUSAMUNE_METADATA_STYLE_BRIGHTNESS)
+        mStyle.textBrightness = src->textBrightness;
+    if (p & SUSAMUNE_METADATA_STYLE_PADDING) mStyle.padding = src->padding;
+
+    for (int i = 0; i < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS; i++) {
+        if (p & SUSAMUNE_METADATA_STYLE_TEXT_R) mTextRgb[i][0] = src->textR;
+        if (p & SUSAMUNE_METADATA_STYLE_TEXT_G) mTextRgb[i][1] = src->textG;
+        if (p & SUSAMUNE_METADATA_STYLE_TEXT_B) mTextRgb[i][2] = src->textB;
+        if (src->slotPresent[i >> 3] & (1u << (i & 7))) {
+            for (int c = 0; c < 3; c++) mTextRgb[i][c] = src->textRgb[i][c];
+        }
+    }
     clampLayout();
     mDirty = false;
 }
@@ -387,13 +442,13 @@ void MetadataDisplay::adopt(const volatile SusamuneMetadataDisplayCfg *src) {
 void MetadataDisplay::stageInto(volatile SusamuneMetadataDisplayCfg *dst) const {
     dst->magic        = SUSAMUNE_METADATA_CFG_MAGIC;
     dst->version      = SUSAMUNE_METADATA_CFG_VERSION;
-    dst->x            = mCfg.x;
-    dst->y            = mCfg.y;
+    dst->x            = mStyle.x;
+    dst->y            = mStyle.y;
     dst->fieldMask    = mCfg.fieldMask;
     dst->startVisible = mCfg.startVisible;
-    dst->scale        = mCfg.scale;
+    dst->scale        = mStyle.scale;
     dst->labelMode    = mCfg.labelMode;
-    dst->backgroundAlpha = mCfg.backgroundAlpha;
+    dst->backgroundAlpha = mStyle.bgA;
     const char *dstFormat = const_cast<const char *>(&dst->format[0]);
     if (mFormat != dstFormat) {
         for (u32 i = 0; i < mFormatLength; i++) {
@@ -405,30 +460,87 @@ void MetadataDisplay::stageInto(volatile SusamuneMetadataDisplayCfg *dst) const 
     }
 }
 
+void MetadataDisplay::stageStyleInto(volatile SusamuneMetadataStyleCfg *dst) const {
+    int modal = 0;
+    int modalCount = 0;
+    for (int candidate = 0; candidate < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS;
+         candidate++) {
+        int count = 0;
+        for (int i = 0; i < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS; i++) {
+            if (mTextRgb[i][0] == mTextRgb[candidate][0] &&
+                mTextRgb[i][1] == mTextRgb[candidate][1] &&
+                mTextRgb[i][2] == mTextRgb[candidate][2]) {
+                count++;
+            }
+        }
+        if (count > modalCount) {
+            modal = candidate;
+            modalCount = count;
+        }
+    }
+
+    dst->magic          = SUSAMUNE_METADATA_STYLE_MAGIC;
+    dst->version        = SUSAMUNE_METADATA_STYLE_VERSION;
+    dst->present        = SUSAMUNE_METADATA_STYLE_ALL;
+    dst->textR          = mTextRgb[modal][0];
+    dst->textG          = mTextRgb[modal][1];
+    dst->textB          = mTextRgb[modal][2];
+    dst->textA          = mStyle.textA;
+    dst->bgR            = mStyle.bgR;
+    dst->bgG            = mStyle.bgG;
+    dst->bgB            = mStyle.bgB;
+    dst->bgA            = mStyle.bgA;
+    dst->textBrightness = mStyle.textBrightness;
+    dst->padding        = mStyle.padding;
+    for (u32 i = 0; i < sizeof(dst->reserved0); i++) dst->reserved0[i] = 0;
+    for (u32 i = 0; i < sizeof(dst->slotPresent); i++) dst->slotPresent[i] = 0;
+    for (int i = 0; i < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS; i++) {
+        const bool override = mTextRgb[i][0] != mTextRgb[modal][0] ||
+                              mTextRgb[i][1] != mTextRgb[modal][1] ||
+                              mTextRgb[i][2] != mTextRgb[modal][2];
+        if (override) dst->slotPresent[i >> 3] |= (u8)(1u << (i & 7));
+        for (int c = 0; c < 3; c++) dst->textRgb[i][c] = mTextRgb[i][c];
+    }
+}
+
 void MetadataDisplay::markDirty() {
     mDirty = true;
     clampLayout();
 }
 
 void MetadataDisplay::resetLayout() {
-    mCfg.x     = 16;
-    mCfg.y     = 112;
-    mCfg.scale = 100;
-    mCfg.backgroundAlpha = 0;
+    const CreationStyle defaults = defaultStyle();
+    mStyle.x     = defaults.x;
+    mStyle.y     = defaults.y;
+    mStyle.scale = defaults.scale;
+    mStyle.bgA   = defaults.bgA;
     markDirty();
 }
 
 void MetadataDisplay::clampLayout() {
-    int size  = textSize(mCfg);
+    mStyle.scale          = (u8)clampi(mStyle.scale, 50, 200);
+    mStyle.textBrightness = (u8)clampi(mStyle.textBrightness, 25, 200);
+    if (mStyle.padding != 0xff)
+        mStyle.padding = (u8)clampi(mStyle.padding, 0, 16);
+    int size  = textSize(mStyle);
     int lines = enabledLineCount(mCfg, mFormat, mFormatLength);
     int h     = lines * (size + 3);
     int maxY  = kSafeBottom - h;
     if (maxY < 0) maxY = 0;
-    mCfg.x = (u16)clampi(mCfg.x, 0, 620);
-    mCfg.y = (u16)clampi(mCfg.y, 0, maxY);
+    mStyle.x = (u16)clampi(mStyle.x, 0, 620);
+    mStyle.y = (u16)clampi(mStyle.y, 0, maxY);
+    syncLegacyStyle();
+}
+
+void MetadataDisplay::syncLegacyStyle() {
+    mCfg.x               = mStyle.x;
+    mCfg.y               = mStyle.y;
+    mCfg.scale           = mStyle.scale;
+    mCfg.backgroundAlpha = mStyle.bgA;
 }
 
 const char *MetadataDisplay::menuRowName(int row) {
+    if (row == 2 + FIELD_COUNT) return "Metadata style";
     return (row >= 0 && row < menuRowCount())
                ? kMetadataText + kTextOffsets[FIELD_COUNT + row] : "";
 }
@@ -438,7 +550,7 @@ const char *MetadataDisplay::menuRowValue(int row) const {
     if (row == 1) return labelModeText(mCfg.labelMode);
     if (row >= 2 && row < 2 + FIELD_COUNT)
         return onOffText((mCfg.fieldMask & fieldBit(row - 2)) != 0);
-    if (row == 2 + FIELD_COUNT) return "Open";
+    if (row == 2 + FIELD_COUNT) return "Edit";
     if (row == 3 + FIELD_COUNT) return "Default";
     return "";
 }
@@ -461,50 +573,65 @@ void MetadataDisplay::adjustMenuRow(int row, int dir) {
     }
 }
 
-void MetadataDisplay::beginEditor() {
-    if (mEditing) return;
-    mEditBackup      = {mCfg.x, mCfg.y, mCfg.scale, mCfg.backgroundAlpha};
-    mDirtyBeforeEdit = mDirty;
-    mEditing         = true;
+void MetadataDisplay::buildEditorPreview() {
+    Values v = readValues();
+    int out = 0;
+    auto appendLine = [&](const char *line) {
+        while (*line && out < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS) {
+            const int bytes = textGlyphBytes(line);
+            if (out + bytes > SUSAMUNE_METADATA_STYLE_TEXT_SLOTS) break;
+            for (int i = 0; i < bytes; i++) mEditorPreview[out++] = line[i];
+            line += bytes;
+        }
+    };
+
+    char line[192];
+    if (mCfg.labelMode == SUSAMUNE_METADATA_LABEL_CUSTOM) {
+        u32 pos = 0;
+        bool more;
+        do {
+            more = formatCustomLine(mFormat, mFormatLength, v, pos,
+                                    line, sizeof(line));
+            appendLine(line);
+        } while (more && out < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS);
+    } else {
+        const u8 *labelOffsets = kTextOffsets;
+        if (mCfg.labelMode == SUSAMUNE_METADATA_LABEL_LONG)
+            labelOffsets += FIELD_COUNT + 2;
+        for (int field = 0; field < FIELD_COUNT; field++) {
+            if (!(mCfg.fieldMask & fieldBit(field))) continue;
+            formatField(line, sizeof(line), field,
+                        kMetadataText + labelOffsets[field], v);
+            appendLine(line);
+        }
+    }
+
+    if (out == 0) {
+        const char fallback[] = "Metadata";
+        for (u32 i = 0; i < sizeof(fallback); i++) mEditorPreview[i] = fallback[i];
+        out = sizeof(fallback) - 1;
+    } else {
+        mEditorPreview[out] = '\0';
+    }
+    mEditorPreviewSlots = (u16)Creation::glyphCount(mEditorPreview);
 }
 
-void MetadataDisplay::finishEditor(bool keep) {
-    if (!keep) {
-        mCfg.x               = mEditBackup.x;
-        mCfg.y               = mEditBackup.y;
-        mCfg.scale           = mEditBackup.scale;
-        mCfg.backgroundAlpha = mEditBackup.backgroundAlpha;
-        mDirty = mDirtyBeforeEdit;
-    }
-    mEditing = false;
+void MetadataDisplay::beginEditor() {
+    if (editing()) return;
+    buildEditorPreview();
+    mDirtyBeforeEdit = mDirty;
+    mEditor.begin(&mStyle, mTextRgb, mBackupRgb,
+                  SUSAMUNE_METADATA_STYLE_TEXT_SLOTS, mEditorPreviewSlots);
 }
 
 void MetadataDisplay::updateEditor(TMarioGamePad *pad) {
-    u32 rapid = pad->mButtons.mRapidInput;
-    if (rapid & TMarioGamePad::A) {
-        finishEditor(true);
-        return;
+    const u8 defaultsRgb[3] = {255, 255, 255};
+    const u8 result = mEditor.update(pad, defaultStyle(), defaultsRgb);
+    if (result & CreationEditor::UPDATE_CHANGED) markDirty();
+    if (result & CreationEditor::UPDATE_CANCELLED) {
+        syncLegacyStyle();
+        mDirty = mDirtyBeforeEdit;
     }
-    if (rapid & TMarioGamePad::B) {
-        finishEditor(false);
-        return;
-    }
-    if (rapid & TMarioGamePad::Z) {
-        resetLayout();
-        return;
-    }
-
-    bool changed = LayoutEditor::updatePositionScale(
-        rapid, mCfg.x, mCfg.y, mCfg.scale);
-    if (rapid & TMarioGamePad::X) {
-        mCfg.backgroundAlpha = (u8)clampi((int)mCfg.backgroundAlpha - 8, 0, 255);
-        changed = true;
-    }
-    if (rapid & TMarioGamePad::Y) {
-        mCfg.backgroundAlpha = (u8)clampi((int)mCfg.backgroundAlpha + 8, 0, 255);
-        changed = true;
-    }
-    if (changed) markDirty();
 }
 
 void MetadataDisplay::draw(Menu *menu, bool force) const {
@@ -521,11 +648,12 @@ void MetadataDisplay::draw(Menu *menu, bool force) const {
     }
 
     Values v = readValues();
-    int size  = textSize(mCfg);
+    int size  = textSize(mStyle);
     int lineH = size + 3;
 
     if (mCfg.labelMode == SUSAMUNE_METADATA_LABEL_CUSTOM) {
-        drawCustom(menu, mCfg, mFormat, mFormatLength, v, size, lineH);
+        drawCustom(menu, mStyle, mTextRgb, mFormat, mFormatLength,
+                   v, size, lineH);
         return;
     }
 
@@ -544,27 +672,23 @@ void MetadataDisplay::draw(Menu *menu, bool force) const {
         if (width > maxWidth) maxWidth = width;
         lines++;
     }
-    drawBackground(menu, mCfg, maxWidth, lines * lineH);
+    drawBackground(menu, mStyle, maxWidth, lines * lineH);
 
-    int y = mCfg.y;
+    int y = mStyle.y;
+    u16 slot = 0;
     for (int field = 0; field < FIELD_COUNT; field++) {
         if (!(mCfg.fieldMask & fieldBit(field))) continue;
         formatField(text, sizeof(text), field,
                     kMetadataText + labelOffsets[field], v);
-        drawLine(menu, text, mCfg.x, y, size);
+        Creation::drawTextLine(menu, mStyle, mTextRgb,
+                               SUSAMUNE_METADATA_STYLE_TEXT_SLOTS,
+                               text, mStyle.x, y, size, slot, true);
+        slot = (u16)(slot + Creation::glyphCount(text));
         y += lineH;
     }
 }
 
 void MetadataDisplay::drawEditor(Menu *menu) const {
     draw(menu, true);
-
-    char status[96];
-    snprintf(status, sizeof(status), "X:%u Y:%u Size:%u%% BG:%u%% Labels:%s",
-             mCfg.x, mCfg.y, mCfg.scale,
-             (unsigned)mCfg.backgroundAlpha * 100u / 255u,
-             labelModeText(mCfg.labelMode));
-    LayoutEditor::drawHeader(menu, 70, "Metadata Display editor", status);
-    menu->drawText("D-pad Move  L/R Size  X/Y BG  A Save  B Cancel  Z Reset",
-                   18, 57, 11, 11, Color(255, 255, 255, 255));
+    mEditor.draw(menu, "Metadata editor", mEditorPreview);
 }

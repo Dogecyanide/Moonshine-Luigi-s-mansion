@@ -15,25 +15,28 @@ inline int clampi(int value, int lo, int hi) {
 QftDisplay gQftDisplay;
 
 CreationStyle QftDisplay::defaults() {
-    CreationStyle style = {
+    return CreationStyle{
         16, 416, 100, 255,
         0, 0, 0, 128,
         100, 2,
-        {{0}},
     };
+}
+
+void QftDisplay::defaultTextRgb(u8 (*out)[3]) {
     for (int i = 0; i < SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS; i++) {
-        style.textRgb[i][0] = 255;
-        style.textRgb[i][1] = 255;
-        style.textRgb[i][2] = 255;
+        out[i][0] = 255;
+        out[i][1] = 255;
+        out[i][2] = 255;
     }
-    return style;
 }
 
 void QftDisplay::resetDefaults() {
     mStyle           = defaults();
+    defaultTextRgb(mTextRgb);
     mEditor.reset();
     mDirty           = false;
     mDirtyBeforeEdit = false;
+    mLeadingZero     = false;
 }
 
 void QftDisplay::clamp() {
@@ -64,18 +67,20 @@ void QftDisplay::adopt(const volatile SusamuneQftDisplayCfg *src) {
     if (p & SUSAMUNE_QFT_DISPLAY_TEXT_BRIGHTNESS)
         mStyle.textBrightness = src->textBrightness;
     if (p & SUSAMUNE_QFT_DISPLAY_PADDING)    mStyle.padding = src->padding;
+    if (p & SUSAMUNE_QFT_DISPLAY_LEADING_ZERO)
+        mLeadingZero = src->leadingZero != 0;
 
     for (int i = 0; i < SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS; i++) {
         if (p & SUSAMUNE_QFT_DISPLAY_TEXT_R)
-            mStyle.textRgb[i][0] = src->textR;
+            mTextRgb[i][0] = src->textR;
         if (p & SUSAMUNE_QFT_DISPLAY_TEXT_G)
-            mStyle.textRgb[i][1] = src->textG;
+            mTextRgb[i][1] = src->textG;
         if (p & SUSAMUNE_QFT_DISPLAY_TEXT_B)
-            mStyle.textRgb[i][2] = src->textB;
+            mTextRgb[i][2] = src->textB;
         if (src->version == SUSAMUNE_QFT_DISPLAY_CFG_VERSION &&
             (src->slotPresent & SUSAMUNE_QFT_DISPLAY_SLOT(i))) {
             for (int c = 0; c < 3; c++)
-                mStyle.textRgb[i][c] = src->textRgb[i][c];
+                mTextRgb[i][c] = src->textRgb[i][c];
         }
     }
     clamp();
@@ -89,9 +94,9 @@ void QftDisplay::stageInto(volatile SusamuneQftDisplayCfg *dst) const {
     dst->x              = mStyle.x;
     dst->y              = mStyle.y;
     dst->scale          = mStyle.scale;
-    dst->textR          = mStyle.textRgb[0][0];
-    dst->textG          = mStyle.textRgb[0][1];
-    dst->textB          = mStyle.textRgb[0][2];
+    dst->textR          = mTextRgb[0][0];
+    dst->textG          = mTextRgb[0][1];
+    dst->textB          = mTextRgb[0][2];
     dst->textA          = mStyle.textA;
     dst->bgR            = mStyle.bgR;
     dst->bgG            = mStyle.bgG;
@@ -99,27 +104,31 @@ void QftDisplay::stageInto(volatile SusamuneQftDisplayCfg *dst) const {
     dst->bgA            = mStyle.bgA;
     dst->textBrightness = mStyle.textBrightness;
     dst->padding        = mStyle.padding;
+    dst->leadingZero    = mLeadingZero ? 1 : 0;
     for (u32 i = 0; i < sizeof(dst->reservedV1); i++) dst->reservedV1[i] = 0;
     dst->slotPresent = SUSAMUNE_QFT_DISPLAY_ALL_SLOTS;
     for (int i = 0; i < SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS; i++) {
         for (int c = 0; c < 3; c++)
-            dst->textRgb[i][c] = mStyle.textRgb[i][c];
+            dst->textRgb[i][c] = mTextRgb[i][c];
     }
     for (u32 i = 0; i < sizeof(dst->reserved); i++) dst->reserved[i] = 0;
 }
 
 void QftDisplay::draw(Menu *menu, const char *text) const {
-    Creation::drawTextBox(menu, mStyle, text);
+    Creation::drawTextBox(menu, mStyle, mTextRgb,
+                          SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS, text, true);
 }
 
 void QftDisplay::beginEditor() {
     if (editing()) return;
     mDirtyBeforeEdit = mDirty;
-    mEditor.begin(&mStyle);
+    mEditor.begin(&mStyle, mTextRgb, mBackupRgb,
+                  SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS);
 }
 
 void QftDisplay::updateEditor(TMarioGamePad *pad) {
-    const u8 result = mEditor.update(pad, defaults());
+    const u8 defaultsRgb[3] = {255, 255, 255};
+    const u8 result = mEditor.update(pad, defaults(), defaultsRgb);
     if (result & CreationEditor::UPDATE_CHANGED) {
         clamp();
         mDirty = true;
@@ -131,5 +140,10 @@ void QftDisplay::updateEditor(TMarioGamePad *pad) {
 
 void QftDisplay::drawEditor(Menu *menu) const {
     draw(menu, "12:34:567");
-    mEditor.draw(menu, "QFT timer editor");
+    mEditor.draw(menu, "QFT timer editor", "12:34:567");
+}
+
+void QftDisplay::toggleLeadingZero() {
+    mLeadingZero = !mLeadingZero;
+    mDirty = true;
 }

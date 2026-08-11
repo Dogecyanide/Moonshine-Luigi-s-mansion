@@ -765,7 +765,10 @@ void QFTTimer::draw(Menu *menu) const {
   int remainder = (int)(millis % 1000);
 
   char text[20];
-  snprintf(text, sizeof(text), "%d:%02d.%03d", minutes, seconds, remainder);
+  if (gQftDisplay.leadingZero() && minutes < 10)
+    snprintf(text, sizeof(text), "0%d:%02d.%03d", minutes, seconds, remainder);
+  else
+    snprintf(text, sizeof(text), "%d:%02d.%03d", minutes, seconds, remainder);
 
   gQftDisplay.draw(menu, text);
 }

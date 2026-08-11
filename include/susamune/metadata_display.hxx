@@ -3,6 +3,7 @@
 
 #include <Dolphin/types.h>
 
+#include "susamune/creation.hxx"
 #include "susamune/susamune_cfg.h"
 
 class Menu;
@@ -39,7 +40,9 @@ public:
 
     void resetDefaults();
     void adopt(const volatile SusamuneMetadataDisplayCfg *src);
+    void adoptStyle(const volatile SusamuneMetadataStyleCfg *src);
     void stageInto(volatile SusamuneMetadataDisplayCfg *dst) const;
+    void stageStyleInto(volatile SusamuneMetadataStyleCfg *dst) const;
 
     void draw(Menu *menu, bool force = false) const;
 
@@ -54,31 +57,29 @@ public:
     void beginEditor();
     void updateEditor(TMarioGamePad *pad);
     void drawEditor(Menu *menu) const;
-    bool editing() const { return mEditing; }
+    bool editing() const { return mEditor.editing(); }
 
 private:
-    struct EditBackup {
-        u16 x;
-        u16 y;
-        u8  scale;
-        u8  backgroundAlpha;
-    };
-
+    static CreationStyle defaultStyle();
+    static void defaultTextRgb(u8 (*out)[3]);
     void resetLayout();
     void clampLayout();
     void markDirty();
-    void finishEditor(bool keep);
+    void syncLegacyStyle();
+    void buildEditorPreview();
 
     const char                *mFormat;
     MetadataDisplayLiveCfg     mCfg;
-    EditBackup                 mEditBackup;
+    CreationStyle              mStyle;
+    CreationEditor             mEditor;
+    u8 mTextRgb[SUSAMUNE_METADATA_STYLE_TEXT_SLOTS][3];
+    u8 mBackupRgb[SUSAMUNE_METADATA_STYLE_TEXT_SLOTS][3];
+    char mEditorPreview[SUSAMUNE_METADATA_STYLE_TEXT_SLOTS + 1];
+    u16  mEditorPreviewSlots;
     bool                       mDirty;
     bool                       mDirtyBeforeEdit;
-    bool                       mEditing;
     u8                         mFormatLength;
 };
-
-static_assert(sizeof(MetadataDisplay) == 24, "metadata display state grew");
 
 extern MetadataDisplay gMetadataDisplay;
 

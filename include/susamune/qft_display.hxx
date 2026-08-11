@@ -20,17 +20,24 @@ public:
     void drawEditor(Menu *menu) const;
     bool editing() const { return mEditor.editing(); }
 
+    bool leadingZero() const { return mLeadingZero; }
+    void toggleLeadingZero();
+
     bool dirty() const { return mDirty; }
     void clearDirty() { mDirty = false; }
 
 private:
     static CreationStyle defaults();
+    static void defaultTextRgb(u8 (*out)[3]);
     void clamp();
 
     CreationStyle  mStyle;
+    u8             mTextRgb[SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS][3];
+    u8             mBackupRgb[SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS][3];
     CreationEditor mEditor;
     bool           mDirty;
     bool           mDirtyBeforeEdit;
+    bool           mLeadingZero;
 };
 
 extern QftDisplay gQftDisplay;

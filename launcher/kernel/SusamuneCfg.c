@@ -89,7 +89,7 @@ static const struct BindButton BindButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAM
 // Enough for the whole file: the settings plus display payloads for all
 // three versions, section headers, and the comment banner.
 // A file larger than this is refused rather than truncated (see WriteIniFile).
-#define SUSAMUNE_INI_BUF_SIZE 12288
+#define SUSAMUNE_INI_BUF_SIZE 32768
 
 // Longest section name we build: "settings" + '_' + "pal" + NUL.
 #define SUSAMUNE_SECTION_NAME_MAX 24
@@ -726,6 +726,103 @@ static void ApplyQftDisplayKey(struct SusamuneQftDisplayCfg *cfg,
 			cfg->padding = v8;
 			cfg->present |= SUSAMUNE_QFT_DISPLAY_PADDING;
 		}
+		else if (strcmp(key, "leading_zero") == 0)
+		{
+			cfg->leadingZero = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_LEADING_ZERO;
+		}
+	}
+}
+
+static bool ParseMetadataRgbKey(const char *key, u32 *slot)
+{
+	u32 value = 0;
+	const char *p;
+
+	if (memcmp(key, "text_", 5) != 0)
+		return false;
+	p = key + 5;
+	if (*p < '0' || *p > '9')
+		return false;
+	while (*p >= '0' && *p <= '9')
+	{
+		value = value * 10 + (u32)(*p++ - '0');
+		if (value > SUSAMUNE_METADATA_STYLE_TEXT_SLOTS)
+			return false;
+	}
+	if (value == 0 || strcmp(p, "_rgb") != 0)
+		return false;
+	*slot = value - 1;
+	return true;
+}
+
+static void ApplyMetadataStyleKey(struct SusamuneMetadataStyleCfg *cfg,
+				  const char *key, const char *text)
+{
+	u8 rgb[3];
+	u8 v8;
+	u32 slot;
+
+	if (ParseMetadataRgbKey(key, &slot) && ParseQftRgb(text, rgb))
+	{
+		cfg->textRgb[slot][0] = rgb[0];
+		cfg->textRgb[slot][1] = rgb[1];
+		cfg->textRgb[slot][2] = rgb[2];
+		cfg->slotPresent[slot >> 3] |= (u8)(1u << (slot & 7));
+		return;
+	}
+	if (!ParseQftU8(text, &v8))
+		return;
+
+	if (strcmp(key, "text_r") == 0)
+	{
+		cfg->textR = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_TEXT_R;
+	}
+	else if (strcmp(key, "text_g") == 0)
+	{
+		cfg->textG = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_TEXT_G;
+	}
+	else if (strcmp(key, "text_b") == 0)
+	{
+		cfg->textB = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_TEXT_B;
+	}
+	else if (strcmp(key, "text_alpha") == 0)
+	{
+		cfg->textA = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_TEXT_A;
+	}
+	else if (strcmp(key, "background_r") == 0)
+	{
+		cfg->bgR = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_BG_R;
+	}
+	else if (strcmp(key, "background_g") == 0)
+	{
+		cfg->bgG = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_BG_G;
+	}
+	else if (strcmp(key, "background_b") == 0)
+	{
+		cfg->bgB = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_BG_B;
+	}
+	else if (strcmp(key, "background_alpha") == 0)
+	{
+		cfg->bgA = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_BG_A;
+	}
+	else if (strcmp(key, "text_brightness") == 0 || strcmp(key, "brightness") == 0)
+	{
+		cfg->textBrightness = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_BRIGHTNESS;
+	}
+	else if (strcmp(key, "padding") == 0)
+	{
+		cfg->padding = v8;
+		cfg->present |= SUSAMUNE_METADATA_STYLE_PADDING;
 	}
 }
 
@@ -806,6 +903,7 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 		else if (section == SECTION_METADATA_DISPLAY)
 		{
 			ApplyMetadataDisplayKey(&cfg->metadataDisplay, Trim(line), Trim(eq + 1));
+			ApplyMetadataStyleKey(&cfg->metadataStyle, Trim(line), Trim(eq + 1));
 		}
 		else if (section == SECTION_QFT_DISPLAY)
 		{
@@ -931,6 +1029,14 @@ static void EmitInputU16(FIL *f, int *err, const char *key, u16 value)
 		Emit(f, err, line, (u32)_sprintf(line, "%s = %u\r\n", key, value));
 }
 
+static void EmitMetadataStyleU8(FIL *f, int *err, const char *key, u8 value,
+				u16 present, u16 bit)
+{
+	char line[96];
+	if (present & bit)
+		Emit(f, err, line, (u32)_sprintf(line, "%s = %u\r\n", key, value));
+}
+
 static void EmitInputDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cfg)
 {
 	const struct SusamuneInputDisplayCfg *d = &cfg->inputDisplay;
@@ -955,6 +1061,16 @@ static void EmitInputDisplaySection(FIL *f, int *err, const struct SusamuneCfg *
 static void EmitMetadataDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cfg)
 {
 	const struct SusamuneMetadataDisplayCfg *d = &cfg->metadataDisplay;
+	const struct SusamuneMetadataStyleCfg *s = &cfg->metadataStyle;
+	u8 backgroundAlpha = d->backgroundAlpha;
+	u32 i;
+	char line[96];
+	if (s->magic == SUSAMUNE_METADATA_STYLE_MAGIC &&
+	    s->version == SUSAMUNE_METADATA_STYLE_VERSION &&
+	    (s->present & SUSAMUNE_METADATA_STYLE_BG_A) &&
+	    (backgroundAlpha == SUSAMUNE_INPUT_CFG_U8_UNSET ||
+	     backgroundAlpha == s->bgA))
+		backgroundAlpha = s->bgA;
 
 	EmitStr(f, err, "[");
 	EmitStr(f, err, MetadataDisplaySection);
@@ -965,12 +1081,49 @@ static void EmitMetadataDisplaySection(FIL *f, int *err, const struct SusamuneCf
 	EmitInputU8(f, err, "start_visible", d->startVisible);
 	EmitInputU8(f, err, "scale", d->scale);
 	EmitInputU8(f, err, "label_mode", d->labelMode);
-	EmitInputU8(f, err, "background_alpha", d->backgroundAlpha);
 	if ((u8)d->format[0] != SUSAMUNE_METADATA_FORMAT_UNSET)
 	{
 		EmitStr(f, err, "format = ");
 		EmitStr(f, err, d->format);
 		EmitStr(f, err, "\r\n");
+	}
+	if (s->magic != SUSAMUNE_METADATA_STYLE_MAGIC ||
+	    s->version != SUSAMUNE_METADATA_STYLE_VERSION)
+	{
+		EmitInputU8(f, err, "background_alpha", backgroundAlpha);
+		return;
+	}
+	EmitMetadataStyleU8(f, err, "text_r", s->textR, s->present,
+	                    SUSAMUNE_METADATA_STYLE_TEXT_R);
+	EmitMetadataStyleU8(f, err, "text_g", s->textG, s->present,
+	                    SUSAMUNE_METADATA_STYLE_TEXT_G);
+	EmitMetadataStyleU8(f, err, "text_b", s->textB, s->present,
+	                    SUSAMUNE_METADATA_STYLE_TEXT_B);
+	EmitMetadataStyleU8(f, err, "text_alpha", s->textA, s->present,
+	                    SUSAMUNE_METADATA_STYLE_TEXT_A);
+	EmitMetadataStyleU8(f, err, "background_r", s->bgR, s->present,
+	                    SUSAMUNE_METADATA_STYLE_BG_R);
+	EmitMetadataStyleU8(f, err, "background_g", s->bgG, s->present,
+	                    SUSAMUNE_METADATA_STYLE_BG_G);
+	EmitMetadataStyleU8(f, err, "background_b", s->bgB, s->present,
+	                    SUSAMUNE_METADATA_STYLE_BG_B);
+	if (s->present & SUSAMUNE_METADATA_STYLE_BG_A)
+		Emit(f, err, line, (u32)_sprintf(
+			line, "background_alpha = %u\r\n", backgroundAlpha));
+	else
+		EmitInputU8(f, err, "background_alpha", backgroundAlpha);
+	EmitMetadataStyleU8(f, err, "text_brightness", s->textBrightness, s->present,
+	                    SUSAMUNE_METADATA_STYLE_BRIGHTNESS);
+	EmitMetadataStyleU8(f, err, "padding", s->padding, s->present,
+	                    SUSAMUNE_METADATA_STYLE_PADDING);
+	for (i = 0; i < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS; i++)
+	{
+		if (s->slotPresent[i >> 3] & (1u << (i & 7)))
+		{
+			Emit(f, err, line, (u32)_sprintf(
+				line, "text_%u_rgb = %u,%u,%u\r\n", i + 1,
+				s->textRgb[i][0], s->textRgb[i][1], s->textRgb[i][2]));
+		}
 	}
 }
 
@@ -1029,6 +1182,8 @@ static void EmitQftDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cf
 	EmitQftU8(f, err, "text_brightness", d->textBrightness, p,
 	          SUSAMUNE_QFT_DISPLAY_TEXT_BRIGHTNESS);
 	EmitQftU8(f, err, "padding", d->padding, p, SUSAMUNE_QFT_DISPLAY_PADDING);
+	EmitQftU8(f, err, "leading_zero", d->leadingZero, p,
+	          SUSAMUNE_QFT_DISPLAY_LEADING_ZERO);
 }
 
 static const char kIniBanner[] =
@@ -1285,6 +1440,9 @@ void SusamuneCfgInit(void)
 	cfg->qftDisplay.version = SUSAMUNE_QFT_DISPLAY_CFG_VERSION;
 	cfg->qftDisplay.present = 0;
 	cfg->qftDisplay.slotPresent = 0;
+	cfg->metadataStyle.magic = SUSAMUNE_METADATA_STYLE_MAGIC;
+	cfg->metadataStyle.version = SUSAMUNE_METADATA_STYLE_VERSION;
+	cfg->metadataStyle.present = 0;
 
 	cfg->magic     = SUSAMUNE_CFG_MAGIC;
 	cfg->version   = SUSAMUNE_CFG_VERSION;
@@ -1292,7 +1450,8 @@ void SusamuneCfgInit(void)
 	cfg->bindCount = (u16)BIND_KEY_COUNT;
 	cfg->flags     = SUSAMUNE_CFG_FLAG_INPUT_DISPLAY |
 	                 SUSAMUNE_CFG_FLAG_METADATA_DISPLAY |
-	                 SUSAMUNE_CFG_FLAG_QFT_DISPLAY;
+	                 SUSAMUNE_CFG_FLAG_QFT_DISPLAY |
+	                 SUSAMUNE_CFG_FLAG_METADATA_STYLE;
 	if (InitPbFiles(cfg, region))
 		cfg->flags |= SUSAMUNE_CFG_FLAG_ILING_PBS;
 
@@ -1355,7 +1514,8 @@ void SusamuneCfgService(void)
 	sync_before_read(cfg->values,
 	                 sizeof(cfg->values) + sizeof(cfg->binds) +
 	                 sizeof(cfg->inputDisplay) + sizeof(cfg->metadataDisplay));
-	sync_before_read(&cfg->qftDisplay, sizeof(cfg->qftDisplay));
+	sync_before_read(&cfg->qftDisplay,
+	                 sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle));
 	seq = cfg->saveSeq;
 
 	ret = WriteIniFile(cfg);

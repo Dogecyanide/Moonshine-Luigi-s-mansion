@@ -20,9 +20,8 @@ struct CreationStyle {
     u8  bgA;
     u8  textBrightness;
     u8  padding;
-    u8  textRgb[9][3];
 };
-static_assert(sizeof(CreationStyle) == 40, "creation style layout changed");
+static_assert(sizeof(CreationStyle) == 12, "creation style layout changed");
 
 class CreationEditor {
 public:
@@ -34,9 +33,11 @@ public:
     };
 
     void reset();
-    void begin(CreationStyle *style);
-    u8   update(TMarioGamePad *pad, const CreationStyle &defaults);
-    void draw(Menu *menu, const char *title) const;
+    void begin(CreationStyle *style, u8 (*textRgb)[3], u8 (*backupRgb)[3],
+               u16 textSlots, u16 targetSlots = 0);
+    u8   update(TMarioGamePad *pad, const CreationStyle &defaults,
+                const u8 defaultRgb[3]);
+    void draw(Menu *menu, const char *title, const char *preview) const;
     bool editing() const { return mEditing; }
 
 private:
@@ -44,9 +45,13 @@ private:
 
     CreationStyle *mStyle;
     CreationStyle  mBackup;
+    u8            (*mTextRgb)[3];
+    u8            (*mBackupRgb)[3];
     u32            mRepeatMask;
+    u16            mTextSlots;
+    u16            mTargetSlots;
+    u16            mTextTarget;
     u8             mOption;
-    u8             mTextTarget;
     u8             mRepeatFrames;
     u8             mConfirm;
     bool           mEditing;
@@ -54,7 +59,13 @@ private:
 
 namespace Creation {
 
-void drawTextBox(Menu *menu, const CreationStyle &style, const char *text);
+int glyphCount(const char *text);
+void drawTextBox(Menu *menu, const CreationStyle &style,
+                 const u8 (*textRgb)[3], u16 textSlots, const char *text,
+                 bool rightAlignSlots = false);
+void drawTextLine(Menu *menu, const CreationStyle &style,
+                  const u8 (*textRgb)[3], u16 textSlots, const char *text,
+                  int x, int y, int size, u16 firstSlot, bool shadow);
 
 }  // namespace Creation
 

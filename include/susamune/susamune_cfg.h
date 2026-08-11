@@ -153,7 +153,8 @@ struct SusamuneMetadataDisplayCfg {
 #define SUSAMUNE_QFT_DISPLAY_BG_A        (1u << 10)
 #define SUSAMUNE_QFT_DISPLAY_TEXT_BRIGHTNESS (1u << 11)
 #define SUSAMUNE_QFT_DISPLAY_PADDING     (1u << 12)
-#define SUSAMUNE_QFT_DISPLAY_ALL         ((1u << 13) - 1u)
+#define SUSAMUNE_QFT_DISPLAY_LEADING_ZERO (1u << 13)
+#define SUSAMUNE_QFT_DISPLAY_ALL         ((1u << 14) - 1u)
 #define SUSAMUNE_QFT_DISPLAY_SLOT(slot)  (1u << (slot))
 #define SUSAMUNE_QFT_DISPLAY_ALL_SLOTS   ((1u << SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS) - 1u)
 
@@ -177,7 +178,47 @@ struct SusamuneQftDisplayCfg {
     unsigned char  reservedV1[9];
     unsigned short slotPresent;
     unsigned char  textRgb[SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS][3];
-    unsigned char  reserved[3];
+    unsigned char  leadingZero;
+    unsigned char  reserved[2];
+};
+
+// Creation styling added to Metadata without moving its established 256-byte
+// config or the IL PB mailbox that follows it. Character colours are indexed
+// across rendered glyphs, ignoring line breaks.
+#define SUSAMUNE_METADATA_STYLE_MAGIC       0x534D5343u  // 'SMSC'
+#define SUSAMUNE_METADATA_STYLE_VERSION     1u
+#define SUSAMUNE_METADATA_STYLE_TEXT_SLOTS  256u
+#define SUSAMUNE_METADATA_STYLE_SLOT_BYTES  32u
+
+#define SUSAMUNE_METADATA_STYLE_TEXT_R      (1u << 0)
+#define SUSAMUNE_METADATA_STYLE_TEXT_G      (1u << 1)
+#define SUSAMUNE_METADATA_STYLE_TEXT_B      (1u << 2)
+#define SUSAMUNE_METADATA_STYLE_TEXT_A      (1u << 3)
+#define SUSAMUNE_METADATA_STYLE_BG_R        (1u << 4)
+#define SUSAMUNE_METADATA_STYLE_BG_G        (1u << 5)
+#define SUSAMUNE_METADATA_STYLE_BG_B        (1u << 6)
+#define SUSAMUNE_METADATA_STYLE_BG_A        (1u << 7)
+#define SUSAMUNE_METADATA_STYLE_BRIGHTNESS  (1u << 8)
+#define SUSAMUNE_METADATA_STYLE_PADDING     (1u << 9)
+#define SUSAMUNE_METADATA_STYLE_ALL         ((1u << 10) - 1u)
+
+struct SusamuneMetadataStyleCfg {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short present;
+    unsigned char  textR;
+    unsigned char  textG;
+    unsigned char  textB;
+    unsigned char  textA;
+    unsigned char  bgR;
+    unsigned char  bgG;
+    unsigned char  bgB;
+    unsigned char  bgA;
+    unsigned char  textBrightness;
+    unsigned char  padding;
+    unsigned char  reserved0[14];
+    unsigned char  slotPresent[SUSAMUNE_METADATA_STYLE_SLOT_BYTES];
+    unsigned char  textRgb[SUSAMUNE_METADATA_STYLE_TEXT_SLOTS][3];
 };
 
 // susamune.ini had nothing for the running game version -- either the file is
@@ -197,6 +238,8 @@ struct SusamuneQftDisplayCfg {
 #define SUSAMUNE_CFG_FLAG_ILING_PBS 0x8u
 // Kernel understands qftDisplay and [qft_display_<region>].
 #define SUSAMUNE_CFG_FLAG_QFT_DISPLAY 0x10u
+// Kernel understands Metadata's appended Creation style and character colours.
+#define SUSAMUNE_CFG_FLAG_METADATA_STYLE 0x20u
 
 // IL PBs use stable result slots: ordinary rows use retail Shine ids, while
 // independent Secret and Any% rows occupy otherwise-unused ids through 120.
@@ -267,6 +310,7 @@ struct SusamuneCfg {
     // Appended after the independent PB mailbox so its established offsets do
     // not move when an old launcher and a new mod are paired (or vice versa).
     struct SusamuneQftDisplayCfg qftDisplay;
+    struct SusamuneMetadataStyleCfg metadataStyle;
 };
 
 #define SUSAMUNE_CFG_PPC_PTR  ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PPC_BASE)
@@ -315,6 +359,8 @@ typedef char susamune_metadata_cfg_size_check[(sizeof(struct SusamuneMetadataDis
 typedef char susamune_cfg_metadata_check[(__builtin_offsetof(struct SusamuneCfg, metadataDisplay) == 352) ? 1 : -1];
 typedef char susamune_qft_display_cfg_size_check[(sizeof(struct SusamuneQftDisplayCfg) == 64) ? 1 : -1];
 typedef char susamune_qft_display_v1_tail_check[(__builtin_offsetof(struct SusamuneQftDisplayCfg, slotPresent) == 32) ? 1 : -1];
+typedef char susamune_metadata_style_cfg_size_check[(sizeof(struct SusamuneMetadataStyleCfg) == 832) ? 1 : -1];
+typedef char susamune_metadata_style_slots_check[(__builtin_offsetof(struct SusamuneMetadataStyleCfg, textRgb) == 64) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_ack_check[(__builtin_offsetof(struct SusamuneILingPbCfg, ackSeq) == 32) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_values_check[(__builtin_offsetof(struct SusamuneILingPbCfg, values) == 64) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_size_check[(sizeof(struct SusamuneILingPbCfg) == 576) ? 1 : -1];
@@ -322,7 +368,8 @@ typedef char susamune_iling_pb_file_values_check[(__builtin_offsetof(struct Susa
 typedef char susamune_iling_pb_file_size_check[(sizeof(struct SusamuneILingPbFile) == 544) ? 1 : -1];
 typedef char susamune_cfg_iling_pb_check[(__builtin_offsetof(struct SusamuneCfg, ilingPbs) == 608) ? 1 : -1];
 typedef char susamune_cfg_qft_display_check[(__builtin_offsetof(struct SusamuneCfg, qftDisplay) == 1184) ? 1 : -1];
-typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 1248) ? 1 : -1];
+typedef char susamune_cfg_metadata_style_check[(__builtin_offsetof(struct SusamuneCfg, metadataStyle) == 1248) ? 1 : -1];
+typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 2080) ? 1 : -1];
 typedef char susamune_cfg_size_check[
     (sizeof(struct SusamuneCfg) <=
      SUSAMUNE_MEM2_PB_LIVE_PPC_BASE - SUSAMUNE_MEM2_CFG_PPC_BASE) ? 1 : -1];

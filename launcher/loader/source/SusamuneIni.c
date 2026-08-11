@@ -25,7 +25,7 @@ output unchanged.
 // Whole-file buffer. Same ceiling as the kernel's (SusamuneCfg.c): a file
 // bigger than this is refused rather than truncated, since a partial
 // copy-through would silently drop a game version's settings.
-#define SUSA_INI_BUF_SIZE 12288
+#define SUSA_INI_BUF_SIZE 32768
 
 #define SUSA_SECTION_NAME_MAX 24
 

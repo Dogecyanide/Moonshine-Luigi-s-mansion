@@ -15,6 +15,7 @@
 #include "susamune/actions.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
+#include "susamune/metadata_display.hxx"
 #include "susamune/mem_diagnostics.hxx"
 #include "susamune/iling.hxx"
 #include "susamune/attempt_counter.hxx"
@@ -154,7 +155,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     // it and asks whether the menu bind was pressed this frame, which would
     // otherwise be answered from the previous frame's sample.
     gBinds.update();
-    const bool creationEditing = gQftDisplay.editing();
+    const bool creationEditing = gQftDisplay.editing() || gMetadataDisplay.editing();
     if (!creationEditing)
         gInputDisplay.update();
     PatternSelector::update(!creationEditing);
@@ -213,7 +214,7 @@ extern "C" void afterDraw() {
     // immediately afterward: director, fader, audio, and the current frame's
     // GPU work are all complete, while the next game frame has not begun.
     THPPlayerDrawDone();
-    if (gSavestateMgr && !gQftDisplay.editing())
+    if (gSavestateMgr && !gQftDisplay.editing() && !gMetadataDisplay.editing())
         gSavestateMgr->processPendingLoad();
     // gpPollution is stale until the async setup thread reaches onSetup.
     if (gpMarDirector && gpMarDirector->_260 != 0 &&
