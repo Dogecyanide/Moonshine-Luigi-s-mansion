@@ -40,7 +40,7 @@
 #define SUSAMUNE_MOD_BASE_JP  0x80426020u
 #define SUSAMUNE_MOD_BASE_US  0x80429800u
 #define SUSAMUNE_MOD_BASE_PAL 0x80420D60u
-#define SUSAMUNE_MOD_REGION_SIZE 0x18000u
+#define SUSAMUNE_MOD_REGION_SIZE 0x20000u
 #define SUSAMUNE_SCRATCH 0x40u
 #define SUSAMUNE_MOD_BLOB_MAX_SIZE \
     (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
@@ -81,7 +81,7 @@ struct SusamuneModHeader {
 #define SUSAMUNE_MOD_FILE_FMT "mod_%s.bin"
 
 // Portable compile-time checks (no C11 dependency). The window has to hold a
-// blob that fills the whole 96 KiB mod region plus the header and write list;
+// blob that fills the whole 128 KiB mod region plus the header and write list;
 typedef char susamune_mod_header_size_check
     [(sizeof(struct SusamuneModHeader) == SUSAMUNE_MOD_HEADER_SIZE) ? 1 : -1];
 typedef char susamune_mod_window_size_check

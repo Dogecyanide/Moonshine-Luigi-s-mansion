@@ -10,6 +10,7 @@ Usage: gen_mod_bin.py MANIFEST.json -o mod_jp.bin
 """
 import argparse
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -17,9 +18,21 @@ from pathlib import Path
 MAGIC = 0x534D4F44  # 'SMOD'
 VERSION = 1
 HEADER_SIZE = 32
-# SUSAMUNE_MEM2_MODBIN_SIZE (mem2_map.h): the loader refuses a larger file, so
-# fail the build instead of shipping one that cannot be staged.
-STAGING_WINDOW_SIZE = 0x20000
+
+
+def staging_window_size():
+    header = Path(__file__).parent.parent / "include" / "susamune" / "mem2_map.h"
+    match = re.search(
+        r"^#define\s+SUSAMUNE_MEM2_MODBIN_SIZE\s+(0x[0-9a-fA-F]+)u?\s*$",
+        header.read_text(), re.M)
+    if not match:
+        raise RuntimeError("SUSAMUNE_MEM2_MODBIN_SIZE not found in {}".format(header))
+    return int(match.group(1), 16)
+
+
+# The loader refuses a larger file, so fail the build instead of shipping one
+# that cannot be staged. Read the shared C header rather than duplicating it.
+STAGING_WINDOW_SIZE = staging_window_size()
 
 
 def build_mod_bin(manifest):

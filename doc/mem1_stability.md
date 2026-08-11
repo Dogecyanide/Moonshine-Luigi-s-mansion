@@ -1,8 +1,8 @@
 # MEM1 stability test
 
-The 96 KiB build moves the game heap floor up by 32 KiB relative to the
-previous release. Console results are authoritative; Dolphin can miss real
-overlap and cache failures.
+The 128 KiB build moves the game heap floor up by 32 KiB relative to the
+console-tested 96 KiB checkpoint. Console results are authoritative; Dolphin
+can miss real overlap and cache failures.
 
 ## Diagnostic overlay
 
@@ -16,12 +16,12 @@ cmake --build build_memdiag --target mod_bins
 The overlay is always visible in this build and allocates no heap:
 
 ```text
-MEM R:8043E020 E:8043E020 F:OK C:OK
+MEM R:80446020 E:80446020 F:OK C:OK
 ST 7/0 F:1234K I:1250K M:1210K H:OK
 ```
 
 - `R`: root-heap object address.
-- `E`: exclusive end of the 96 KiB mod region.
+- `E`: exclusive end of the 128 KiB mod region.
 - `F`: root heap and its first usable byte are outside the mod region.
 - `C`: the unused scratch-tail canary has never changed.
 - `ST`: current area and episode.
@@ -33,13 +33,13 @@ ST 7/0 F:1234K I:1250K M:1210K H:OK
 
 Any `BAD` is a failure. Photograph the overlay after a fresh load and again at
 the lowest observed `M`. A minimum below 32 KiB is a warning that needs an A/B
-check against the 64 KiB build even if the stage still runs.
+check against the console-tested 96 KiB build even if the stage still runs.
 
 ## Primary JP and PAL stress
 
 Test JP first because it is the main run version, then repeat the same sequence
-on PAL because its blob is largest and its fixed QFT scratch crosses a signed
-low-half boundary in the 96 KiB layout.
+on PAL because its blob is largest. The fixed QFT scratch changes signed
+low-half behavior again in the 128 KiB layout, so both regions remain mandatory.
 
 For both Sirena 1 (Phantamanta) and Pinna Park interior:
 
@@ -76,7 +76,7 @@ Run this on JP and PAL before a long soak:
    dialogue must restore exactly. On PAL, repeat in English and French.
 
 If the regional DPad Functions Gecko code is used, test it separately with
-native Fast Text off. The launcher should relocate it by `0x1A000`.
+native Fast Text off. The launcher should relocate it by `0x22000`.
 
 ## Closing coverage
 
@@ -98,3 +98,11 @@ or behavioral failure. The lowest observed stage-heap minimum was 1413 KiB in
 JP Bianco 5 and 1438 KiB on PAL. JP Sirena 1 stayed above 2100 KiB and Pinna
 Park interior stayed above 2400 KiB. These measurements were taken from the
 diagnostic build's per-visit `M` field.
+
+With otherwise identical allocations, the extra 32 KiB reservation predicts
+128 KiB minima near 1381 KiB for JP and 1406 KiB for PAL.
+
+## 128 KiB console result
+
+The JP build booted and Bianco 5 reached 1381 KiB exactly as predicted, with
+no observed instability or diagnostic failure.
