@@ -125,7 +125,7 @@ extern "C" void onSetup(TMarDirector* director) {
     // Runs on every stage load, so this must stay above the once-only guard.
     featuresOnStageLoad();
     actionsOnStageLoad();
-    visibleGoopUpdate();
+    visibleGoopOnStageSetup();
     gQFTTimer.onStageSetup(director);
     gAttemptCounter.onStageSetup(director);
 #if ENABLE_MEM_DIAGNOSTICS
@@ -211,7 +211,10 @@ extern "C" void afterDraw() {
     THPPlayerDrawDone();
     if (gSavestateMgr) gSavestateMgr->processPendingLoad();
     // gpPollution is stale until the async setup thread reaches onSetup.
-    if (gpMarDirector && gpMarDirector->_260 != 0) visibleGoopUpdate();
+    if (gpMarDirector && gpMarDirector->_260 != 0 &&
+        gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING) {
+        visibleGoopUpdate();
+    }
 
     {
         J2DOrthoGraph ortho(0, 0, 640, 480);
