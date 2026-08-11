@@ -31,7 +31,10 @@ public:
     void draw(J2DOrthoGraph *ortho);
 
     bool shown() const { return mShown; }
-    void hide() { mShown = false; }
+    void hide();
+
+    // Menu-only C-stick repeat. This never changes the game's pad state.
+    u32 navigationInput(TMarioGamePad *pad);
 
     // Show a transient status message. Drawn on top of everything and even
     // while the menu is closed, since the thing it usually reports (a settings
@@ -88,6 +91,7 @@ private:
                                     // on borrowed strings)
     int             mToastFrames;   // frames left before the toast expires
     bool            mSaveWatch;     // a save is in flight; poll for its result
+    u8              mCRepeatFrames;
 };
 
 // One instance, constructed once at boot (placement-new into BSS -- no heap).

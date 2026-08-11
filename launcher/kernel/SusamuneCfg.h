@@ -21,10 +21,24 @@ bool SusamuneCfgPending(void);
 // GCNCard_Save) -- FatFS is not reentrant against the DI thread.
 void SusamuneCfgService(void);
 
+// Independent ILing-PB doorbell. Keeping this separate from the ini write
+// means a PB can be saved immediately without regenerating susamune.ini.
+bool SusamunePbPending(void);
+void SusamunePbService(void);
+
 // Path to open susamune.ini by. The ini lives on the device the launcher was
 // run from, which is drive 1 when that is not the device the game is read from
 // and drive 0 (i.e. the unprefixed path) when it is. Defined in main.c, next to
 // the mount that decides it.
 const char *SusamuneCfgIniPath(void);
+
+// Prefix for other Susamune files on the same device: "1:" when the
+// launcher's device is mounted as drive 1, otherwise the empty string.
+const char *SusamuneCfgStoragePrefix(void);
+
+// False when the launcher and game use different devices and the launcher's
+// device could not be mounted. In that case persistence must stay disabled;
+// falling back to drive 0 would read and write the wrong files.
+bool SusamuneCfgStorageAvailable(void);
 
 #endif

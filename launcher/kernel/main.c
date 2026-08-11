@@ -58,9 +58,10 @@ static FATFS *fatfs = NULL;
 static const WCHAR fatDevName[2] = { 0x002F, 0x0000 };
 
 // Drive 1, the device susamune.ini lives on. Mounted only when that is not the
-// device the game is read from; NULL otherwise, which is what makes
-// SusamuneCfgIniPath() fall back to the unprefixed (drive 0) path.
+// device the game is read from. Readiness is separate so a failed drive-1
+// mount cannot silently fall back to the wrong device.
 static FATFS *ConfigFatFS = NULL;
+static bool ConfigStorageReady = true;
 //"1:" as u16
 static const WCHAR cfgDevName[3] = { 0x0031, 0x003A, 0x0000 };
 
@@ -68,6 +69,16 @@ static const WCHAR cfgDevName[3] = { 0x0031, 0x003A, 0x0000 };
 const char *SusamuneCfgIniPath(void)
 {
 	return ConfigFatFS ? "1:" SUSAMUNE_INI_PATH : SUSAMUNE_INI_PATH;
+}
+
+const char *SusamuneCfgStoragePrefix(void)
+{
+	return ConfigFatFS ? "1:" : "";
+}
+
+bool SusamuneCfgStorageAvailable(void)
+{
+	return ConfigStorageReady;
 }
 
 // Moved to kernel/global.h
@@ -263,6 +274,7 @@ int _main( int argc, char *argv[] )
 	// kernel uses unprefixed paths and so keeps binding to drive 0.
 	if (ConfigGetConfig(NIN_CFG_CFG_ON_USB) != (UseUSB != 0))
 	{
+		ConfigStorageReady = false;
 		u32 cfgOnUSB = ConfigGetConfig(NIN_CFG_CFG_ON_USB) ? 1 : 0;
 		u32 cfgSectorSize = PAGE_SIZE512;
 		s32 cfgRet;
@@ -291,12 +303,23 @@ int _main( int argc, char *argv[] )
 		{
 			SetConfigDiskFunctions(cfgOnUSB, cfgSectorSize);
 			ConfigFatFS = (FATFS*)malloca( sizeof(FATFS), 32 );
-			res = f_mount( ConfigFatFS, cfgDevName, 1 );
-			if( res != FR_OK )
+			if(ConfigFatFS == NULL)
 			{
-				dbgprintf("Susamune: config device mount failed:%d\r\n", res );
-				free(ConfigFatFS);
-				ConfigFatFS = NULL;
+				dbgprintf("Susamune: config device FAT allocation failed\r\n");
+			}
+			else
+			{
+				res = f_mount( ConfigFatFS, cfgDevName, 1 );
+				if( res != FR_OK )
+				{
+					dbgprintf("Susamune: config device mount failed:%d\r\n", res );
+					free(ConfigFatFS);
+					ConfigFatFS = NULL;
+				}
+				else
+				{
+					ConfigStorageReady = true;
+				}
 			}
 		}
 	}
@@ -500,7 +523,11 @@ int _main( int argc, char *argv[] )
 		/* Same constraint as the card save below: FatFS is shared with the DI
 		 * thread, so only touch the SD card when no async read is in flight.
 		 * Ahead of SaveCard because that one sits on a 60 second timer and
-		 * would otherwise starve settings writes for a minute. */
+		 * would otherwise starve Susamune writes for a minute. */
+		else if(SusamunePbPending())
+		{
+			SusamunePbService();
+		}
 		else if(SusamuneCfgPending())
 		{
 			SusamuneCfgService();

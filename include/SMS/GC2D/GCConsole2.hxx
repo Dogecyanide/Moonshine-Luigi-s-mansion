@@ -35,7 +35,7 @@ public:
     bool mIsWaterCard;       // 0x0046
     u8 _02;                  // 0x0047
     u16 _03;                 // 0x0048
-    bool mIsResetTimer;      // 0x004A
+    bool mIsTimerMoving;     // 0x004A; owned by startMoveTimer/stopMoveTimer
     bool mWaterCardFalling;  // 0x004B
     u32 _05[0x28 / 4];       // 0x004C
     s16 mRedCoinCardTimer;   // 0x0074

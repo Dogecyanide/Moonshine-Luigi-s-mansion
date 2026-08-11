@@ -511,6 +511,10 @@ u32 gCaveFreePause[] = {
     ((SUSAMUNE_ADDR_ATTEMPT_SHINE_SERIAL + 0x8000u) >> 16)
 #define ATTEMPT_SERIAL_LO \
     (SUSAMUNE_ADDR_ATTEMPT_SHINE_SERIAL & 0xFFFFu)
+#define LAST_SHINE_ID_HA \
+    ((SUSAMUNE_ADDR_LAST_SHINE_ID + 0x8000u) >> 16)
+#define LAST_SHINE_ID_LO \
+    (SUSAMUNE_ADDR_LAST_SHINE_ID & 0xFFFFu)
 
 // winDemo+0x88, replacing `bl fireGetStar` (r3 = gpMarDirector).
 u32 gCaveShineNoFire[] = {
@@ -528,6 +532,9 @@ u32 gCaveShineNoFire[] = {
     0xB00C0000u | QFT_STATE_LO(SUSAMUNE_QFT_STATE_STOP_OFF),
     0x38000001u,
     0x980C0000u | QFT_STATE_LO(SUSAMUNE_QFT_STATE_STOP_REASON_OFF),
+    0x81840134u,               // lwz r12, 0x134(r4)  shine event id
+    0x3D600000u | LAST_SHINE_ID_HA,
+    0x918B0000u | LAST_SHINE_ID_LO,
     0x3D600000u | ATTEMPT_SERIAL_HA,
     0x818B0000u | ATTEMPT_SERIAL_LO,
     0x398C0001u,
@@ -555,6 +562,8 @@ u32 gCaveShineTouch[] = {
 #undef QFT_STATE_LO
 #undef ATTEMPT_SERIAL_HA
 #undef ATTEMPT_SERIAL_LO
+#undef LAST_SHINE_ID_HA
+#undef LAST_SHINE_ID_LO
 
 // Attempt Counter's moveStage+0x3c check. The first word is the displaced
 // region-specific instruction that materialises gpApplication in r28. The

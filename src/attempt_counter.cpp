@@ -37,6 +37,10 @@ volatile u32 *departureSerial() {
         SUSAMUNE_ADDR_ATTEMPT_DEPARTURE_SERIAL);
 }
 
+volatile u32 *lastShineId() {
+    return reinterpret_cast<volatile u32 *>(SUSAMUNE_ADDR_LAST_SHINE_ID);
+}
+
 u16 packedArea(u8 area, u8 episode) {
     return (u16)(((u16)area << 8) | episode);
 }
@@ -54,6 +58,8 @@ AttemptCounter gAttemptCounter;
 // serial lets the normal call and No Shine Get Animation's asm cave feed one
 // counter without hooking fireGetStar itself (where QFT/Gecko hooks may live).
 extern "C" void onFireGetStar(TMarDirector *director, TShine *shine) {
+    // mMapObjID is the decomp's mEventId at TShine+0x134.
+    *lastShineId() = shine->mMapObjID;
     *shineSerial() = *shineSerial() + 1;
     director->fireGetStar(shine);
 }
@@ -71,6 +77,7 @@ void AttemptCounter::init() {
     mWasEnabled          = false;
     *shineSerial()       = 0;
     *departureSerial()   = 0;
+    *lastShineId()       = 0xFFFFFFFFu;
 }
 
 void AttemptCounter::show() { mDisplayFrames = kDisplayDuration; }

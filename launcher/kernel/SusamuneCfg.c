@@ -29,6 +29,10 @@ The file lives on the device the launcher was run from, which is not
 necessarily the one the game is read from; SusamuneCfgIniPath() (main.c) names
 the drive it ended up on.
 
+ILing PBs use a separate fixed binary journal on that same device. Two files
+per region alternate generations so an interrupted write leaves one valid
+copy, and their independent doorbell avoids rewriting the ini after every PB.
+
 One launcher now serves GMSJ/GMSE/GMSP, and each keeps its own settings and
 binds, hence the region tag on the section names. Only the running version's
 sections are ever parsed: the handoff block holds one set of values, not three.
@@ -88,6 +92,22 @@ static const struct BindButton BindButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAM
 static bool CfgReady = false;
 static u32  CfgAckSeq = 0;
 
+#define SUSAMUNE_PB_FILE_COUNT 2
+#define SUSAMUNE_PB_PATH_SIZE  40
+
+static u32 PbAckSeq = 0;
+static u32 PbGeneration = 0;
+static s32 PbActiveFile = -1;
+static bool PbReady = false;
+static char PbPaths[SUSAMUNE_PB_FILE_COUNT][SUSAMUNE_PB_PATH_SIZE];
+
+enum PbReadResult
+{
+	PB_READ_INVALID,
+	PB_READ_VALID,
+	PB_READ_UNSAFE
+};
+
 // "[settings_jp]" and friends for the running disc, built once in
 // SusamuneCfgInit. Empty for a game we have no mod for, which is also what
 // leaves CfgReady false.
@@ -112,6 +132,200 @@ static void BuildSectionName(char *out, const char *base, const char *region)
 static struct SusamuneCfg *CfgBlock(void)
 {
 	return SUSAMUNE_CFG_PHYS_PTR;
+}
+
+// ---------------------------------------------------------------------
+// ILing PB binary files
+// ---------------------------------------------------------------------
+
+static u32 PbHashWord(u32 hash, u32 value)
+{
+	return (hash ^ value) * 16777619u;
+}
+
+static u32 PbChecksum(const struct SusamuneILingPbFile *file)
+{
+	u32 hash = 2166136261u;
+	u32 i;
+
+	hash = PbHashWord(hash, ((u32)file->version << 16) | file->count);
+	hash = PbHashWord(hash, file->gameId);
+	hash = PbHashWord(hash, file->generation);
+	for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+		hash = PbHashWord(hash, (u32)file->values[i]);
+	return hash;
+}
+
+static bool PbGenerationIsNewer(u32 candidate, u32 current)
+{
+	return (s32)(candidate - current) > 0;
+}
+
+static bool PbValueIsValid(s32 value)
+{
+	return value >= SUSAMUNE_ILING_PB_UNSET &&
+	       value <= SUSAMUNE_ILING_PB_MAX_QF;
+}
+
+static enum PbReadResult ReadPbFile(const char *path,
+	                               struct SusamuneILingPbFile *file)
+{
+	FIL f;
+	UINT read = 0;
+	u32 i;
+	int ret;
+	int closeRet;
+
+	ret = f_open_char(&f, path, FA_READ | FA_OPEN_EXISTING);
+	if (ret == FR_NO_FILE || ret == FR_NO_PATH)
+		return PB_READ_INVALID;
+	if (ret != FR_OK)
+	{
+		dbgprintf("Susamune: could not read PB file %s (%d)\r\n", path, ret);
+		return PB_READ_UNSAFE;
+	}
+
+	if (f_size(&f) != sizeof(*file))
+	{
+		closeRet = f_close(&f);
+		if (closeRet != FR_OK)
+			return PB_READ_UNSAFE;
+		dbgprintf("Susamune: ignored invalid PB file %s (size)\r\n", path);
+		return PB_READ_INVALID;
+	}
+
+	ret = f_read(&f, file, sizeof(*file), &read);
+	closeRet = f_close(&f);
+	if (ret != FR_OK || read != sizeof(*file) || closeRet != FR_OK)
+	{
+		dbgprintf("Susamune: ignored unreadable PB file %s\r\n", path);
+		return PB_READ_UNSAFE;
+	}
+
+	if (file->magic == SUSAMUNE_ILING_PB_FILE_MAGIC &&
+	    file->version != SUSAMUNE_ILING_PB_VERSION)
+	{
+		dbgprintf("Susamune: unsupported PB file %s (version %u)\r\n",
+		          path, file->version);
+		return PB_READ_UNSAFE;
+	}
+
+	if (file->magic != SUSAMUNE_ILING_PB_FILE_MAGIC ||
+	    file->count == 0 || file->count > SUSAMUNE_ILING_PB_MAX_SLOTS ||
+	    file->gameId != GAME_ID || file->checksum != PbChecksum(file))
+	{
+		dbgprintf("Susamune: ignored invalid PB file %s (header)\r\n", path);
+		return PB_READ_INVALID;
+	}
+
+	for (i = 0; i < file->count; i++)
+	{
+		if (!PbValueIsValid(file->values[i]))
+		{
+			dbgprintf("Susamune: ignored invalid PB file %s (value)\r\n", path);
+			return PB_READ_INVALID;
+		}
+	}
+	return PB_READ_VALID;
+}
+
+static bool InitPbFiles(struct SusamuneCfg *cfg, const char *region)
+{
+	struct SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
+	struct SusamuneILingPbFile file;
+	u32 i;
+	u32 fileIndex;
+	bool safe = true;
+
+	pbs->magic   = SUSAMUNE_ILING_PB_MAGIC;
+	pbs->version = SUSAMUNE_ILING_PB_VERSION;
+	pbs->count   = SUSAMUNE_ILING_PB_SLOT_COUNT;
+	for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+		pbs->values[i] = SUSAMUNE_ILING_PB_UNSET;
+
+	_sprintf(PbPaths[0], "%s/susamune_pbs_v1_%s_a.bin",
+	         SusamuneCfgStoragePrefix(), region);
+	_sprintf(PbPaths[1], "%s/susamune_pbs_v1_%s_b.bin",
+	         SusamuneCfgStoragePrefix(), region);
+
+	PbGeneration = 0;
+	PbActiveFile = -1;
+	for (fileIndex = 0; fileIndex < SUSAMUNE_PB_FILE_COUNT; fileIndex++)
+	{
+		enum PbReadResult readResult = ReadPbFile(PbPaths[fileIndex], &file);
+		if (readResult == PB_READ_UNSAFE)
+		{
+			safe = false;
+			continue;
+		}
+		if (readResult != PB_READ_VALID)
+			continue;
+		if (PbActiveFile >= 0 &&
+		    !PbGenerationIsNewer(file.generation, PbGeneration))
+			continue;
+
+		for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+			pbs->values[i] = SUSAMUNE_ILING_PB_UNSET;
+		for (i = 0; i < file.count; i++)
+			pbs->values[i] = file.values[i];
+		pbs->count = file.count > SUSAMUNE_ILING_PB_SLOT_COUNT
+		                 ? file.count : SUSAMUNE_ILING_PB_SLOT_COUNT;
+		PbGeneration = file.generation;
+		PbActiveFile = (s32)fileIndex;
+	}
+
+	PbAckSeq = 0;
+	PbReady = safe;
+	if (!safe)
+		dbgprintf("Susamune: PB persistence disabled to preserve unreadable files\r\n");
+	return safe;
+}
+
+static int WritePbFile(const struct SusamuneILingPbCfg *pbs)
+{
+	struct SusamuneILingPbFile file;
+	FIL f;
+	UINT wrote = 0;
+	u32 i;
+	u32 target = PbActiveFile == 0 ? 1u : 0u;
+	int ret;
+	int closeRet;
+
+	if (pbs->count == 0 || pbs->count > SUSAMUNE_ILING_PB_MAX_SLOTS)
+		return FR_INVALID_PARAMETER;
+	for (i = 0; i < pbs->count; i++)
+	{
+		if (!PbValueIsValid(pbs->values[i]))
+			return FR_INVALID_PARAMETER;
+	}
+
+	memset(&file, 0, sizeof(file));
+	file.magic      = SUSAMUNE_ILING_PB_FILE_MAGIC;
+	file.version    = SUSAMUNE_ILING_PB_VERSION;
+	file.count      = pbs->count;
+	file.gameId     = GAME_ID;
+	file.generation = PbGeneration + 1;
+	for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+		file.values[i] = pbs->values[i];
+	file.checksum = PbChecksum(&file);
+
+	ret = f_open_char(&f, PbPaths[target], FA_WRITE | FA_CREATE_ALWAYS);
+	if (ret != FR_OK)
+		return ret;
+
+	ret = f_write(&f, &file, sizeof(file), &wrote);
+	if (ret == FR_OK && wrote != sizeof(file))
+		ret = FR_DISK_ERR;
+	closeRet = f_close(&f);
+	if (ret == FR_OK && closeRet != FR_OK)
+		ret = closeRet;
+
+	if (ret == FR_OK)
+	{
+		PbGeneration = file.generation;
+		PbActiveFile = (s32)target;
+	}
+	return ret;
 }
 
 // ---------------------------------------------------------------------
@@ -786,6 +1000,16 @@ void SusamuneCfgInit(void)
 	// stale one left by an earlier boot would be adopted wholesale by a mod
 	// that happens to be running now.
 	memset(cfg, 0, sizeof(struct SusamuneCfg));
+	CfgReady = false;
+	PbReady = false;
+
+	if (!SusamuneCfgStorageAvailable())
+	{
+		// The launcher device was different from drive 0 and could not be
+		// mounted. Zero magic advertises an unsupported backend to the mod.
+		sync_after_write(cfg, sizeof(struct SusamuneCfg));
+		return;
+	}
 
 	if (region == NULL)
 	{
@@ -838,6 +1062,8 @@ void SusamuneCfgInit(void)
 	cfg->bindCount = (u16)BIND_KEY_COUNT;
 	cfg->flags     = SUSAMUNE_CFG_FLAG_INPUT_DISPLAY |
 	                 SUSAMUNE_CFG_FLAG_METADATA_DISPLAY;
+	if (InitPbFiles(cfg, region))
+		cfg->flags |= SUSAMUNE_CFG_FLAG_ILING_PBS;
 
 	ret = f_open_char(&f, SusamuneCfgIniPath(), FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)
@@ -893,7 +1119,11 @@ void SusamuneCfgService(void)
 	u32 seq;
 	int ret;
 
-	sync_before_read(cfg, sizeof(struct SusamuneCfg));
+	// Keep the independent PB payload out of this cache transaction.
+	sync_before_read(cfg, 32);
+	sync_before_read(cfg->values,
+	                 sizeof(cfg->values) + sizeof(cfg->binds) +
+	                 sizeof(cfg->inputDisplay) + sizeof(cfg->metadataDisplay));
 	seq = cfg->saveSeq;
 
 	ret = WriteIniFile(cfg);
@@ -908,4 +1138,45 @@ void SusamuneCfgService(void)
 	// values[] back over whatever the mod has staged since (see the cache-line
 	// ownership note in susamune_cfg.h).
 	sync_after_write(&cfg->ackSeq, 32);
+}
+
+bool SusamunePbPending(void)
+{
+	struct SusamuneCfg *cfg = CfgBlock();
+	struct SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
+
+	if (!CfgReady || !PbReady)
+		return false;
+
+	sync_before_read(pbs, 32);
+	if (pbs->magic != SUSAMUNE_ILING_PB_MAGIC ||
+	    pbs->version != SUSAMUNE_ILING_PB_VERSION)
+		return false;
+	return pbs->saveSeq != PbAckSeq;
+}
+
+void SusamunePbService(void)
+{
+	struct SusamuneCfg *cfg = CfgBlock();
+	struct SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
+	u32 seq;
+	int ret;
+
+	if (!PbReady)
+		return;
+
+	sync_before_read(pbs, 32);
+	seq = pbs->saveSeq;
+	sync_before_read(pbs->values, sizeof(pbs->values));
+
+	ret = WritePbFile(pbs);
+	if (ret != FR_OK)
+		dbgprintf("Susamune: failed to write ILing PBs (%d)\r\n", ret);
+
+	pbs->status = (u32)ret;
+	pbs->ackSeq = seq;
+	PbAckSeq = seq;
+
+	// The PPC owns the control and payload lines after boot.
+	sync_after_write(&pbs->ackSeq, 32);
 }

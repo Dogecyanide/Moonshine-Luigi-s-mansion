@@ -91,8 +91,8 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     SBOOL("Disable 3rd Chomplet aggro", 0, SETTING_CAT_QOL),
 
     // Timer presentation and QFT's established freeze-event configuration.
-    // A temporary freeze snapshots the compact display only; the accurate
-    // clock and Sunshine HUD continue running in the background.
+    // Configured event freezes affect the compact display only. Loading zones
+    // also hold the Sunshine HUD visually while the accurate clock carries on.
     SCHOICE("Sunshine timer", 0, kSunshineTimerLabels, SETTING_CAT_TIMER),
     SCHOICE("Bottom-left QFT", 1, kQftVisibilityLabels, SETTING_CAT_TIMER),
     SCHOICE("Freeze duration", 2, kFreezeDurationLabels, SETTING_CAT_TIMER),
@@ -122,7 +122,9 @@ const SettingDesc kSettingDescs[SETTING_COUNT] = {
     SBOOL("In-stage counter controls", 0, SETTING_CAT_MISC),
 
     // Native version of sup39's Pianta 1 / Pianta 4 Pattern Selector.
-    SBOOL("Pattern selector", 0, SETTING_CAT_MISC)
+    SBOOL("Pattern selector", 0, SETTING_CAT_MISC),
+
+    SBOOL("PB fanfare", 1, SETTING_CAT_CUSTOM)
 };
 
 const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'

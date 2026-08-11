@@ -129,6 +129,9 @@
 #define SUSAMUNE_ADDR_ATTEMPT_DEPARTURE_SERIAL \
     (SUSAMUNE_ADDR_MOD_SCRATCH + 0x8u)
 
+// The TShine event id published immediately before the shine-grab serial.
+#define SUSAMUNE_ADDR_LAST_SHINE_ID (SUSAMUNE_ADDR_MOD_SCRATCH + 0xCu)
+
 // Sixteen-byte native QFT state. Fixed scratch is used because the timer's
 // tiny regional asm hooks cannot address a linker-placed C++ global.
 #define SUSAMUNE_ADDR_QFT_STATE (SUSAMUNE_ADDR_MOD_SCRATCH + 0x10u)
@@ -138,5 +141,15 @@
 #define SUSAMUNE_QFT_STATE_OFFSET_OFF        0x4u
 #define SUSAMUNE_QFT_STATE_FREEZE_QF_OFF     0x8u
 #define SUSAMUNE_QFT_STATE_FREEZE_FRAMES_OFF 0xCu
+
+// Exact local-QF events used by Plaza IL endpoints. A negative value means
+// no unconsumed event; the PPC hooks and native timer share this scratch.
+#define SUSAMUNE_ADDR_QFT_DEATH_QF (SUSAMUNE_ADDR_MOD_SCRATCH + 0x20u)
+#define SUSAMUNE_ADDR_QFT_PLANT_QF (SUSAMUNE_ADDR_MOD_SCRATCH + 0x24u)
+
+// Actor loading zones publish timing and destination together. This is
+// separate from freezeQf because demo freezes may overwrite that display slot.
+#define SUSAMUNE_ADDR_QFT_TRANSITION_QF (SUSAMUNE_ADDR_MOD_SCRATCH + 0x28u)
+#define SUSAMUNE_ADDR_QFT_TRANSITION_TARGET (SUSAMUNE_ADDR_MOD_SCRATCH + 0x2Cu)
 
 #endif // SUSAMUNE_ADDRESSES_HXX

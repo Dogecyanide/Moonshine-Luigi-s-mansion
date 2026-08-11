@@ -55,16 +55,20 @@
 #define SUSAMUNE_MEM2_SNAPSHOT_PPC_BASE      0x91F00000u
 #define SUSAMUNE_MEM2_SNAPSHOT_SIZE          0x00FF0000u
 
-// Settings handoff block (struct SusamuneCfg, susamune_cfg.h): the ARM kernel
-// parses susamune.ini into it before the game boots, the mod reads it once at
-// startup, and the mod rings a doorbell in it to have the kernel write the ini
-// back. Carved off the top of the snapshot window rather than from Nintendont's
-// buffers, since the snapshot's 16 MiB reservation is far larger than its use.
-// Deliberately outside the snapshot payload so a savestate load does not rewind
-// the user's settings.
+// Settings/PB handoff block (struct SusamuneCfg, susamune_cfg.h). The ARM
+// kernel fills it before boot and services the mod's independent ini and PB
+// save doorbells. Carved off the top of the snapshot window rather than from
+// Nintendont's buffers, since the snapshot's 16 MiB reservation is far larger
+// than its use. Deliberately outside the snapshot payload so a savestate load
+// does not rewind persistent data.
 #define SUSAMUNE_MEM2_CFG_PHYS_BASE          0x12EF0000u
 #define SUSAMUNE_MEM2_CFG_PPC_BASE           0x92EF0000u
 #define SUSAMUNE_MEM2_CFG_SIZE               0x00010000u
+
+// PPC-only live PB mirror. The ARM doorbell payload remains immutable while a
+// save is in flight; later PB changes queue here for the next write.
+#define SUSAMUNE_MEM2_PB_LIVE_PPC_BASE       0x92EFFE00u
+#define SUSAMUNE_MEM2_PB_LIVE_SIZE           0x00000200u
 
 #define NIN_MEM2_KERNEL_PHYS_BASE            0x12F00000u
 #define NIN_MEM2_KERNEL_PPC_BASE             0x92F00000u
@@ -97,6 +101,9 @@
 #endif
 #if SUSAMUNE_MEM2_CFG_PHYS_BASE + SUSAMUNE_MEM2_CFG_SIZE != NIN_MEM2_KERNEL_PHYS_BASE
 #error "MEM2 settings block must end at the Nintendont kernel"
+#endif
+#if SUSAMUNE_MEM2_PB_LIVE_PPC_BASE + SUSAMUNE_MEM2_PB_LIVE_SIZE != NIN_MEM2_KERNEL_PPC_BASE
+#error "MEM2 live PB mirror must end at the Nintendont kernel"
 #endif
 
 // Physical-to-PPC cached alias checks.
