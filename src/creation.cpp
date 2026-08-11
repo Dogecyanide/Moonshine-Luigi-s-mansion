@@ -143,7 +143,7 @@ u32 CreationEditor::repeatInput(TMarioGamePad *pad) {
 u8 CreationEditor::update(TMarioGamePad *pad, const CreationStyle &defaults) {
     if (!mEditing || !mStyle || !pad) return UPDATE_NONE;
 
-    const u32 pressed = pad->mButtons.mFrameInput;
+    const u32 pressed = pad->mButtons.mRapidInput;
     if (mConfirm != CONFIRM_NONE) {
         if (pressed & TMarioGamePad::A) {
             if (mConfirm == CONFIRM_KEEP) {
@@ -246,7 +246,7 @@ u8 CreationEditor::update(TMarioGamePad *pad, const CreationStyle &defaults) {
 void CreationEditor::draw(Menu *menu, const char *title) const {
     if (!menu || !mStyle) return;
 
-    const int panelY = mStyle->y < 240 ? 300 : 8;
+    const int panelY = mStyle->y < 240 ? 286 : 8;
     const int panelH = 172;
     menu->fillBox(8, panelY, 624, panelH, Color(0, 0, 0, 215));
 
@@ -256,7 +256,10 @@ void CreationEditor::draw(Menu *menu, const char *title) const {
     char targetBuf[16];
     const char *target = targetLabel(mTextTarget, targetBuf, sizeof(targetBuf));
     char status[128];
-    snprintf(status, sizeof(status), "START Letter: %s", target);
+    if (mTextTarget == 0)
+        snprintf(status, sizeof(status), "START: Change to Single Letter");
+    else
+        snprintf(status, sizeof(status), "START: Next Letter (%s)", target);
     menu->drawText(status, 622 - Menu::textWidth(status, 12), panelY + 11,
                    12, 12, Color(190, 220, 255, 255));
 
@@ -269,14 +272,15 @@ void CreationEditor::draw(Menu *menu, const char *title) const {
     const bool sameR = textChannel(*mStyle, mTextTarget, 0, &r);
     const bool sameG = textChannel(*mStyle, mTextTarget, 1, &g);
     const bool sameB = textChannel(*mStyle, mTextTarget, 2, &b);
+    const char *rgbLabel = mTextTarget == 0 ? "Text RGB" : "Letter RGB";
     if (sameR && sameG && sameB) {
         snprintf(status, sizeof(status),
-                 "Text RGB:%03u,%03u,%03u   Background RGB:%03u,%03u,%03u",
-                 r, g, b, mStyle->bgR, mStyle->bgG, mStyle->bgB);
+                 "%s:%03u,%03u,%03u   Background RGB:%03u,%03u,%03u",
+                 rgbLabel, r, g, b, mStyle->bgR, mStyle->bgG, mStyle->bgB);
     } else {
         snprintf(status, sizeof(status),
-                 "Text RGB: Mixed   Background RGB:%03u,%03u,%03u",
-                 mStyle->bgR, mStyle->bgG, mStyle->bgB);
+                 "%s: Mixed   Background RGB:%03u,%03u,%03u",
+                 rgbLabel, mStyle->bgR, mStyle->bgG, mStyle->bgB);
     }
     menu->drawText(status, 18, panelY + 48, 11, 11,
                    Color(190, 220, 255, 255));
@@ -323,9 +327,13 @@ void CreationEditor::draw(Menu *menu, const char *title) const {
                        11, 11, Color(120, 220, 150, 255));
     }
 
-    menu->drawText(SUSAMUNE_GLYPH_C " U/D Change Option   "
-                   SUSAMUNE_GLYPH_C " L/R Adjust   START Change Letter",
-                   18, panelY + 139, 10, 10, Color(150, 170, 205, 255));
+    const char *controls = mTextTarget == 0
+        ? SUSAMUNE_GLYPH_C " U/D Change Option   " SUSAMUNE_GLYPH_C
+          " L/R Adjust   START Change to Single Letter"
+        : SUSAMUNE_GLYPH_C " U/D Change Option   " SUSAMUNE_GLYPH_C
+          " L/R Adjust   START Next Letter";
+    menu->drawText(controls, 18, panelY + 139, 10, 10,
+                   Color(150, 170, 205, 255));
     menu->drawText("D-pad Move   L/R Size",
                    18, panelY + 154, 10, 10, Color(150, 170, 205, 255));
     const char *finish = SUSAMUNE_GLYPH_A " Keep  " SUSAMUNE_GLYPH_B
