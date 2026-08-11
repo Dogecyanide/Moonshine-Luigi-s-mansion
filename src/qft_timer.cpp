@@ -65,7 +65,7 @@ namespace {
     reinterpret_cast<volatile u16 *>(SUSAMUNE_ADDR_QFT_TRANSITION_TARGET);
 
   const s32 kMaxQf          = SUSAMUNE_ILING_PB_MAX_QF;
-  const int kFreezeFrames[] = {0, 15, 30, 60, 90, 150};
+  const u8 kFreezeFrames[] = {0, 15, 30, 60, 90, 150};
 
   bool sStageReady;
   bool sStagePending;
@@ -238,6 +238,19 @@ namespace {
     0x3D800000u, 0x618C0000u, 0x7D8803A6u, 0x4E800021u, 0x38000000u, 0x00000000u,
   };
 
+  // These boss-event sites execute once, on the exact transition tick.
+  u32 sPeteyWakeupCave[] = {
+    0x3D800000u, 0x618C0000u, 0x7D8803A6u, 0x4E800021u, 0x387E0000u, 0x00000000u,
+  };
+
+  u32 sEelActivateCave[] = {
+    0x3D800000u, 0x618C0000u, 0x7D8803A6u, 0x4E800021u, 0x38600001u, 0x00000000u,
+  };
+
+  u32 sEelToothCave[] = {
+    0x3D800000u, 0x618C0000u, 0x7D8803A6u, 0x4E800021u, 0x38000000u, 0x00000000u,
+  };
+
   // Blue coins freeze on the next whole frame; this is QFT's special case.
   u32 sBlueCoinCave[] = {
     0x7C030378u,
@@ -255,6 +268,7 @@ namespace {
   enum FreezeHookKind {
     FREEZE_DIRECT,
     FREEZE_CAVE,
+    FREEZE_GUARDED_CAVE,
   };
 
   struct FreezeHook {
@@ -271,6 +285,9 @@ namespace {
 #define CAVE(settingId, jp, us, pal, originalWord, caveArray)                                      \
   {SUSAMUNE_MEM1_ADDR(jp, us, pal),      originalWord, caveArray, settingId, FREEZE_CAVE,          \
    (u8)(sizeof(caveArray) / sizeof(u32))}
+#define GUARDED_CAVE(settingId, jp, us, pal, originalWord, caveArray)                              \
+  {SUSAMUNE_MEM1_ADDR(jp, us, pal), originalWord, caveArray, settingId, FREEZE_GUARDED_CAVE,       \
+   (u8)(sizeof(caveArray) / sizeof(u32))}
 
   const FreezeHook kFreezeHooks[] = {
     DIRECT(SETTING_TIMER_FREEZE_YELLOW_COIN, 0x80196CB0u, 0x801BEE10u, 0x801B6CC8u),
@@ -285,20 +302,35 @@ namespace {
     DIRECT(SETTING_TIMER_FREEZE_YOSHI, 0x8014F830u, 0x802704D4u, 0x80268260u),
     CAVE(SETTING_TIMER_FREEZE_TAKE, 0x8011EAE4u, 0x8023F9A8u, 0x80237734u, 0x801F0384u, sTakeCave),
     CAVE(SETTING_TIMER_FREEZE_DROP, 0x80122964u, 0x802437D4u, 0x8023B560u, 0x38000000u, sDropCave),
+    GUARDED_CAVE(SETTING_TIMER_FREEZE_PETEY_WAKEUP,
+                 0x802A2EB8u, 0x8009009Cu, 0x8008973Cu, 0x387E0000u,
+                 sPeteyWakeupCave),
+    GUARDED_CAVE(SETTING_TIMER_FREEZE_EEL_ACTIVATE,
+                 0x802E5590u, 0x800D3478u, 0x800CCB18u, 0x38600001u,
+                 sEelActivateCave),
+    GUARDED_CAVE(SETTING_TIMER_FREEZE_EEL_TOOTH,
+                 0x802E92C4u, 0x800D71ACu, 0x800D084Cu, 0x38000000u,
+                 sEelToothCave),
   };
 
 #undef DIRECT
 #undef CAVE
+#undef GUARDED_CAVE
 
   const int kNumFreezeHooks = (int)(sizeof(kFreezeHooks) / sizeof(kFreezeHooks[0]));
 
-  const u32 kPutStatuses[]    = {0x80000387u};
-  const u32 kTripleStatuses[] = {0x00000882u};
-  const u32 kSpinStatuses[]   = {0x00000895u, 0x00000896u};
-  const u32 kLedgeStatuses[]  = {0x3800034Bu};
-  const u32 kWallStatuses[]   = {0x02000886u};
-  const u32 kRopeStatuses[]   = {0x00000892u, 0x00000893u};
-  const u32 kBounceStatuses[] = {0x00000884u};
+  constexpr u32 kPutStatuses[]       = {0x80000387u};
+  constexpr u32 kTripleStatuses[]    = {0x00000882u};
+  constexpr u32 kSpinStatuses[]      = {0x00000895u, 0x00000896u};
+  constexpr u32 kLedgeStatuses[]     = {0x3800034Bu};
+  constexpr u32 kWallStatuses[]      = {0x02000886u};
+  constexpr u32 kRopeStatuses[]      = {0x00000892u, 0x00000893u};
+  constexpr u32 kBounceStatuses[]    = {0x00000884u};
+  constexpr u32 kJumpStatuses[]      = {0x02000880u};
+  constexpr u32 kDiveStatuses[]      = {0x0080088Au};
+  constexpr u32 kDoubleStatuses[]    = {0x02000881u};
+  constexpr u32 kDiveRolloutStatuses[] = {0x02000889u};
+  constexpr u32 kDiveGetupStatuses[]   = {0x000008A6u};
 
   struct StatusFreeze {
     SettingId setting;
@@ -316,14 +348,49 @@ namespace {
     STATUS(SETTING_TIMER_FREEZE_WALL_KICK, kWallStatuses),
     STATUS(SETTING_TIMER_FREEZE_ROPE_JUMP, kRopeStatuses),
     STATUS(SETTING_TIMER_FREEZE_BOUNCE, kBounceStatuses),
+    STATUS(SETTING_TIMER_FREEZE_JUMP, kJumpStatuses),
+    STATUS(SETTING_TIMER_FREEZE_DIVE, kDiveStatuses),
+    STATUS(SETTING_TIMER_FREEZE_DOUBLE_JUMP, kDoubleStatuses),
+    STATUS(SETTING_TIMER_FREEZE_DIVE_ROLLOUT, kDiveRolloutStatuses),
+    STATUS(SETTING_TIMER_FREEZE_DIVE_GETUP, kDiveGetupStatuses),
   };
 
 #undef STATUS
 
   const u32 kStatusSite    = SUSAMUNE_MEM1_ADDR(0x801335B8u, 0x802541C8u, 0x8024BF54u);
   const int kStatusCaveMax = 48;
+
+  template <u32 N>
+  constexpr int statusValueWords(const u32 (&statuses)[N]) {
+    int words = 0;
+    for (u32 i = 0; i < N; i++) {
+      words += statuses[i] < 0x10000u ? 1 : 3;
+    }
+    return words;
+  }
+
+  constexpr int kStatusCount =
+    sizeof(kPutStatuses) / sizeof(u32) + sizeof(kTripleStatuses) / sizeof(u32) +
+    sizeof(kSpinStatuses) / sizeof(u32) + sizeof(kLedgeStatuses) / sizeof(u32) +
+    sizeof(kWallStatuses) / sizeof(u32) + sizeof(kRopeStatuses) / sizeof(u32) +
+    sizeof(kBounceStatuses) / sizeof(u32) + sizeof(kJumpStatuses) / sizeof(u32) +
+    sizeof(kDiveStatuses) / sizeof(u32) + sizeof(kDoubleStatuses) / sizeof(u32) +
+    sizeof(kDiveRolloutStatuses) / sizeof(u32) +
+    sizeof(kDiveGetupStatuses) / sizeof(u32);
+  constexpr int kStatusMaxWords =
+    statusValueWords(kPutStatuses) + statusValueWords(kTripleStatuses) +
+    statusValueWords(kSpinStatuses) + statusValueWords(kLedgeStatuses) +
+    statusValueWords(kWallStatuses) + statusValueWords(kRopeStatuses) +
+    statusValueWords(kBounceStatuses) + statusValueWords(kJumpStatuses) +
+    statusValueWords(kDiveStatuses) + statusValueWords(kDoubleStatuses) +
+    statusValueWords(kDiveRolloutStatuses) + statusValueWords(kDiveGetupStatuses) +
+    (kStatusCount - 1) + 6;
+  static_assert(kStatusMaxWords <= kStatusCaveMax,
+                "enabled QFT status freezes exceed their generated cave");
+
   u32 sStatusCave[kStatusCaveMax];
   u32 sStatusSignature;
+  u32 sGuardedHookMask;
 
   int sDuration = -1;
 
@@ -446,7 +513,11 @@ namespace {
       bool on                = duration != 0 && gSettings.getBool(hook.setting);
 
       u32 target = reinterpret_cast<u32>(&sFreezeCave[0]);
-      if (hook.kind == FREEZE_CAVE) {
+      if (hook.kind == FREEZE_GUARDED_CAVE &&
+          !(sGuardedHookMask & (1u << i))) {
+        continue;
+      }
+      if (hook.kind != FREEZE_DIRECT) {
         target = reinterpret_cast<u32>(&hook.cave[0]);
       }
       ensureWord(hook.site, on ? branchWord(hook.site, target) : hook.original);
@@ -582,10 +653,25 @@ void QFTTimer::init() {
 
   pointAtFreezer(sTakeCave);
   pointAtFreezer(sDropCave);
+  pointAtFreezer(sPeteyWakeupCave);
+  pointAtFreezer(sEelActivateCave);
+  pointAtFreezer(sEelToothCave);
   installCave(kFreezeHooks[9].site, sTakeCave, sizeof(sTakeCave) / sizeof(sTakeCave[0]));
   installCave(kFreezeHooks[10].site, sDropCave, sizeof(sDropCave) / sizeof(sDropCave[0]));
   installCave(kFreezeHooks[2].site, sBlueCoinCave,
               sizeof(sBlueCoinCave) / sizeof(sBlueCoinCave[0]));
+
+  sGuardedHookMask = 0;
+  for (int i = 0; i < kNumFreezeHooks; i++) {
+    const FreezeHook &hook = kFreezeHooks[i];
+    if (hook.kind != FREEZE_GUARDED_CAVE ||
+        *reinterpret_cast<volatile u32 *>(hook.site) != hook.original) {
+      continue;
+    }
+    installCave(hook.site, hook.cave, hook.words);
+    writeGameCode(hook.site, hook.original);
+    sGuardedHookMask |= 1u << i;
+  }
 
   // installCave writes the special-hook sites. Restore retail until their
   // individual settings are applied below.

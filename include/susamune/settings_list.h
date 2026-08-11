@@ -100,7 +100,19 @@
     /* -- Pattern selector (append-only persisted id) -- */                  \
     X(SETTING_PATTERN_SELECTOR,          "pattern_selector")                \
     /* -- ILing (append-only persisted id) -- */                             \
-    X(SETTING_ILING_FANFARE,             "iling_fanfare")
+    X(SETTING_ILING_FANFARE,             "iling_fanfare")                    \
+    /* -- Visible goop (append-only persisted id) -- */                      \
+    X(SETTING_VISIBLE_GOOP,              "visible_goop")                    \
+    /* -- Inkstar requests (append-only persisted ids) -- */                 \
+    X(SETTING_TIMER_FREEZE_JUMP,         "timer_freeze_jump")               \
+    X(SETTING_TIMER_FREEZE_DIVE,         "timer_freeze_dive")               \
+    X(SETTING_TIMER_FREEZE_DOUBLE_JUMP,  "timer_freeze_double_jump")        \
+    X(SETTING_TIMER_FREEZE_PETEY_WAKEUP, "timer_freeze_petey_wakeup")       \
+    X(SETTING_TIMER_FREEZE_EEL_ACTIVATE, "timer_freeze_eel_activate")       \
+    X(SETTING_TIMER_FREEZE_EEL_TOOTH,    "timer_freeze_eel_tooth")          \
+    X(SETTING_ILING_RECENT,              "iling_recent")                    \
+    X(SETTING_TIMER_FREEZE_DIVE_ROLLOUT, "timer_freeze_dive_rollout")       \
+    X(SETTING_TIMER_FREEZE_DIVE_GETUP,   "timer_freeze_dive_getup")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

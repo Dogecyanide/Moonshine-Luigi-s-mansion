@@ -29,6 +29,10 @@ patches = [
     # main is at 0x80005600 with size 0x44 in all three region maps, so the call
     # site is main+0x1c everywhere.
     {'jp': 0x8000561c, 'us': 0x8000561c, 'pal': 0x8000561c, 'sym': 'onAppInit', 'type': PatchType.BL},
+    # CARDMount: retry only an encoding mismatch with the opposite ANSI/SJIS
+    # standard, selecting the format actually recorded in the mounted card.
+    {'jp': 0x800a31fc, 'us': 0x803588dc, 'pal': 0x80350afc,
+     'sym': 'susamuneCardMount', 'type': PatchType.B},
 #   {'jp': 0x800fa110, 'us': ..., 'pal': ..., 'sym': 'onFinishAppState', 'type': PatchType.BL},
     # insert NOPs to speed up boot process
     # initialize__12TApplicationFv + 0x2c / +0x40.

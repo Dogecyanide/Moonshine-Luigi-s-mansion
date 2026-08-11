@@ -290,12 +290,14 @@ const u32 kPostCoronaFlag = 0x103AE;
 const u32 kPinna4ShineFlag = 0x10021;
 const int kOverlayFlagCount = 2;
 const int kBannerFrames = 180;
+const int kRecentCount = 5;
 const int kShineFanfareDelay = 1;
 const u32 kPbSaveTimeoutFrames = 300;
 const u32 kPbRetryDelayFrames = 300;
 
 static_assert(sizeof(Entry) == 6, "ILing entry layout changed");
 static_assert(kEntryCount == 117, "ILing entry count changed");
+static_assert(kEntryCount <= 0x100, "recent IL entry index exceeds u8");
 static_assert(kGroupFirst[GROUP_AIRSTRIP] == kGeneratedLabelCount,
               "generated IL label range changed");
 
@@ -343,6 +345,10 @@ static_assert(kPbSlotCount * sizeof(s32) <= SUSAMUNE_MEM2_PB_LIVE_SIZE,
 int sBannerFrames;
 int sFanfareDelay;
 char sBannerText[32];
+s32 sRecentQf[kRecentCount];
+u8 sRecentEntry[kRecentCount];
+u8 sRecentCount;
+u8 sRecentNext;
 
 bool sPbBackend;
 bool sPbDirty;
@@ -824,6 +830,18 @@ void recordPB(int entry, s32 qf) {
     }
 }
 
+void recordResult(int entry, s32 qf) {
+    sRecentQf[sRecentNext] = qf;
+    sRecentEntry[sRecentNext] = (u8)entry;
+    if (++sRecentNext == kRecentCount) {
+        sRecentNext = 0;
+    }
+    if (sRecentCount < kRecentCount) {
+        sRecentCount++;
+    }
+    recordPB(entry, qf);
+}
+
 }  // namespace
 
 namespace ILing {
@@ -844,6 +862,8 @@ void init() {
     sAttemptSerial = 0;
     sBannerFrames = 0;
     sFanfareDelay = 0;
+    sRecentCount = 0;
+    sRecentNext = 0;
     sHaveSavedAttempt = false;
     loadPBs();
 }
@@ -1032,7 +1052,7 @@ void update() {
         u16 target;
         if (gQFTTimer.consumeTransition(&qf, &target)) {
             if ((u8)target == kEntries[sSelectedEntry].result) {
-                recordPB(sSelectedEntry, qf);
+                recordResult(sSelectedEntry, qf);
             }
             // Keep Plaza setup flags alive until the committed stage takes
             // over, but never let another portal event record this attempt.
@@ -1138,7 +1158,7 @@ void update() {
     }
 
     if (completedEntry >= 0) {
-        recordPB(completedEntry, qf);
+        recordResult(completedEntry, qf);
     }
     if (completedEntry >= 0 && sFinishKind == FINISH_PLANT) {
         // The timed hit precedes the retail death/event sequence. Keep
@@ -1177,21 +1197,49 @@ void onSavestateLoaded() {
 }
 
 void draw(Menu *menu) {
-    if (!menu || sBannerFrames <= 0 || menu->shown()) {
+    if (!menu || menu->shown()) {
         return;
     }
 
-    const int size = 22;
-    const int textW = Menu::textWidth(sBannerText, size);
-    const int w = textW + 28;
-    const int h = 42;
-    const int x = (640 - w) / 2;
-    const int y = 42;
+    if (gSettings.getBool(SETTING_ILING_RECENT) && sRecentCount != 0) {
+        const int x = 382;
+        const int y = 92;
+        const int w = 250;
+        const int lineH = 15;
+        const int h = 22 + lineH * sRecentCount;
+        menu->fillBox(x, y, w, h, JUtility::TColor(12, 20, 34, 205));
+        menu->fillBox(x, y, 3, h, JUtility::TColor(80, 180, 255, 255));
+        menu->drawText("Recent ILs", x + 10, y + 5, 12, 12,
+                       JUtility::TColor(160, 220, 255, 255));
 
-    menu->fillBox(x, y, w, h, JUtility::TColor(90, 58, 4, 230));
-    menu->fillBox(x, y, 4, h, JUtility::TColor(255, 196, 40, 255));
-    menu->drawText(sBannerText, x + 14, y + 10, size, size,
-                   JUtility::TColor(255, 239, 178, 255));
+        for (u8 row = 0; row < sRecentCount; row++) {
+            int index = sRecentNext - 1 - row;
+            if (index < 0) {
+                index += kRecentCount;
+            }
+            char time[20];
+            char line[48];
+            formatTime(sRecentQf[index], time, sizeof(time));
+            snprintf(line, sizeof(line), "%s  %s",
+                     label(sRecentEntry[index]), time);
+            menu->drawText(line, x + 10, y + 21 + row * lineH, 12, 12,
+                           JUtility::TColor(245, 248, 255, 255));
+        }
+    }
+
+    if (sBannerFrames > 0) {
+        const int size = 22;
+        const int textW = Menu::textWidth(sBannerText, size);
+        const int w = textW + 28;
+        const int h = 42;
+        const int x = (640 - w) / 2;
+        const int y = 42;
+
+        menu->fillBox(x, y, w, h, JUtility::TColor(90, 58, 4, 230));
+        menu->fillBox(x, y, 4, h, JUtility::TColor(255, 196, 40, 255));
+        menu->drawText(sBannerText, x + 14, y + 10, size, size,
+                       JUtility::TColor(255, 239, 178, 255));
+    }
 }
 
 }  // namespace ILing

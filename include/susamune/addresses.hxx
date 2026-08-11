@@ -30,6 +30,15 @@
 #define SUSAMUNE_ADDR_APPLICATION_FADER \
     (SUSAMUNE_ADDR_APPLICATION + 0x34u)
 
+// CARDCheck's synchronous wrapper helpers and OSFont.c's encoding selector.
+// The latter is the halfword changed by the original Force ANSI/SJIS codes.
+#define SUSAMUNE_ADDR_CARD_SYNC_CALLBACK \
+    SUSAMUNE_MEM1_ADDR(0x8009ec50u, 0x80354330u, 0x8034c550u)
+#define SUSAMUNE_ADDR_CARD_SYNC \
+    SUSAMUNE_MEM1_ADDR(0x8009fe00u, 0x803554e0u, 0x8034d700u)
+#define SUSAMUNE_ADDR_FONT_ENCODING \
+    SUSAMUNE_MEM1_ADDR(0x80408d18u, 0x8040ce58u, 0x804045b8u)
+
 // Mutable static storage that belongs to the game, not JSystem or the OS.
 //
 // These are deliberately NOT linker-section ends. In each retail build the
