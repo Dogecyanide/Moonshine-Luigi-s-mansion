@@ -61,7 +61,6 @@ public:
 
 private:
     static CreationStyle defaultStyle();
-    static void defaultTextRgb(u8 (*out)[3]);
     void resetLayout();
     void clampLayout();
     void markDirty();

@@ -22,23 +22,24 @@ const int kSafeBottom   = 456;
 
 constexpr u8 kTextOffsets[] = {
     // Short field labels.
-    202, 204, 206, 208, 210, 212, 214, 217, 220, 223, 225,
+    205, 207, 209, 211, 213, 215, 217, 220, 223, 226, 228,
     // Menu rows. Rows 2..12 are also the long field labels.
-    0, 17, 24, 35, 46, 57, 69, 86, 101, 111, 124, 145, 162, 177, 189,
+    0, 17, 24, 35, 46, 57, 69, 86, 101, 111, 124, 145, 162, 177, 192,
 };
 constexpr char kMetadataText[] =
     "Metadata display\0Labels\0X Position\0Y Position\0Z Position\0"
     "Mario Angle\0Horizontal Speed\0Vertical Speed\0QF Offset\0Camera Angle\0"
-    "Invincibility Frames\0Pollution Degree\0Spin Condition\0Edit layout\0"
+    "Invincibility Frames\0Pollution Degree\0Spin Condition\0Metadata style\0"
     "Reset layout\0"
     "X\0Y\0Z\0A\0H\0V\0QF\0CA\0IF\0G\0SP\0"
     "Off\0On\0Short\0Long\0Custom";
 
-const int kTextOnOff      = 228;
-const int kTextLabelModes = 235;
+const int kTextOnOff      = 231;
+const int kTextLabelModes = 238;
 
 constexpr char kTokenIds[] =
     "x\0y\0z\0angle\0HSpd\0VSpd\0QF\0CAngle\0invinc\0goop\0spin";
+constexpr u8 kMaximumValueSlots[] = {7, 7, 7, 5, 9, 9, 1, 5, 5, 10, 1};
 
 template <unsigned N>
 constexpr int stringCount(const char (&pool)[N]) {
@@ -60,9 +61,11 @@ static_assert(SUSAMUNE_METADATA_LABEL_SHORT == 0 &&
               "metadata label mode order changed");
 static_assert(sizeof(kTextOffsets) == MetadataDisplay::FIELD_COUNT + 15,
               "metadata text offsets changed");
-static_assert(sizeof(kMetadataText) == 253, "metadata text offsets need updating");
+static_assert(sizeof(kMetadataText) == 256, "metadata text offsets need updating");
 static_assert(stringCount(kTokenIds) == MetadataDisplay::FIELD_COUNT,
               "metadata token ids changed");
+static_assert(sizeof(kMaximumValueSlots) == MetadataDisplay::FIELD_COUNT,
+              "metadata maximum widths changed");
 
 inline u16 fieldBit(int field) { return (u16)(1u << field); }
 
@@ -161,6 +164,18 @@ Values readValues() {
     return v;
 }
 
+Values editorValues() {
+    Values v = {};
+    v.x = v.y = v.z = 9999999.0f;
+    v.hSpd = v.vSpd = 999999.0f;
+    v.angle = v.cameraAngle = 0xffff;
+    v.qf = 3;
+    v.invinc = 0x7fff;
+    v.goop = 0xffffffff;
+    v.spin = true;
+    return v;
+}
+
 __attribute__((noinline))
 void formatValue(char *out, u32 cap, int field, int precision, const Values &v);
 
@@ -170,6 +185,17 @@ void formatField(char *out, u32 cap, int field, const char *label, const Values 
                      field == MetadataDisplay::FIELD_VSPD) ? 2 : 0;
     formatValue(value, sizeof(value), field, precision, v);
     snprintf(out, cap, "%s: %s", label, value);
+}
+
+int fieldPrecision(int field) {
+    return (field == MetadataDisplay::FIELD_HSPD ||
+            field == MetadataDisplay::FIELD_VSPD) ? 2 : 0;
+}
+
+const u8 *fieldLabelOffsets(const MetadataDisplayLiveCfg &cfg) {
+    return cfg.labelMode == SUSAMUNE_METADATA_LABEL_LONG
+               ? kTextOffsets + MetadataDisplay::FIELD_COUNT + 2
+               : kTextOffsets;
 }
 
 char lower(char c) {
@@ -307,8 +333,8 @@ void drawBackground(Menu *menu, const CreationStyle &style,
 
 void drawCustom(Menu *menu, const CreationStyle &style, const u8 (*textRgb)[3],
                 const char *format, u32 formatLength, const Values &v,
-                int size, int lineH) {
-    char line[192];
+                const Values &maximum, int size, int lineH, u16 selectedSlot) {
+    char line[192], maximumLine[192];
     u32 pos = 0;
     int maxWidth = 0;
     int lines = 0;
@@ -324,16 +350,69 @@ void drawCustom(Menu *menu, const CreationStyle &style, const u8 (*textRgb)[3],
     drawBackground(menu, style, maxWidth, lines * lineH);
 
     pos = 0;
+    u32 maximumPos = 0;
     int y = style.y;
     u16 slot = 0;
     do {
         more = formatCustomLine(format, formatLength, v, pos, line, sizeof(line));
+        formatCustomLine(format, formatLength, maximum, maximumPos,
+                         maximumLine, sizeof(maximumLine));
         Creation::drawTextLine(menu, style, textRgb,
                                SUSAMUNE_METADATA_STYLE_TEXT_SLOTS,
-                               line, style.x, y, size, slot, true);
-        slot = (u16)(slot + Creation::glyphCount(line));
+                               line, style.x, y, size, slot, true,
+                               selectedSlot);
+        slot = (u16)(slot + Creation::glyphCount(maximumLine));
         y += lineH;
     } while (more);
+}
+
+void drawStandard(Menu *menu, const MetadataDisplayLiveCfg &cfg,
+                  const CreationStyle &style, const u8 (*textRgb)[3],
+                  const Values &values, bool editing, int size, int lineH,
+                  u16 selectedSlot) {
+    const u8 *labelOffsets = fieldLabelOffsets(cfg);
+    int maxWidth = 0;
+    int lines = 0;
+    char prefix[48], value[48];
+
+    for (int field = 0; field < MetadataDisplay::FIELD_COUNT; field++) {
+        if (!editing && !(cfg.fieldMask & fieldBit(field))) continue;
+        const char *label = kMetadataText + labelOffsets[field];
+        snprintf(prefix, sizeof(prefix), "%s: ", label);
+        formatValue(value, sizeof(value), field, fieldPrecision(field), values);
+        const int width = Menu::textWidth(prefix, size) +
+                          Menu::textWidth(value, size);
+        if (width > maxWidth) maxWidth = width;
+        lines++;
+    }
+    drawBackground(menu, style, maxWidth, lines * lineH);
+
+    int y = style.y;
+    u16 slot = 0;
+    for (int field = 0; field < MetadataDisplay::FIELD_COUNT; field++) {
+        const char *label = kMetadataText + labelOffsets[field];
+        snprintf(prefix, sizeof(prefix), "%s: ", label);
+        const u16 prefixSlots = (u16)Creation::glyphCount(prefix);
+        const u16 valueSlots = kMaximumValueSlots[field];
+
+        if (editing || (cfg.fieldMask & fieldBit(field))) {
+            formatValue(value, sizeof(value), field, fieldPrecision(field), values);
+            const u16 valueCount = (u16)Creation::glyphCount(value);
+            const u16 valueSlot = valueCount < valueSlots
+                                      ? slot + prefixSlots + valueSlots - valueCount
+                                      : slot + prefixSlots;
+            Creation::drawTextLine(menu, style, textRgb,
+                                   SUSAMUNE_METADATA_STYLE_TEXT_SLOTS,
+                                   prefix, style.x, y, size, slot, true,
+                                   selectedSlot);
+            Creation::drawTextLine(
+                menu, style, textRgb, SUSAMUNE_METADATA_STYLE_TEXT_SLOTS,
+                value, style.x + Menu::textWidth(prefix, size), y, size,
+                valueSlot, true, selectedSlot);
+            y += lineH;
+        }
+        slot = (u16)(slot + prefixSlots + valueSlots);
+    }
 }
 
 }  // namespace
@@ -342,14 +421,6 @@ MetadataDisplay gMetadataDisplay;
 
 CreationStyle MetadataDisplay::defaultStyle() {
     return CreationStyle{16, 112, 100, 255, 0, 0, 0, 0, 100, 3};
-}
-
-void MetadataDisplay::defaultTextRgb(u8 (*out)[3]) {
-    for (int i = 0; i < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS; i++) {
-        out[i][0] = 255;
-        out[i][1] = 255;
-        out[i][2] = 255;
-    }
 }
 
 void MetadataDisplay::resetDefaults() {
@@ -361,7 +432,7 @@ void MetadataDisplay::resetDefaults() {
     mCfg.labelMode    = SUSAMUNE_METADATA_LABEL_SHORT;
     mCfg.backgroundAlpha = 0;
     mStyle             = defaultStyle();
-    defaultTextRgb(mTextRgb);
+    Creation::fillWhite(mTextRgb, SUSAMUNE_METADATA_STYLE_TEXT_SLOTS);
     mFormat            = kDefaultFormat;
     mFormatLength      = sizeof(kDefaultFormat) - 1;
 
@@ -413,7 +484,7 @@ void MetadataDisplay::adopt(const volatile SusamuneMetadataDisplayCfg *src) {
 
 void MetadataDisplay::adoptStyle(const volatile SusamuneMetadataStyleCfg *src) {
     if (!src || src->magic != SUSAMUNE_METADATA_STYLE_MAGIC ||
-        src->version != SUSAMUNE_METADATA_STYLE_VERSION) {
+        src->version == 0 || src->version > SUSAMUNE_METADATA_STYLE_VERSION) {
         return;
     }
 
@@ -431,7 +502,8 @@ void MetadataDisplay::adoptStyle(const volatile SusamuneMetadataStyleCfg *src) {
         if (p & SUSAMUNE_METADATA_STYLE_TEXT_R) mTextRgb[i][0] = src->textR;
         if (p & SUSAMUNE_METADATA_STYLE_TEXT_G) mTextRgb[i][1] = src->textG;
         if (p & SUSAMUNE_METADATA_STYLE_TEXT_B) mTextRgb[i][2] = src->textB;
-        if (src->slotPresent[i >> 3] & (1u << (i & 7))) {
+        if (src->version >= 2 &&
+            (src->slotPresent[i >> 3] & (1u << (i & 7)))) {
             for (int c = 0; c < 3; c++) mTextRgb[i][c] = src->textRgb[i][c];
         }
     }
@@ -461,30 +533,14 @@ void MetadataDisplay::stageInto(volatile SusamuneMetadataDisplayCfg *dst) const 
 }
 
 void MetadataDisplay::stageStyleInto(volatile SusamuneMetadataStyleCfg *dst) const {
-    int modal = 0;
-    int modalCount = 0;
-    for (int candidate = 0; candidate < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS;
-         candidate++) {
-        int count = 0;
-        for (int i = 0; i < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS; i++) {
-            if (mTextRgb[i][0] == mTextRgb[candidate][0] &&
-                mTextRgb[i][1] == mTextRgb[candidate][1] &&
-                mTextRgb[i][2] == mTextRgb[candidate][2]) {
-                count++;
-            }
-        }
-        if (count > modalCount) {
-            modal = candidate;
-            modalCount = count;
-        }
-    }
-
+    // Normal layouts never select the final slot, while All still updates it.
+    const int base = SUSAMUNE_METADATA_STYLE_TEXT_SLOTS - 1;
     dst->magic          = SUSAMUNE_METADATA_STYLE_MAGIC;
     dst->version        = SUSAMUNE_METADATA_STYLE_VERSION;
     dst->present        = SUSAMUNE_METADATA_STYLE_ALL;
-    dst->textR          = mTextRgb[modal][0];
-    dst->textG          = mTextRgb[modal][1];
-    dst->textB          = mTextRgb[modal][2];
+    dst->textR          = mTextRgb[base][0];
+    dst->textG          = mTextRgb[base][1];
+    dst->textB          = mTextRgb[base][2];
     dst->textA          = mStyle.textA;
     dst->bgR            = mStyle.bgR;
     dst->bgG            = mStyle.bgG;
@@ -495,11 +551,13 @@ void MetadataDisplay::stageStyleInto(volatile SusamuneMetadataStyleCfg *dst) con
     for (u32 i = 0; i < sizeof(dst->reserved0); i++) dst->reserved0[i] = 0;
     for (u32 i = 0; i < sizeof(dst->slotPresent); i++) dst->slotPresent[i] = 0;
     for (int i = 0; i < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS; i++) {
-        const bool override = mTextRgb[i][0] != mTextRgb[modal][0] ||
-                              mTextRgb[i][1] != mTextRgb[modal][1] ||
-                              mTextRgb[i][2] != mTextRgb[modal][2];
-        if (override) dst->slotPresent[i >> 3] |= (u8)(1u << (i & 7));
-        for (int c = 0; c < 3; c++) dst->textRgb[i][c] = mTextRgb[i][c];
+        const bool override = mTextRgb[i][0] != mTextRgb[base][0] ||
+                              mTextRgb[i][1] != mTextRgb[base][1] ||
+                              mTextRgb[i][2] != mTextRgb[base][2];
+        if (override) {
+            dst->slotPresent[i >> 3] |= (u8)(1u << (i & 7));
+            for (int c = 0; c < 3; c++) dst->textRgb[i][c] = mTextRgb[i][c];
+        }
     }
 }
 
@@ -540,7 +598,6 @@ void MetadataDisplay::syncLegacyStyle() {
 }
 
 const char *MetadataDisplay::menuRowName(int row) {
-    if (row == 2 + FIELD_COUNT) return "Metadata style";
     return (row >= 0 && row < menuRowCount())
                ? kMetadataText + kTextOffsets[FIELD_COUNT + row] : "";
 }
@@ -574,7 +631,7 @@ void MetadataDisplay::adjustMenuRow(int row, int dir) {
 }
 
 void MetadataDisplay::buildEditorPreview() {
-    Values v = readValues();
+    const Values v = editorValues();
     int out = 0;
     auto appendLine = [&](const char *line) {
         while (*line && out < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS) {
@@ -595,11 +652,8 @@ void MetadataDisplay::buildEditorPreview() {
             appendLine(line);
         } while (more && out < SUSAMUNE_METADATA_STYLE_TEXT_SLOTS);
     } else {
-        const u8 *labelOffsets = kTextOffsets;
-        if (mCfg.labelMode == SUSAMUNE_METADATA_LABEL_LONG)
-            labelOffsets += FIELD_COUNT + 2;
+        const u8 *labelOffsets = fieldLabelOffsets(mCfg);
         for (int field = 0; field < FIELD_COUNT; field++) {
-            if (!(mCfg.fieldMask & fieldBit(field))) continue;
             formatField(line, sizeof(line), field,
                         kMetadataText + labelOffsets[field], v);
             appendLine(line);
@@ -647,45 +701,20 @@ void MetadataDisplay::draw(Menu *menu, bool force) const {
         return;
     }
 
-    Values v = readValues();
+    const bool editor = editing();
+    const Values maximum = editorValues();
+    const Values v = editor ? maximum : readValues();
     int size  = textSize(mStyle);
     int lineH = size + 3;
+    const u16 selected = editor && mEditor.target()
+                             ? mEditor.target() - 1 : 0xffff;
 
     if (mCfg.labelMode == SUSAMUNE_METADATA_LABEL_CUSTOM) {
         drawCustom(menu, mStyle, mTextRgb, mFormat, mFormatLength,
-                   v, size, lineH);
+                   v, maximum, size, lineH, selected);
         return;
     }
-
-    const u8 *labelOffsets = kTextOffsets;
-    if (mCfg.labelMode == SUSAMUNE_METADATA_LABEL_LONG) {
-        labelOffsets += FIELD_COUNT + 2;
-    }
-    int maxWidth = 0;
-    int lines = 0;
-    char text[96];
-    for (int field = 0; field < FIELD_COUNT; field++) {
-        if (!(mCfg.fieldMask & fieldBit(field))) continue;
-        formatField(text, sizeof(text), field,
-                    kMetadataText + labelOffsets[field], v);
-        int width = Menu::textWidth(text, size);
-        if (width > maxWidth) maxWidth = width;
-        lines++;
-    }
-    drawBackground(menu, mStyle, maxWidth, lines * lineH);
-
-    int y = mStyle.y;
-    u16 slot = 0;
-    for (int field = 0; field < FIELD_COUNT; field++) {
-        if (!(mCfg.fieldMask & fieldBit(field))) continue;
-        formatField(text, sizeof(text), field,
-                    kMetadataText + labelOffsets[field], v);
-        Creation::drawTextLine(menu, mStyle, mTextRgb,
-                               SUSAMUNE_METADATA_STYLE_TEXT_SLOTS,
-                               text, mStyle.x, y, size, slot, true);
-        slot = (u16)(slot + Creation::glyphCount(text));
-        y += lineH;
-    }
+    drawStandard(menu, mCfg, mStyle, mTextRgb, v, editor, size, lineH, selected);
 }
 
 void MetadataDisplay::drawEditor(Menu *menu) const {

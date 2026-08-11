@@ -39,6 +39,7 @@ public:
                 const u8 defaultRgb[3]);
     void draw(Menu *menu, const char *title, const char *preview) const;
     bool editing() const { return mEditing; }
+    u16  target() const { return mTextTarget; }
 
 private:
     u32 repeatInput(TMarioGamePad *pad);
@@ -59,13 +60,15 @@ private:
 
 namespace Creation {
 
+void fillWhite(u8 (*out)[3], u16 slots);
 int glyphCount(const char *text);
 void drawTextBox(Menu *menu, const CreationStyle &style,
                  const u8 (*textRgb)[3], u16 textSlots, const char *text,
-                 bool rightAlignSlots = false);
+                 bool rightAlignSlots = false, u16 selectedSlot = 0xffff);
 void drawTextLine(Menu *menu, const CreationStyle &style,
                   const u8 (*textRgb)[3], u16 textSlots, const char *text,
-                  int x, int y, int size, u16 firstSlot, bool shadow);
+                  int x, int y, int size, u16 firstSlot, bool shadow,
+                  u16 selectedSlot = 0xffff);
 
 }  // namespace Creation
 

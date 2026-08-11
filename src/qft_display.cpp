@@ -22,17 +22,9 @@ CreationStyle QftDisplay::defaults() {
     };
 }
 
-void QftDisplay::defaultTextRgb(u8 (*out)[3]) {
-    for (int i = 0; i < SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS; i++) {
-        out[i][0] = 255;
-        out[i][1] = 255;
-        out[i][2] = 255;
-    }
-}
-
 void QftDisplay::resetDefaults() {
     mStyle           = defaults();
-    defaultTextRgb(mTextRgb);
+    Creation::fillWhite(mTextRgb, SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS);
     mEditor.reset();
     mDirty           = false;
     mDirtyBeforeEdit = false;
@@ -139,7 +131,10 @@ void QftDisplay::updateEditor(TMarioGamePad *pad) {
 }
 
 void QftDisplay::drawEditor(Menu *menu) const {
-    draw(menu, "12:34:567");
+    const u16 selected = mEditor.target() ? mEditor.target() - 1 : 0xffff;
+    Creation::drawTextBox(menu, mStyle, mTextRgb,
+                          SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS, "12:34:567",
+                          true, selected);
     mEditor.draw(menu, "QFT timer editor", "12:34:567");
 }
 

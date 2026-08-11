@@ -739,7 +739,7 @@ static bool ParseMetadataRgbKey(const char *key, u32 *slot)
 	u32 value = 0;
 	const char *p;
 
-	if (memcmp(key, "text_", 5) != 0)
+	if (memcmp(key, "char_", 5) != 0)
 		return false;
 	p = key + 5;
 	if (*p < '0' || *p > '9')
@@ -1121,7 +1121,7 @@ static void EmitMetadataDisplaySection(FIL *f, int *err, const struct SusamuneCf
 		if (s->slotPresent[i >> 3] & (1u << (i & 7)))
 		{
 			Emit(f, err, line, (u32)_sprintf(
-				line, "text_%u_rgb = %u,%u,%u\r\n", i + 1,
+				line, "char_%u_rgb = %u,%u,%u\r\n", i + 1,
 				s->textRgb[i][0], s->textRgb[i][1], s->textRgb[i][2]));
 		}
 	}

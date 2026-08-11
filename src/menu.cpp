@@ -158,6 +158,13 @@ __attribute__((noinline)) void drawRowHighlight(Menu *menu, int x, int y, int w,
     menu->fillBox(x - 6, y - (rowH - 12) / 2, w + 12, rowH, cRowSelBg());
 }
 
+__attribute__((noinline)) void drawSectionHeader(Menu *menu, int x, int y, int w,
+                                                 const char *label) {
+    menu->drawText(label, x + 4, y + 3, 13, 13, cAccent());
+    const int lineX = x + 14 + Menu::textWidth(label, 13);
+    menu->fillBox(lineX, y + 11, x + w - lineX - 8, 1, cRowDim());
+}
+
 // Wrap helper for a cursor over [0, n).
 __attribute__((noinline)) int wrap(int v, int n) {
     if (v < 0) {
@@ -262,21 +269,33 @@ public:
         const int entries = ILing::count();
         const int listH = h - ROW_H;
         const int maxRows = listH / ROW_H;
-        const int start = listScrollStart(mSel, entries, maxRows);
+        const int rows = menuRowCount(entries);
+        const int start = listScrollStart(menuRowForEntry(mSel), rows, maxRows);
         int end = start + maxRows;
-        if (end > entries) {
-            end = entries;
+        if (end > rows) {
+            end = rows;
         }
 
         int ry = y;
-        for (int i = start; i < end; i++, ry += ROW_H) {
+        int row = 0;
+        for (int i = 0; i < entries && row < end; i++) {
+            if (ILing::beginsGroup(i)) {
+                if (row >= start) {
+                    drawSectionHeader(menu, x, ry, w, ILing::groupName(i));
+                    ry += ROW_H;
+                }
+                row++;
+                if (row >= end) break;
+            }
+            if (row < start) {
+                row++;
+                continue;
+            }
+
             const bool selected = i == mSel;
             if (selected) {
                 drawRowHighlight(menu, x, ry, w, ROW_H);
                 menu->drawText(">", x - 2, ry, ROW_SZ, ROW_SZ, cAccent());
-            }
-            if (ILing::beginsGroup(i)) {
-                menu->fillBox(x + 4, ry - 6, w - 16, 1, cRowDim());
             }
             menu->drawText(ILing::label(i), x + 12, ry, ROW_SZ, ROW_SZ,
                            selected ? cRowSel() : cRow());
@@ -294,9 +313,11 @@ public:
             }
             menu->drawText(value, x + w - Menu::textWidth(value, ROW_SZ) - 8,
                            ry, ROW_SZ, ROW_SZ, cValue());
+            ry += ROW_H;
+            row++;
         }
 
-        drawScrollHints(menu, x, y, w, listH, start, end, entries);
+        drawScrollHints(menu, x, y, w, listH, start, end, rows);
         menu->drawText(SUSAMUNE_GLYPH_A " Start  " SUSAMUNE_GLYPH_X
                        " Delete  " SUSAMUNE_GLYPH_C " U/D Scroll L/R Group",
                        x + 4, y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
@@ -309,6 +330,18 @@ public:
     }
 
 private:
+    static int menuRowForEntry(int entry) {
+        int row = entry;
+        for (int i = 0; i <= entry; i++) {
+            if (ILing::beginsGroup(i)) row++;
+        }
+        return row;
+    }
+
+    static int menuRowCount(int entries) {
+        return menuRowForEntry(entries - 1) + 1;
+    }
+
     int mSel;
     bool mConfirmDelete;
 };
@@ -656,9 +689,7 @@ public:
         for (int row = start; row < end; row++) {
             if (isSeparator(row)) {
                 const char *label = row == ROW_QFT_HEADER ? "QFT" : "METADATA";
-                menu->drawText(label, x + 4, ry + 3, 13, 13, cAccent());
-                const int lineX = x + 14 + Menu::textWidth(label, 13);
-                menu->fillBox(lineX, ry + 11, x + w - lineX - 8, 1, cRowDim());
+                drawSectionHeader(menu, x, ry, w, label);
             } else {
                 const bool selected = row == mSel;
                 if (selected) drawRowHighlight(menu, x, ry, w, ROW_H);
@@ -703,21 +734,29 @@ private:
         } else if (mSel == ROW_QFT_LEADING_ZERO) {
             gQftDisplay.toggleLeadingZero();
         } else if (mSel >= ROW_METADATA_FIRST) {
-            gMetadataDisplay.adjustMenuRow(mSel - ROW_METADATA_FIRST, dir);
+            gMetadataDisplay.adjustMenuRow(metadataRow(mSel), dir);
         }
     }
 
     const char *rowName(int row) const {
         if (row == ROW_QFT_EDITOR) return "QFT timer";
         if (row == ROW_QFT_LEADING_ZERO) return "QFT leading zero";
-        return gMetadataDisplay.menuRowName(row - ROW_METADATA_FIRST);
+        return gMetadataDisplay.menuRowName(metadataRow(row));
     }
 
     const char *rowValue(int row) const {
         if (row == ROW_QFT_EDITOR) return "Edit";
         if (row == ROW_QFT_LEADING_ZERO)
             return gQftDisplay.leadingZero() ? "On" : "Off";
-        return gMetadataDisplay.menuRowValue(row - ROW_METADATA_FIRST);
+        return gMetadataDisplay.menuRowValue(metadataRow(row));
+    }
+
+    static int metadataRow(int row) {
+        const int local = row - ROW_METADATA_FIRST;
+        const int style = 2 + MetadataDisplay::FIELD_COUNT;
+        if (local == 0) return style;
+        if (local <= style) return local - 1;
+        return style + 1;
     }
 
     u8 mSel;

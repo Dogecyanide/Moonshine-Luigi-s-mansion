@@ -37,6 +37,28 @@ enum ConfirmAction {
     CONFIRM_RESET,
 };
 
+constexpr u8 kStyleOffsets[] = {
+    __builtin_offsetof(CreationStyle, textA),
+    __builtin_offsetof(CreationStyle, textBrightness),
+    __builtin_offsetof(CreationStyle, bgR),
+    __builtin_offsetof(CreationStyle, bgG),
+    __builtin_offsetof(CreationStyle, bgB),
+    __builtin_offsetof(CreationStyle, bgA),
+    __builtin_offsetof(CreationStyle, padding),
+};
+static_assert(sizeof(kStyleOffsets) == OPTION_COUNT - OPTION_TEXT_A,
+              "Creation scalar options changed");
+
+u8 &styleValue(CreationStyle &style, int option) {
+    return *(reinterpret_cast<u8 *>(&style) +
+             kStyleOffsets[option - OPTION_TEXT_A]);
+}
+
+u8 styleValue(const CreationStyle &style, int option) {
+    return *(reinterpret_cast<const u8 *>(&style) +
+             kStyleOffsets[option - OPTION_TEXT_A]);
+}
+
 inline int clampi(int value, int lo, int hi) {
     if (value < lo) return lo;
     if (value > hi) return hi;
@@ -96,15 +118,7 @@ void resetOption(CreationStyle &style, const CreationStyle &defaults,
         return;
     }
 
-    switch (option) {
-    case OPTION_TEXT_A:          style.textA = defaults.textA; break;
-    case OPTION_TEXT_BRIGHTNESS: style.textBrightness = defaults.textBrightness; break;
-    case OPTION_BG_R:            style.bgR = defaults.bgR; break;
-    case OPTION_BG_G:            style.bgG = defaults.bgG; break;
-    case OPTION_BG_B:            style.bgB = defaults.bgB; break;
-    case OPTION_BG_A:            style.bgA = defaults.bgA; break;
-    default:                     style.padding = defaults.padding; break;
-    }
+    styleValue(style, option) = styleValue(defaults, option);
 }
 
 const char *targetLabel(u16 target, const char *preview, char *out, int size) {
@@ -224,7 +238,9 @@ u8 CreationEditor::update(TMarioGamePad *pad, const CreationStyle &defaults,
         return UPDATE_NONE;
     }
     if (pressed & TMarioGamePad::START) {
-        mTextTarget = (u16)((mTextTarget + 1) % (mTargetSlots + 1));
+        const int count = mTargetSlots + 1;
+        const int direction = (pad->mButtons.mInput & TMarioGamePad::X) ? -1 : 1;
+        mTextTarget = (u16)((mTextTarget + count + direction) % count);
     }
 
     const u32 repeat = repeatInput(pad);
@@ -248,33 +264,10 @@ u8 CreationEditor::update(TMarioGamePad *pad, const CreationStyle &defaults,
     if (repeat & TMarioGamePad::CSTICK_RIGHT) delta = 4;
     if (!delta) return result;
 
-    switch (mOption) {
-    case OPTION_TEXT_R:
-    case OPTION_TEXT_G:
-    case OPTION_TEXT_B:
+    if (mOption <= OPTION_TEXT_B) {
         adjustTextChannel(mTextRgb, mTextSlots, mTextTarget,
                           mOption - OPTION_TEXT_R, delta);
-        break;
-    case OPTION_TEXT_A:
-        mStyle->textA = (u8)clampi((int)mStyle->textA + delta, 0, 255);
-        break;
-    case OPTION_TEXT_BRIGHTNESS:
-        mStyle->textBrightness =
-            (u8)clampi((int)mStyle->textBrightness + delta, 25, 200);
-        break;
-    case OPTION_BG_R:
-        mStyle->bgR = (u8)clampi((int)mStyle->bgR + delta, 0, 255);
-        break;
-    case OPTION_BG_G:
-        mStyle->bgG = (u8)clampi((int)mStyle->bgG + delta, 0, 255);
-        break;
-    case OPTION_BG_B:
-        mStyle->bgB = (u8)clampi((int)mStyle->bgB + delta, 0, 255);
-        break;
-    case OPTION_BG_A:
-        mStyle->bgA = (u8)clampi((int)mStyle->bgA + delta, 0, 255);
-        break;
-    default:
+    } else if (mOption == OPTION_PADDING) {
         if (mStyle->padding == 0xff) {
             if (delta > 0) mStyle->padding = 0;
         } else if (mStyle->padding == 0 && delta < 0) {
@@ -283,7 +276,11 @@ u8 CreationEditor::update(TMarioGamePad *pad, const CreationStyle &defaults,
             mStyle->padding = (u8)clampi(
                 (int)mStyle->padding + (delta > 0 ? 1 : -1), 0, 16);
         }
-        break;
+    } else {
+        u8 &value = styleValue(*mStyle, mOption);
+        const int lo = mOption == OPTION_TEXT_BRIGHTNESS ? 25 : 0;
+        const int hi = mOption == OPTION_TEXT_BRIGHTNESS ? 200 : 255;
+        value = (u8)clampi((int)value + delta, lo, hi);
     }
     return result | UPDATE_CHANGED;
 }
@@ -291,8 +288,8 @@ u8 CreationEditor::update(TMarioGamePad *pad, const CreationStyle &defaults,
 void CreationEditor::draw(Menu *menu, const char *title, const char *preview) const {
     if (!menu || !mStyle) return;
 
-    const int panelY = mStyle->y < 240 ? 286 : 8;
-    const int panelH = 172;
+    const int panelY = mStyle->y < 224 ? 264 : 8;
+    const int panelH = 168;
     menu->fillBox(8, panelY, 624, panelH, Color(0, 0, 0, 215));
 
     menu->drawText(title, 18, panelY + 9, 16, 16,
@@ -302,15 +299,15 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
     const char *target = targetLabel(mTextTarget, preview, targetBuf, sizeof(targetBuf));
     char status[128];
     if (mTextTarget == 0)
-        snprintf(status, sizeof(status), "START: Change to Single Character");
+        snprintf(status, sizeof(status), "All characters");
     else
-        snprintf(status, sizeof(status), "START: Next Character (%s)", target);
+        snprintf(status, sizeof(status), "Character %s", target);
     menu->drawText(status, 622 - Menu::textWidth(status, 12), panelY + 11,
                    12, 12, Color(190, 220, 255, 255));
 
     snprintf(status, sizeof(status), "Position X:%u Y:%u   Size:%u%%",
              mStyle->x, mStyle->y, mStyle->scale);
-    menu->drawText(status, 18, panelY + 31, 12, 12,
+    menu->drawText(status, 18, panelY + 29, 12, 12,
                    Color(190, 220, 255, 255));
 
     u8 r, g, b;
@@ -327,14 +324,14 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
                  "%s: Mixed   Background RGB:%03u,%03u,%03u",
                  rgbLabel, mStyle->bgR, mStyle->bgG, mStyle->bgB);
     }
-    menu->drawText(status, 18, panelY + 48, 11, 11,
+    menu->drawText(status, 18, panelY + 46, 11, 11,
                    Color(190, 220, 255, 255));
 
     for (int i = 0; i < OPTION_COUNT; i++) {
         const int column = i / 5;
         const int row = i % 5;
         const int x = 18 + column * 306;
-        const int y = panelY + 67 + row * 14;
+        const int y = panelY + 64 + row * 14;
         const bool selected = i == mOption;
         if (selected) {
             menu->fillBox(x - 3, y - 1, 294, 14, Color(90, 170, 255, 60));
@@ -351,43 +348,33 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
                 snprintf(status, sizeof(status), "%u", v);
             else
                 value = "Mixed";
-        } else if (i == OPTION_TEXT_A) {
-            snprintf(status, sizeof(status), "%u", mStyle->textA);
-        } else if (i == OPTION_TEXT_BRIGHTNESS) {
-            snprintf(status, sizeof(status), "%u%%", mStyle->textBrightness);
-        } else if (i == OPTION_BG_R) {
-            snprintf(status, sizeof(status), "%u", mStyle->bgR);
-        } else if (i == OPTION_BG_G) {
-            snprintf(status, sizeof(status), "%u", mStyle->bgG);
-        } else if (i == OPTION_BG_B) {
-            snprintf(status, sizeof(status), "%u", mStyle->bgB);
-        } else if (i == OPTION_BG_A) {
-            snprintf(status, sizeof(status), "%u", mStyle->bgA);
-        } else if (mStyle->padding == 0xff) {
-            value = "Off";
         } else {
-            snprintf(status, sizeof(status), "%u", mStyle->padding);
+            const u8 scalar = styleValue(*mStyle, i);
+            if (i == OPTION_PADDING && scalar == 0xff)
+                value = "Off";
+            else if (i == OPTION_TEXT_BRIGHTNESS)
+                snprintf(status, sizeof(status), "%u%%", scalar);
+            else
+                snprintf(status, sizeof(status), "%u", scalar);
         }
         menu->drawText(value, x + 282 - Menu::textWidth(value, 11), y,
                        11, 11, Color(120, 220, 150, 255));
     }
 
-    const char *controls = mTextTarget == 0
-        ? SUSAMUNE_GLYPH_C " U/D Change Option   " SUSAMUNE_GLYPH_C
-          " L/R Adjust   START Single Character"
-        : SUSAMUNE_GLYPH_C " U/D Change Option   " SUSAMUNE_GLYPH_C
-          " L/R Adjust   START Next Character";
-    menu->drawText(controls, 18, panelY + 139, 10, 10,
+    const char *controls = SUSAMUNE_GLYPH_C " U/D Option   " SUSAMUNE_GLYPH_C
+                           " L/R Adjust   START Next   " SUSAMUNE_GLYPH_X
+                           "+START Back";
+    menu->drawText(controls, 18, panelY + 135, 9, 9,
                    Color(150, 170, 205, 255));
     menu->drawText("D-pad Move   L/R Size",
-                   18, panelY + 154, 10, 10, Color(150, 170, 205, 255));
+                   18, panelY + 150, 9, 9, Color(150, 170, 205, 255));
     const char *finish = SUSAMUNE_GLYPH_A " Keep  " SUSAMUNE_GLYPH_B
                          " Cancel  " SUSAMUNE_GLYPH_Z " Reset";
-    menu->drawText(finish, 622 - Menu::textWidth(finish, 10), panelY + 154,
-                   10, 10, Color(150, 170, 205, 255));
+    menu->drawText(finish, 622 - Menu::textWidth(finish, 9), panelY + 150,
+                   9, 9, Color(150, 170, 205, 255));
 
     if (mConfirm != CONFIRM_NONE) {
-        const int boxY = panelY + 45;
+        const int boxY = panelY + 43;
         menu->fillBox(128, boxY, 384, 78, Color(8, 11, 20, 245));
         const char *prompt = mConfirm == CONFIRM_KEEP
                                  ? "Keep these changes?"
@@ -405,6 +392,14 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
 
 namespace Creation {
 
+void fillWhite(u8 (*out)[3], u16 slots) {
+    for (u16 i = 0; i < slots; i++) {
+        out[i][0] = 255;
+        out[i][1] = 255;
+        out[i][2] = 255;
+    }
+}
+
 int glyphCount(const char *text) {
     int count = 0;
     while (text && *text) {
@@ -416,21 +411,24 @@ int glyphCount(const char *text) {
 
 void drawTextLine(Menu *menu, const CreationStyle &style,
                   const u8 (*textRgb)[3], u16 textSlots, const char *text,
-                  int x, int y, int size, u16 firstSlot, bool shadow) {
+                  int x, int y, int size, u16 firstSlot, bool shadow,
+                  u16 selectedSlot) {
     if (!menu || !text || !textRgb || textSlots == 0) return;
     if (shadow) {
         menu->drawText(text, x + 1, y + 1, size, size, Color(0, 0, 0, 220));
     }
 
-    char prefix[192];
     char run[192];
     int byte = 0;
     int glyph = 0;
+    int drawX = x;
+    int arrowCentre = -1;
     while (text[byte]) {
         const int startByte = byte;
         const u16 logicalSlot = (u16)(firstSlot + glyph);
         const u16 colorSlot = logicalSlot < textSlots ? logicalSlot : textSlots - 1;
         const u8 *rgb = textRgb[colorSlot];
+        const bool selectedRun = logicalSlot == selectedSlot;
 
         do {
             byte += glyphBytes(text + byte);
@@ -438,25 +436,38 @@ void drawTextLine(Menu *menu, const CreationStyle &style,
             if (!text[byte]) break;
             const u16 nextLogical = (u16)(firstSlot + glyph);
             const u16 nextSlot = nextLogical < textSlots ? nextLogical : textSlots - 1;
+            if (selectedRun || nextLogical == selectedSlot) break;
             if (textRgb[nextSlot][0] != rgb[0] || textRgb[nextSlot][1] != rgb[1] ||
                 textRgb[nextSlot][2] != rgb[2]) break;
         } while (byte - startByte + 1 < (int)sizeof(run));
 
         int runBytes = byte - startByte;
-        for (int i = 0; i < startByte; i++) prefix[i] = text[i];
-        prefix[startByte] = '\0';
         for (int i = 0; i < runBytes; i++) run[i] = text[startByte + i];
         run[runBytes] = '\0';
-        menu->drawText(run, x + Menu::textWidth(prefix, size), y, size, size,
+        menu->drawText(run, drawX, y, size, size,
                        Color(lit(rgb[0], style.textBrightness),
                              lit(rgb[1], style.textBrightness),
                              lit(rgb[2], style.textBrightness), style.textA));
+        const int runWidth = Menu::textWidth(run, size);
+        if (selectedRun) arrowCentre = drawX + runWidth / 2;
+        drawX += runWidth;
+    }
+
+    if (arrowCentre >= 0) {
+        int top = y - 8;
+        if (top < 0) top = 0;
+        const s16 arrow[6] = {
+            (s16)(arrowCentre - 4), (s16)top,
+            (s16)(arrowCentre + 4), (s16)top,
+            (s16)arrowCentre,       (s16)(top + 6),
+        };
+        menu->fillPoly(arrow, 3, Color(90, 170, 255, 255));
     }
 }
 
 void drawTextBox(Menu *menu, const CreationStyle &style,
                  const u8 (*textRgb)[3], u16 textSlots, const char *text,
-                 bool rightAlignSlots) {
+                 bool rightAlignSlots, u16 selectedSlot) {
     if (!menu || !text) return;
     const int size = clampi(20 * (int)style.scale / 100, 10, 40);
     const int pad  = style.padding == 0xff ? 0 : style.padding;
@@ -470,7 +481,7 @@ void drawTextBox(Menu *menu, const CreationStyle &style,
     const u16 first = rightAlignSlots && count < textSlots
                           ? (u16)(textSlots - count) : 0;
     drawTextLine(menu, style, textRgb, textSlots, text, style.x, style.y,
-                 size, first, false);
+                 size, first, false, selectedSlot);
 }
 
 }  // namespace Creation

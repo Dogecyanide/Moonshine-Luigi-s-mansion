@@ -183,10 +183,10 @@ struct SusamuneQftDisplayCfg {
 };
 
 // Creation styling added to Metadata without moving its established 256-byte
-// config or the IL PB mailbox that follows it. Character colours are indexed
-// across rendered glyphs, ignoring line breaks.
+// config or the IL PB mailbox that follows it. Version 2 gives standard fields
+// stable maximum-width character ranges so changing digits cannot shift rows.
 #define SUSAMUNE_METADATA_STYLE_MAGIC       0x534D5343u  // 'SMSC'
-#define SUSAMUNE_METADATA_STYLE_VERSION     1u
+#define SUSAMUNE_METADATA_STYLE_VERSION     2u
 #define SUSAMUNE_METADATA_STYLE_TEXT_SLOTS  256u
 #define SUSAMUNE_METADATA_STYLE_SLOT_BYTES  32u
 

@@ -28,7 +28,6 @@ public:
 
 private:
     static CreationStyle defaults();
-    static void defaultTextRgb(u8 (*out)[3]);
     void clamp();
 
     CreationStyle  mStyle;
