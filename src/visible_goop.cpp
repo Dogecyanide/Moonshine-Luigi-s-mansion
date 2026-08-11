@@ -45,6 +45,17 @@ constexpr AlphaComp kRetailAlpha = {0x00C3, 128, 255};
 // to 64 and the first non-zero value to 65, keeping connector texels hidden.
 constexpr AlphaComp kRevealAlpha = {0x0083, 64, 255};
 
+enum ApplyPhase : u8 {
+    APPLY_SCAN,
+    APPLY_UNLOCK,
+    APPLY_RESET_DL,
+};
+
+bool sApplied = false;
+bool sTarget = false;
+ApplyPhase sPhase = APPLY_SCAN;
+u32 sLayerIndex = 0;
+
 J3DTevBlock *tevBlock(J3DMaterial *material) {
     return *reinterpret_cast<J3DTevBlock **>(
         reinterpret_cast<u8 *>(material) + kMaterialTevBlock);
@@ -183,30 +194,64 @@ bool updateMaterial(J3DMaterial *material, bool reveal) {
 
 }  // namespace
 
+void visibleGoopOnStageSetup() {
+    sApplied = false;
+    sTarget = false;
+    sPhase = APPLY_SCAN;
+    sLayerIndex = 0;
+}
+
 void visibleGoopUpdate() {
     // gpPollution is not cleared by retail destruction; gpMarDirector is.
     if (!gpMarDirector || !gpPollution) return;
 
     const bool reveal = gSettings.getBool(SETTING_VISIBLE_GOOP);
-    for (u32 i = 0; i < gpPollution->mJointModelNum; ++i) {
-        TPollutionLayer *layer = static_cast<TPollutionLayer *>(
-            gpPollution->mJointModels[i]);
-        if (!layer || !layer->mModel || !layer->mModelData || !layer->mActor) {
-            continue;
-        }
+    if (sPhase == APPLY_SCAN && sLayerIndex == 0) {
+        if (!reveal && !sApplied) return;
+        sTarget = reveal;
+    }
 
-        bool changed = false;
-        J3DMaterial **modelMaterials = materials(layer->mModelData);
-        const u16 count = materialCount(layer->mModelData);
-        for (u16 j = 0; j < count; ++j) {
-            changed |= updateMaterial(modelMaterials[j], reveal);
-        }
+    if (sLayerIndex >= gpPollution->mJointModelNum) {
+        sApplied = sTarget;
+        sLayerIndex = 0;
+        sPhase = APPLY_SCAN;
+        return;
+    }
 
-        if (changed) {
-            // resetDL re-locks only static packets; animated materials stay
-            // writable for their normal per-frame updates.
-            layer->mModel->unlock();
-            layer->mActor->resetDL();
-        }
+    TPollutionLayer *layer = static_cast<TPollutionLayer *>(
+        gpPollution->mJointModels[sLayerIndex]);
+    if (!layer || !layer->mModel || !layer->mModelData || !layer->mActor) {
+        ++sLayerIndex;
+        return;
+    }
+
+    if (sPhase == APPLY_UNLOCK) {
+        layer->mModel->unlock();
+        sPhase = APPLY_RESET_DL;
+        return;
+    }
+
+    if (sPhase == APPLY_RESET_DL) {
+        // resetDL re-locks only static packets; animated materials stay
+        // writable for their normal per-frame updates.
+        layer->mActor->resetDL();
+        ++sLayerIndex;
+        sPhase = APPLY_SCAN;
+        return;
+    }
+
+    bool changed = false;
+    J3DMaterial **modelMaterials = materials(layer->mModelData);
+    const u16 count = materialCount(layer->mModelData);
+    for (u16 j = 0; j < count; ++j) {
+        changed |= updateMaterial(modelMaterials[j], sTarget);
+    }
+
+    if (changed) {
+        // Console J3D needs a rendered frame between material mutation,
+        // unlocking, and rebuilding the display list.
+        sPhase = APPLY_UNLOCK;
+    } else {
+        ++sLayerIndex;
     }
 }
