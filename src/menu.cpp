@@ -19,6 +19,7 @@
 #include "susamune/metadata_display.hxx"
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
+#include "susamune/qft_display.hxx"
 #include "susamune/settings.hxx"
 #if ENABLE_DEBUG_WARPS
 #include "susamune/debug_warp.hxx"
@@ -635,6 +636,41 @@ private:
 static_assert(sizeof(DisplayTab) == 8, "display tab state grew");
 
 // ---------------------------------------------------------------------
+// Creation -- shared visual editor, initially exposed for compact QFT.
+// ---------------------------------------------------------------------
+class CreationTab final : public MenuTab {
+public:
+    const char *title() const override { return "Creation"; }
+    bool grabsInput() const override { return gQftDisplay.editing(); }
+    bool fullScreen() const override { return gQftDisplay.editing(); }
+
+    void update(Menu *menu, TMarioGamePad *pad) override {
+        if (gQftDisplay.editing()) {
+            gQftDisplay.updateEditor(pad);
+            return;
+        }
+        const u32 rapid = menu->navigationInput(pad);
+        if (rapid & (TMarioGamePad::A | TMarioGamePad::CSTICK_RIGHT)) {
+            gQftDisplay.beginEditor();
+        }
+    }
+
+    void draw(Menu *menu, int x, int y, int w, int h) override {
+        if (gQftDisplay.editing()) {
+            gQftDisplay.drawEditor(menu);
+            return;
+        }
+        drawRowHighlight(menu, x, y, w, ROW_H);
+        menu->drawText("QFT timer", x + 4, y, ROW_SZ, ROW_SZ, cRowSel());
+        const char *value = "Edit";
+        menu->drawText(value, x + w - Menu::textWidth(value, ROW_SZ) - 8,
+                       y, ROW_SZ, ROW_SZ, cValue());
+        menu->drawText(SUSAMUNE_GLYPH_A " Open   Saved when the menu closes",
+                       x + 4, y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+};
+
+// ---------------------------------------------------------------------
 // Binds tab
 //
 // One row per BindId. A on a row arms gBinds' recorder, which watches the
@@ -751,6 +787,7 @@ u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
 u8 sSavestateBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sUiBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sTimerBuf[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
+u8 sCreationBuf[sizeof(CreationTab)]             __attribute__((aligned(8)));
 u8 sILingBuf[sizeof(ILingTab)]                   __attribute__((aligned(8)));
 u8 sInputBuf[sizeof(DisplayTab)]                 __attribute__((aligned(8)));
 u8 sMetadataBuf[sizeof(DisplayTab)]              __attribute__((aligned(8)));
@@ -810,6 +847,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
         new (sSavestateBuf) CategorySettingsTab(TITLE_SAVESTATE, SETTING_CAT_SAVESTATE);
     mTabs[mNumTabs++] = new (sUiBuf) CategorySettingsTab(TITLE_UI, SETTING_CAT_UI);
     mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab(TITLE_TIMER, SETTING_CAT_TIMER);
+    mTabs[mNumTabs++] = new (sCreationBuf) CreationTab();
     mTabs[mNumTabs++] = new (sILingBuf) ILingTab();
     mTabs[mNumTabs++] = new (sInputBuf) DisplayTab(DisplayTab::INPUT);
     mTabs[mNumTabs++] = new (sMetadataBuf) DisplayTab(DisplayTab::METADATA);
@@ -983,7 +1021,7 @@ void Menu::requestSettingsSave() {
 void Menu::hide() {
     mShown = false;
     if (gSettings.dirty() || gBinds.dirty() || gInputDisplay.dirty() ||
-        gMetadataDisplay.dirty()) {
+        gMetadataDisplay.dirty() || gQftDisplay.dirty()) {
         requestSettingsSave();
     }
 }
@@ -1102,7 +1140,8 @@ void Menu::update(TMarioGamePad *pad) {
         // Closing with edits pending writes them back to the SD card. Gated on
         // dirty() so merely opening and closing the menu never touches storage.
         if (!mShown && (gSettings.dirty() || gBinds.dirty() ||
-                        gInputDisplay.dirty() || gMetadataDisplay.dirty())) {
+                        gInputDisplay.dirty() || gMetadataDisplay.dirty() ||
+                        gQftDisplay.dirty())) {
             requestSettingsSave();
         }
         return;

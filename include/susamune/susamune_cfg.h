@@ -133,6 +133,47 @@ struct SusamuneMetadataDisplayCfg {
     char           format[SUSAMUNE_METADATA_FORMAT_SIZE];
 };
 
+// Shared presentation fields for the compact QFT readout. `present` lets a
+// hand-written ini omit individual fields without reserving 0xFF as an unset
+// value, so fully opaque colours remain representable.
+#define SUSAMUNE_QFT_DISPLAY_CFG_MAGIC   0x53514643u  // 'SQFC'
+#define SUSAMUNE_QFT_DISPLAY_CFG_VERSION 1u
+
+#define SUSAMUNE_QFT_DISPLAY_X           (1u << 0)
+#define SUSAMUNE_QFT_DISPLAY_Y           (1u << 1)
+#define SUSAMUNE_QFT_DISPLAY_SCALE       (1u << 2)
+#define SUSAMUNE_QFT_DISPLAY_TEXT_R      (1u << 3)
+#define SUSAMUNE_QFT_DISPLAY_TEXT_G      (1u << 4)
+#define SUSAMUNE_QFT_DISPLAY_TEXT_B      (1u << 5)
+#define SUSAMUNE_QFT_DISPLAY_TEXT_A      (1u << 6)
+#define SUSAMUNE_QFT_DISPLAY_BG_R        (1u << 7)
+#define SUSAMUNE_QFT_DISPLAY_BG_G        (1u << 8)
+#define SUSAMUNE_QFT_DISPLAY_BG_B        (1u << 9)
+#define SUSAMUNE_QFT_DISPLAY_BG_A        (1u << 10)
+#define SUSAMUNE_QFT_DISPLAY_BRIGHTNESS  (1u << 11)
+#define SUSAMUNE_QFT_DISPLAY_PADDING     (1u << 12)
+#define SUSAMUNE_QFT_DISPLAY_ALL         ((1u << 13) - 1u)
+
+struct SusamuneQftDisplayCfg {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short present;
+    unsigned short x;
+    unsigned short y;
+    unsigned char  scale;
+    unsigned char  textR;
+    unsigned char  textG;
+    unsigned char  textB;
+    unsigned char  textA;
+    unsigned char  bgR;
+    unsigned char  bgG;
+    unsigned char  bgB;
+    unsigned char  bgA;
+    unsigned char  brightness;
+    unsigned char  padding;
+    unsigned char  reserved[9];
+};
+
 // susamune.ini had nothing for the running game version -- either the file is
 // absent entirely, or it has no [settings_<region>] section for this disc. The
 // kernel cannot author defaults itself -- they live in the mod's descriptor
@@ -148,6 +189,8 @@ struct SusamuneMetadataDisplayCfg {
 #define SUSAMUNE_CFG_FLAG_METADATA_DISPLAY 0x4u
 // Kernel understands the independent ILing PB payload and save doorbell.
 #define SUSAMUNE_CFG_FLAG_ILING_PBS 0x8u
+// Kernel understands qftDisplay and [qft_display_<region>].
+#define SUSAMUNE_CFG_FLAG_QFT_DISPLAY 0x10u
 
 // IL PBs use stable result slots: ordinary rows use retail Shine ids, while
 // independent Secret and Any% rows occupy otherwise-unused ids through 120.
@@ -215,6 +258,9 @@ struct SusamuneCfg {
     struct SusamuneInputDisplayCfg inputDisplay;
     struct SusamuneMetadataDisplayCfg metadataDisplay;
     struct SusamuneILingPbCfg ilingPbs;
+    // Appended after the independent PB mailbox so its established offsets do
+    // not move when an old launcher and a new mod are paired (or vice versa).
+    struct SusamuneQftDisplayCfg qftDisplay;
 };
 
 #define SUSAMUNE_CFG_PPC_PTR  ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PPC_BASE)
@@ -247,6 +293,8 @@ struct SusamuneCfg {
 // Native position/angle/speed/QF overlay. Its `format` key is an optional
 // custom template containing live-value placeholders such as <x> and <HSpd>.
 #define SUSAMUNE_INI_SECTION_METADATA_DISPLAY "metadata_display"
+// Compact three-decimal QFT readout presentation, edited from Creation.
+#define SUSAMUNE_INI_SECTION_QFT_DISPLAY "qft_display"
 // settings_jp / binds_pal / ...
 #define SUSAMUNE_INI_SECTION_SEPARATOR  '_'
 
@@ -259,13 +307,15 @@ typedef char susamune_input_cfg_size_check[(sizeof(struct SusamuneInputDisplayCf
 typedef char susamune_cfg_input_check[(__builtin_offsetof(struct SusamuneCfg, inputDisplay) == 320) ? 1 : -1];
 typedef char susamune_metadata_cfg_size_check[(sizeof(struct SusamuneMetadataDisplayCfg) == 256) ? 1 : -1];
 typedef char susamune_cfg_metadata_check[(__builtin_offsetof(struct SusamuneCfg, metadataDisplay) == 352) ? 1 : -1];
+typedef char susamune_qft_display_cfg_size_check[(sizeof(struct SusamuneQftDisplayCfg) == 32) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_ack_check[(__builtin_offsetof(struct SusamuneILingPbCfg, ackSeq) == 32) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_values_check[(__builtin_offsetof(struct SusamuneILingPbCfg, values) == 64) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_size_check[(sizeof(struct SusamuneILingPbCfg) == 576) ? 1 : -1];
 typedef char susamune_iling_pb_file_values_check[(__builtin_offsetof(struct SusamuneILingPbFile, values) == 32) ? 1 : -1];
 typedef char susamune_iling_pb_file_size_check[(sizeof(struct SusamuneILingPbFile) == 544) ? 1 : -1];
 typedef char susamune_cfg_iling_pb_check[(__builtin_offsetof(struct SusamuneCfg, ilingPbs) == 608) ? 1 : -1];
-typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 1184) ? 1 : -1];
+typedef char susamune_cfg_qft_display_check[(__builtin_offsetof(struct SusamuneCfg, qftDisplay) == 1184) ? 1 : -1];
+typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 1216) ? 1 : -1];
 typedef char susamune_cfg_size_check[
     (sizeof(struct SusamuneCfg) <=
      SUSAMUNE_MEM2_PB_LIVE_PPC_BASE - SUSAMUNE_MEM2_CFG_PPC_BASE) ? 1 : -1];

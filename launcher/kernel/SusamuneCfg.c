@@ -19,7 +19,8 @@ button combination per configurable action, keyed by binds_list.h and written as
 `+`-joined button tokens ("X+DUp") from the same shared list.
 [input_display_<region>] holds its wider position/colour configuration.
 [metadata_display_<region>] holds the native metadata overlay, including its
-optional hand-authored text template.
+optional hand-authored text template. [qft_display_<region>] holds the compact
+QFT readout's Creation style.
 [nintendont] holds
 the launcher's own options -- game version, per-version disc image paths, and
 the Nintendont settings that used to live in nincfg.bin -- and belongs to
@@ -39,9 +40,9 @@ sections are ever parsed: the handoff block holds one set of values, not three.
 Consequently a save cannot simply re-emit the file from the block -- it would
 drop the other versions. Instead it reads the old file back and copies every
 line through verbatim, substituting freshly written sections in place of this
-version's four. Sections the launcher does not know stay byte-for-byte intact.
+version's five. Sections the launcher does not know stay byte-for-byte intact.
 
-NOTE: keys the launcher does not recognise *inside our own four sections* are
+NOTE: keys the launcher does not recognise *inside our own five sections* are
 still dropped, since those sections are regenerated wholesale.
 
 */
@@ -85,7 +86,7 @@ static const struct BindButton BindButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAM
 
 #define BIND_BUTTON_COUNT ((u32)(sizeof(BindButtons) / sizeof(BindButtons[0])))
 
-// Enough for the whole file: the settings plus both display payloads for all
+// Enough for the whole file: the settings plus display payloads for all
 // three versions, section headers, and the comment banner.
 // A file larger than this is refused rather than truncated (see WriteIniFile).
 #define SUSAMUNE_INI_BUF_SIZE 12288
@@ -119,6 +120,7 @@ static char SettingsSection[SUSAMUNE_SECTION_NAME_MAX];
 static char BindsSection[SUSAMUNE_SECTION_NAME_MAX];
 static char InputDisplaySection[SUSAMUNE_SECTION_NAME_MAX];
 static char MetadataDisplaySection[SUSAMUNE_SECTION_NAME_MAX];
+static char QftDisplaySection[SUSAMUNE_SECTION_NAME_MAX];
 
 // name + '_' + region tag, e.g. "settings" + "jp".
 static void BuildSectionName(char *out, const char *base, const char *region)
@@ -487,14 +489,15 @@ static bool ParseBindMask(const char *s, u16 *out)
 }
 
 // Which section the parser is currently inside. Anything that is not one of
-// this version's four sections -- [nintendont], or another version's settings --
+// this version's five sections -- [nintendont], or another version's settings --
 // is SECTION_OTHER and left alone.
 enum IniSection {
 	SECTION_OTHER,
 	SECTION_SETTINGS,
 	SECTION_BINDS,
 	SECTION_INPUT_DISPLAY,
-	SECTION_METADATA_DISPLAY
+	SECTION_METADATA_DISPLAY,
+	SECTION_QFT_DISPLAY
 };
 
 static enum IniSection ClassifySection(const char *name)
@@ -507,6 +510,8 @@ static enum IniSection ClassifySection(const char *name)
 		return SECTION_INPUT_DISPLAY;
 	if (strcmp(name, MetadataDisplaySection) == 0)
 		return SECTION_METADATA_DISPLAY;
+	if (strcmp(name, QftDisplaySection) == 0)
+		return SECTION_QFT_DISPLAY;
 	return SECTION_OTHER;
 }
 
@@ -579,6 +584,88 @@ static void ApplyMetadataDisplayKey(struct SusamuneMetadataDisplayCfg *cfg,
 		else if (strcmp(key, "scale") == 0) cfg->scale = v8;
 		else if (strcmp(key, "label_mode") == 0) cfg->labelMode = v8;
 		else if (strcmp(key, "background_alpha") == 0) cfg->backgroundAlpha = v8;
+	}
+}
+
+static void ApplyQftDisplayKey(struct SusamuneQftDisplayCfg *cfg,
+			       const char *key, const char *text)
+{
+	u8  v8;
+	u16 v16;
+
+	if (strcmp(key, "x") == 0)
+	{
+		if (ParseU16(text, &v16))
+		{
+			cfg->x = v16;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_X;
+		}
+	}
+	else if (strcmp(key, "y") == 0)
+	{
+		if (ParseU16(text, &v16))
+		{
+			cfg->y = v16;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_Y;
+		}
+	}
+	else if (ParseU8(text, &v8))
+	{
+		if (strcmp(key, "scale") == 0)
+		{
+			cfg->scale = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_SCALE;
+		}
+		else if (strcmp(key, "text_r") == 0)
+		{
+			cfg->textR = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_TEXT_R;
+		}
+		else if (strcmp(key, "text_g") == 0)
+		{
+			cfg->textG = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_TEXT_G;
+		}
+		else if (strcmp(key, "text_b") == 0)
+		{
+			cfg->textB = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_TEXT_B;
+		}
+		else if (strcmp(key, "text_alpha") == 0)
+		{
+			cfg->textA = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_TEXT_A;
+		}
+		else if (strcmp(key, "background_r") == 0)
+		{
+			cfg->bgR = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_BG_R;
+		}
+		else if (strcmp(key, "background_g") == 0)
+		{
+			cfg->bgG = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_BG_G;
+		}
+		else if (strcmp(key, "background_b") == 0)
+		{
+			cfg->bgB = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_BG_B;
+		}
+		else if (strcmp(key, "background_alpha") == 0)
+		{
+			cfg->bgA = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_BG_A;
+		}
+		else if (strcmp(key, "brightness") == 0)
+		{
+			cfg->brightness = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_BRIGHTNESS;
+		}
+		else if (strcmp(key, "padding") == 0)
+		{
+			cfg->padding = v8;
+			cfg->present |= SUSAMUNE_QFT_DISPLAY_PADDING;
+		}
 	}
 }
 
@@ -659,6 +746,10 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 		else if (section == SECTION_METADATA_DISPLAY)
 		{
 			ApplyMetadataDisplayKey(&cfg->metadataDisplay, Trim(line), Trim(eq + 1));
+		}
+		else if (section == SECTION_QFT_DISPLAY)
+		{
+			ApplyQftDisplayKey(&cfg->qftDisplay, Trim(line), Trim(eq + 1));
 		}
 
 		line = next;
@@ -823,6 +914,46 @@ static void EmitMetadataDisplaySection(FIL *f, int *err, const struct SusamuneCf
 	}
 }
 
+static void EmitQftU8(FIL *f, int *err, const char *key, u8 value,
+		      u16 present, u16 bit)
+{
+	char line[96];
+	if (present & bit)
+		Emit(f, err, line, (u32)_sprintf(line, "%s = %u\r\n", key, value));
+}
+
+static void EmitQftU16(FIL *f, int *err, const char *key, u16 value,
+		       u16 present, u16 bit)
+{
+	char line[96];
+	if (present & bit)
+		Emit(f, err, line, (u32)_sprintf(line, "%s = %u\r\n", key, value));
+}
+
+static void EmitQftDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cfg)
+{
+	const struct SusamuneQftDisplayCfg *d = &cfg->qftDisplay;
+	const u16 p = d->present;
+
+	EmitStr(f, err, "[");
+	EmitStr(f, err, QftDisplaySection);
+	EmitStr(f, err, "]\r\n");
+	EmitQftU16(f, err, "x", d->x, p, SUSAMUNE_QFT_DISPLAY_X);
+	EmitQftU16(f, err, "y", d->y, p, SUSAMUNE_QFT_DISPLAY_Y);
+	EmitQftU8(f, err, "scale", d->scale, p, SUSAMUNE_QFT_DISPLAY_SCALE);
+	EmitQftU8(f, err, "text_r", d->textR, p, SUSAMUNE_QFT_DISPLAY_TEXT_R);
+	EmitQftU8(f, err, "text_g", d->textG, p, SUSAMUNE_QFT_DISPLAY_TEXT_G);
+	EmitQftU8(f, err, "text_b", d->textB, p, SUSAMUNE_QFT_DISPLAY_TEXT_B);
+	EmitQftU8(f, err, "text_alpha", d->textA, p, SUSAMUNE_QFT_DISPLAY_TEXT_A);
+	EmitQftU8(f, err, "background_r", d->bgR, p, SUSAMUNE_QFT_DISPLAY_BG_R);
+	EmitQftU8(f, err, "background_g", d->bgG, p, SUSAMUNE_QFT_DISPLAY_BG_G);
+	EmitQftU8(f, err, "background_b", d->bgB, p, SUSAMUNE_QFT_DISPLAY_BG_B);
+	EmitQftU8(f, err, "background_alpha", d->bgA, p, SUSAMUNE_QFT_DISPLAY_BG_A);
+	EmitQftU8(f, err, "brightness", d->brightness, p,
+	          SUSAMUNE_QFT_DISPLAY_BRIGHTNESS);
+	EmitQftU8(f, err, "padding", d->padding, p, SUSAMUNE_QFT_DISPLAY_PADDING);
+}
+
 static const char kIniBanner[] =
 	"; susamune settings\r\n"
 	"; Written by the susamune launcher. Values are edited in-game from the\r\n"
@@ -830,7 +961,8 @@ static const char kIniBanner[] =
 	"; whenever the menu is closed with changes pending, so comments added\r\n"
 	"; inside it are lost. Everything else in this file is preserved.\r\n"
 	";\r\n"
-	"; Each disc has settings, binds, input_display and metadata_display sections.\r\n"
+	"; Each disc has settings, binds, input_display, metadata_display and\r\n"
+	"; qft_display sections.\r\n"
 	"; Their suffix is jp = GMSJ, us = GMSE, or pal = GMSP.\r\n"
 	"; Metadata format uses \\n for lines and placeholders such as <x> or <HSpd|.2>.\r\n"
 	";\r\n"
@@ -840,11 +972,11 @@ static const char kIniBanner[] =
 	"\r\n"
 	"[" SUSAMUNE_INI_SECTION_NINTENDONT "]\r\n";
 
-// Rewrite the ini with this version's four sections replaced.
+// Rewrite the ini with this version's five sections replaced.
 //
 // The whole point of the copy-through is that the other versions' settings are
 // never materialised: they exist only as the text we are reading back here.
-// Everything outside our four sections -- other regions, [nintendont], comments,
+// Everything outside our five sections -- other regions, [nintendont], comments,
 // blank lines -- lands in the output unchanged and in its original order.
 static int WriteIniFile(const struct SusamuneCfg *cfg)
 {
@@ -859,6 +991,7 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 	bool  wroteBinds = false;
 	bool  wroteInputDisplay = false;
 	bool  wroteMetadataDisplay = false;
+	bool  wroteQftDisplay = false;
 
 	buf = (char*)malloca(SUSAMUNE_INI_BUF_SIZE, 32);
 	if (buf == NULL)
@@ -945,6 +1078,11 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 					EmitMetadataDisplaySection(&f, &err, cfg);
 					wroteMetadataDisplay = true;
 				}
+				else if (kind == SECTION_QFT_DISPLAY)
+				{
+					EmitQftDisplaySection(&f, &err, cfg);
+					wroteQftDisplay = true;
+				}
 			}
 		}
 
@@ -977,6 +1115,11 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 	{
 		EmitStr(&f, &err, "\r\n");
 		EmitMetadataDisplaySection(&f, &err, cfg);
+	}
+	if (!wroteQftDisplay)
+	{
+		EmitStr(&f, &err, "\r\n");
+		EmitQftDisplaySection(&f, &err, cfg);
 	}
 
 	ret = f_close(&f);
@@ -1029,6 +1172,7 @@ void SusamuneCfgInit(void)
 	BuildSectionName(BindsSection, SUSAMUNE_INI_SECTION_BINDS, region);
 	BuildSectionName(InputDisplaySection, SUSAMUNE_INI_SECTION_INPUT_DISPLAY, region);
 	BuildSectionName(MetadataDisplaySection, SUSAMUNE_INI_SECTION_METADATA_DISPLAY, region);
+	BuildSectionName(QftDisplaySection, SUSAMUNE_INI_SECTION_QFT_DISPLAY, region);
 
 	for (i = 0; i < SUSAMUNE_CFG_MAX_SETTINGS; i++)
 		cfg->values[i] = SUSAMUNE_CFG_UNSET;
@@ -1060,12 +1204,17 @@ void SusamuneCfgInit(void)
 	cfg->metadataDisplay.scale        = SUSAMUNE_INPUT_CFG_U8_UNSET;
 	cfg->metadataDisplay.labelMode    = SUSAMUNE_INPUT_CFG_U8_UNSET;
 
+	cfg->qftDisplay.magic   = SUSAMUNE_QFT_DISPLAY_CFG_MAGIC;
+	cfg->qftDisplay.version = SUSAMUNE_QFT_DISPLAY_CFG_VERSION;
+	cfg->qftDisplay.present = 0;
+
 	cfg->magic     = SUSAMUNE_CFG_MAGIC;
 	cfg->version   = SUSAMUNE_CFG_VERSION;
 	cfg->count     = (u16)SETTING_KEY_COUNT;
 	cfg->bindCount = (u16)BIND_KEY_COUNT;
 	cfg->flags     = SUSAMUNE_CFG_FLAG_INPUT_DISPLAY |
-	                 SUSAMUNE_CFG_FLAG_METADATA_DISPLAY;
+	                 SUSAMUNE_CFG_FLAG_METADATA_DISPLAY |
+	                 SUSAMUNE_CFG_FLAG_QFT_DISPLAY;
 	if (InitPbFiles(cfg, region))
 		cfg->flags |= SUSAMUNE_CFG_FLAG_ILING_PBS;
 
@@ -1128,6 +1277,7 @@ void SusamuneCfgService(void)
 	sync_before_read(cfg->values,
 	                 sizeof(cfg->values) + sizeof(cfg->binds) +
 	                 sizeof(cfg->inputDisplay) + sizeof(cfg->metadataDisplay));
+	sync_before_read(&cfg->qftDisplay, sizeof(cfg->qftDisplay));
 	seq = cfg->saveSeq;
 
 	ret = WriteIniFile(cfg);

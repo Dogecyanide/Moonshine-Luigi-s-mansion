@@ -14,6 +14,7 @@
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/metadata_display.hxx"
+#include "susamune/qft_display.hxx"
 #include "susamune/packed_text.hxx"
 #include "susamune/susamune_cfg.h"
 
@@ -98,6 +99,7 @@ void Settings::resetDefaults() {
     gBinds.resetDefaults();
     gInputDisplay.resetDefaults();
     gMetadataDisplay.resetDefaults();
+    gQftDisplay.resetDefaults();
 
     for (int i = 0; i < SETTING_COUNT; i++) {
         mValues[i] = defaultValue(kSettingDescs[i]);
@@ -128,6 +130,7 @@ void Settings::save() {
     gBinds.clearDirty();
     gInputDisplay.clearDirty();
     gMetadataDisplay.clearDirty();
+    gQftDisplay.clearDirty();
 }
 
 SettingsSaveState Settings::pollSave() { return (SettingsSaveState)mSaveState; }
@@ -189,6 +192,9 @@ void Settings::init() {
     if (cfg->flags & SUSAMUNE_CFG_FLAG_METADATA_DISPLAY) {
         gMetadataDisplay.adopt(&cfg->metadataDisplay);
     }
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_QFT_DISPLAY) {
+        gQftDisplay.adopt(&cfg->qftDisplay);
+    }
 
     // set() marks dirty; adopting persisted values is not a user edit.
     mDirty     = false;
@@ -212,6 +218,9 @@ void Settings::save() {
     if (mSaveState == SETTINGS_SAVE_UNSUPPORTED) {
         mDirty = false;
         gBinds.clearDirty();
+        gInputDisplay.clearDirty();
+        gMetadataDisplay.clearDirty();
+        gQftDisplay.clearDirty();
         return;
     }
 
@@ -232,6 +241,8 @@ void Settings::save() {
     gInputDisplay.clearDirty();
     gMetadataDisplay.stageInto(&cfg->metadataDisplay);
     gMetadataDisplay.clearDirty();
+    gQftDisplay.stageInto(&cfg->qftDisplay);
+    gQftDisplay.clearDirty();
 
     // Publish the payload before the doorbell, so the kernel can never see a
     // bumped saveSeq alongside a half-written values[]/binds[]. Both live in
@@ -239,6 +250,7 @@ void Settings::save() {
     DCStoreRange((void *)cfg->values,
                  sizeof(cfg->values) + sizeof(cfg->binds) + sizeof(cfg->inputDisplay) +
                  sizeof(cfg->metadataDisplay));
+    DCStoreRange((void *)&cfg->qftDisplay, sizeof(cfg->qftDisplay));
 
     mSaveSeq     = cfg->saveSeq + 1;
     cfg->saveSeq = mSaveSeq;

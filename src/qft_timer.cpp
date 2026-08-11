@@ -16,6 +16,7 @@
 #include "susamune/addresses.hxx"
 #include "susamune/features.hxx"
 #include "susamune/menu.hxx"
+#include "susamune/qft_display.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/susamune_cfg.h"
 
@@ -766,12 +767,7 @@ void QFTTimer::draw(Menu *menu) const {
   char text[20];
   snprintf(text, sizeof(text), "%d:%02d.%03d", minutes, seconds, remainder);
 
-  const int size = 20;
-  const int x    = 16;
-  const int y    = 416;
-  const int w    = Menu::textWidth(text, size);
-  menu->fillBox(x - 2, y - 2, w + 4, size + 4, JUtility::TColor(0, 0, 0, 128));
-  menu->drawText(text, x, y, size, size, JUtility::TColor(255, 255, 255, 255));
+  gQftDisplay.draw(menu, text);
 }
 
 void QFTTimer::requestReset() {

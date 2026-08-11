@@ -5,9 +5,9 @@ and why nincfg.bin is gone.
 
 The write path is a copy-through, for the same reason the kernel's is: this
 side only knows [nintendont], and re-emitting the file from what we parsed
-would delete the mod's [settings_<region>] and [binds_<region>] sections for
-all three discs. So the old file is read back and every line outside our own
-section lands in the output unchanged.
+would delete the mod's per-region settings, binds and overlay sections. So the
+old file is read back and every line outside our own section lands in the
+output unchanged.
 
 */
 #include <gccore.h>
@@ -25,7 +25,7 @@ section lands in the output unchanged.
 // Whole-file buffer. Same ceiling as the kernel's (SusamuneCfg.c): a file
 // bigger than this is refused rather than truncated, since a partial
 // copy-through would silently drop a game version's settings.
-#define SUSA_INI_BUF_SIZE 8192
+#define SUSA_INI_BUF_SIZE 12288
 
 #define SUSA_SECTION_NAME_MAX 24
 
@@ -318,8 +318,8 @@ static const char kIniBanner[] =
 	"; With autoboot = 1 the launcher skips its menu and boots the version\r\n"
 	"; named by `version` straight away. Hold B at startup for the menu.\r\n"
 	";\r\n"
-	"; The in-game options live in [settings_<region>] and [binds_<region>],\r\n"
-	"; written by the mod -- jp = GMSJ, us = GMSE, pal = GMSP.\r\n"
+	"; In-game settings, binds and overlay sections are written by the mod.\r\n"
+	"; Their suffix is jp = GMSJ, us = GMSE, or pal = GMSP.\r\n"
 	"\r\n";
 
 // ---------------------------------------------------------------------
