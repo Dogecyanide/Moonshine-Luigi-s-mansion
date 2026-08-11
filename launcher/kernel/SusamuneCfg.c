@@ -86,6 +86,13 @@ static const struct BindButton BindButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAM
 
 #define BIND_BUTTON_COUNT ((u32)(sizeof(BindButtons) / sizeof(BindButtons[0])))
 
+static const char *const InputColorKeys[SUSAMUNE_INPUT_COLOR_COUNT] =
+{
+	"main_stick_rgb", "c_stick_rgb", "a_rgb", "b_rgb", "x_rgb", "y_rgb",
+	"l_rgb", "r_rgb", "start_rgb", "z_rgb", "value_rgb",
+	"trigger_outline_rgb"
+};
+
 // Enough for the whole file: the settings plus display payloads for all
 // three versions, section headers, and the comment banner.
 // A file larger than this is refused rather than truncated (see WriteIniFile).
@@ -632,6 +639,38 @@ static bool ParseQftRgb(const char *s, u8 out[3])
 	return *s == '\0';
 }
 
+static void ApplyInputStyleKey(struct SusamuneInputStyleCfg *cfg,
+			       const char *key, const char *text)
+{
+	u8 value;
+	u8 rgb[3];
+	u32 i;
+
+	if (strcmp(key, "element_alpha") == 0 && ParseQftU8(text, &value))
+	{
+		cfg->elementOpacity = value;
+		cfg->present |= SUSAMUNE_INPUT_STYLE_OPACITY;
+		return;
+	}
+	if (strcmp(key, "padding") == 0 && ParseQftU8(text, &value))
+	{
+		cfg->padding = value;
+		cfg->present |= SUSAMUNE_INPUT_STYLE_PADDING;
+		return;
+	}
+	for (i = 0; i < SUSAMUNE_INPUT_COLOR_COUNT; i++)
+	{
+		if (strcmp(key, InputColorKeys[i]) == 0 && ParseQftRgb(text, rgb))
+		{
+			cfg->rgb[i][0] = rgb[0];
+			cfg->rgb[i][1] = rgb[1];
+			cfg->rgb[i][2] = rgb[2];
+			cfg->present |= SUSAMUNE_INPUT_STYLE_COLOR(i);
+			return;
+		}
+	}
+}
+
 static void ApplyQftDisplayKey(struct SusamuneQftDisplayCfg *cfg,
 			       const char *key, const char *text)
 {
@@ -899,6 +938,7 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 		else if (section == SECTION_INPUT_DISPLAY)
 		{
 			ApplyInputDisplayKey(&cfg->inputDisplay, Trim(line), Trim(eq + 1));
+			ApplyInputStyleKey(&cfg->inputStyle, Trim(line), Trim(eq + 1));
 		}
 		else if (section == SECTION_METADATA_DISPLAY)
 		{
@@ -1040,6 +1080,9 @@ static void EmitMetadataStyleU8(FIL *f, int *err, const char *key, u8 value,
 static void EmitInputDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cfg)
 {
 	const struct SusamuneInputDisplayCfg *d = &cfg->inputDisplay;
+	const struct SusamuneInputStyleCfg *s = &cfg->inputStyle;
+	char line[96];
+	u32 i;
 
 	EmitStr(f, err, "[");
 	EmitStr(f, err, InputDisplaySection);
@@ -1056,6 +1099,22 @@ static void EmitInputDisplaySection(FIL *f, int *err, const struct SusamuneCfg *
 	EmitInputU8(f, err, "value_mode", d->valueMode);
 	EmitInputU8(f, err, "value_source", d->valueSource);
 	EmitInputU8(f, err, "value_position", d->valuePlacement);
+	if (s->magic != SUSAMUNE_INPUT_STYLE_MAGIC ||
+	    s->version != SUSAMUNE_INPUT_STYLE_VERSION)
+		return;
+	EmitMetadataStyleU8(f, err, "element_alpha", s->elementOpacity, s->present,
+	                    SUSAMUNE_INPUT_STYLE_OPACITY);
+	EmitMetadataStyleU8(f, err, "padding", s->padding, s->present,
+	                    SUSAMUNE_INPUT_STYLE_PADDING);
+	for (i = 0; i < SUSAMUNE_INPUT_COLOR_COUNT; i++)
+	{
+		if (s->present & SUSAMUNE_INPUT_STYLE_COLOR(i))
+		{
+			Emit(f, err, line, (u32)_sprintf(
+				line, "%s = %u,%u,%u\r\n", InputColorKeys[i],
+				s->rgb[i][0], s->rgb[i][1], s->rgb[i][2]));
+		}
+	}
 }
 
 static void EmitMetadataDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cfg)
@@ -1443,6 +1502,9 @@ void SusamuneCfgInit(void)
 	cfg->metadataStyle.magic = SUSAMUNE_METADATA_STYLE_MAGIC;
 	cfg->metadataStyle.version = SUSAMUNE_METADATA_STYLE_VERSION;
 	cfg->metadataStyle.present = 0;
+	cfg->inputStyle.magic = SUSAMUNE_INPUT_STYLE_MAGIC;
+	cfg->inputStyle.version = SUSAMUNE_INPUT_STYLE_VERSION;
+	cfg->inputStyle.present = 0;
 
 	cfg->magic     = SUSAMUNE_CFG_MAGIC;
 	cfg->version   = SUSAMUNE_CFG_VERSION;
@@ -1451,7 +1513,8 @@ void SusamuneCfgInit(void)
 	cfg->flags     = SUSAMUNE_CFG_FLAG_INPUT_DISPLAY |
 	                 SUSAMUNE_CFG_FLAG_METADATA_DISPLAY |
 	                 SUSAMUNE_CFG_FLAG_QFT_DISPLAY |
-	                 SUSAMUNE_CFG_FLAG_METADATA_STYLE;
+	                 SUSAMUNE_CFG_FLAG_METADATA_STYLE |
+	                 SUSAMUNE_CFG_FLAG_INPUT_STYLE;
 	if (InitPbFiles(cfg, region))
 		cfg->flags |= SUSAMUNE_CFG_FLAG_ILING_PBS;
 
@@ -1515,7 +1578,8 @@ void SusamuneCfgService(void)
 	                 sizeof(cfg->values) + sizeof(cfg->binds) +
 	                 sizeof(cfg->inputDisplay) + sizeof(cfg->metadataDisplay));
 	sync_before_read(&cfg->qftDisplay,
-	                 sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle));
+	                 sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle) +
+	                 sizeof(cfg->inputStyle));
 	seq = cfg->saveSeq;
 
 	ret = WriteIniFile(cfg);

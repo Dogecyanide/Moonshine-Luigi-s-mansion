@@ -34,9 +34,10 @@ public:
 
     void reset();
     void begin(CreationStyle *style, u8 (*textRgb)[3], u8 (*backupRgb)[3],
-               u16 textSlots, u16 targetSlots = 0);
+               u16 textSlots, u16 targetSlots = 0,
+               const char *targetNames = nullptr);
     u8   update(TMarioGamePad *pad, const CreationStyle &defaults,
-                const u8 defaultRgb[3]);
+                const u8 (*defaultRgb)[3], u16 defaultRgbSlots = 1);
     void draw(Menu *menu, const char *title, const char *preview) const;
     bool editing() const { return mEditing; }
     u16  target() const { return mTextTarget; }
@@ -48,6 +49,7 @@ private:
     CreationStyle  mBackup;
     u8            (*mTextRgb)[3];
     u8            (*mBackupRgb)[3];
+    const char     *mTargetNames;
     u32            mRepeatMask;
     u16            mTextSlots;
     u16            mTargetSlots;

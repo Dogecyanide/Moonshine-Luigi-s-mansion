@@ -119,7 +119,7 @@ void QftDisplay::beginEditor() {
 }
 
 void QftDisplay::updateEditor(TMarioGamePad *pad) {
-    const u8 defaultsRgb[3] = {255, 255, 255};
+    const u8 defaultsRgb[1][3] = {{255, 255, 255}};
     const u8 result = mEditor.update(pad, defaults(), defaultsRgb);
     if (result & CreationEditor::UPDATE_CHANGED) {
         clamp();

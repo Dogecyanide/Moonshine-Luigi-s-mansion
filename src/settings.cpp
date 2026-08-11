@@ -189,6 +189,9 @@ void Settings::init() {
     if (cfg->flags & SUSAMUNE_CFG_FLAG_INPUT_DISPLAY) {
         gInputDisplay.adopt(&cfg->inputDisplay);
     }
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_INPUT_STYLE) {
+        gInputDisplay.adoptStyle(&cfg->inputStyle);
+    }
     if (cfg->flags & SUSAMUNE_CFG_FLAG_METADATA_DISPLAY) {
         gMetadataDisplay.adopt(&cfg->metadataDisplay);
     }
@@ -241,6 +244,7 @@ void Settings::save() {
     gBinds.clearDirty();
 
     gInputDisplay.stageInto(&cfg->inputDisplay);
+    gInputDisplay.stageStyleInto(&cfg->inputStyle);
     gInputDisplay.clearDirty();
     gMetadataDisplay.stageInto(&cfg->metadataDisplay);
     gMetadataDisplay.stageStyleInto(&cfg->metadataStyle);
@@ -255,7 +259,8 @@ void Settings::save() {
                  sizeof(cfg->values) + sizeof(cfg->binds) + sizeof(cfg->inputDisplay) +
                  sizeof(cfg->metadataDisplay));
     DCStoreRange((void *)&cfg->qftDisplay,
-                 sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle));
+                 sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle) +
+                 sizeof(cfg->inputStyle));
 
     mSaveSeq     = cfg->saveSeq + 1;
     cfg->saveSeq = mSaveSeq;

@@ -95,6 +95,39 @@ struct SusamuneInputDisplayCfg {
     unsigned char  reserved[12];
 };
 
+// Appended styling keeps the established 32-byte Input Display payload and
+// every later mailbox offset stable.
+#define SUSAMUNE_INPUT_STYLE_MAGIC       0x53495343u  // 'SISC'
+#define SUSAMUNE_INPUT_STYLE_VERSION     1u
+#define SUSAMUNE_INPUT_COLOR_MAIN_STICK  0u
+#define SUSAMUNE_INPUT_COLOR_C_STICK     1u
+#define SUSAMUNE_INPUT_COLOR_A           2u
+#define SUSAMUNE_INPUT_COLOR_B           3u
+#define SUSAMUNE_INPUT_COLOR_X           4u
+#define SUSAMUNE_INPUT_COLOR_Y           5u
+#define SUSAMUNE_INPUT_COLOR_L           6u
+#define SUSAMUNE_INPUT_COLOR_R           7u
+#define SUSAMUNE_INPUT_COLOR_START       8u
+#define SUSAMUNE_INPUT_COLOR_Z           9u
+#define SUSAMUNE_INPUT_COLOR_VALUES      10u
+#define SUSAMUNE_INPUT_COLOR_TRIGGER_OUTLINE 11u
+#define SUSAMUNE_INPUT_COLOR_COUNT       12u
+
+#define SUSAMUNE_INPUT_STYLE_OPACITY     (1u << 0)
+#define SUSAMUNE_INPUT_STYLE_PADDING     (1u << 1)
+#define SUSAMUNE_INPUT_STYLE_COLOR(i)    (1u << (2u + (i)))
+#define SUSAMUNE_INPUT_STYLE_ALL         ((1u << (2u + SUSAMUNE_INPUT_COLOR_COUNT)) - 1u)
+
+struct SusamuneInputStyleCfg {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short present;
+    unsigned char  elementOpacity;
+    unsigned char  padding;
+    unsigned char  rgb[SUSAMUNE_INPUT_COLOR_COUNT][3];
+    unsigned char  reserved[18];
+};
+
 // Metadata Display keeps a compact in-game configuration plus an optional
 // hand-authored template. The template is edited in susamune.ini; the game
 // menu only selects it and edits the live overlay's layout.
@@ -240,6 +273,8 @@ struct SusamuneMetadataStyleCfg {
 #define SUSAMUNE_CFG_FLAG_QFT_DISPLAY 0x10u
 // Kernel understands Metadata's appended Creation style and character colours.
 #define SUSAMUNE_CFG_FLAG_METADATA_STYLE 0x20u
+// Kernel understands Input Display's appended Creation colour payload.
+#define SUSAMUNE_CFG_FLAG_INPUT_STYLE 0x40u
 
 // IL PBs use stable result slots: ordinary rows use retail Shine ids, while
 // independent Secret and Any% rows occupy otherwise-unused ids through 120.
@@ -311,6 +346,7 @@ struct SusamuneCfg {
     // not move when an old launcher and a new mod are paired (or vice versa).
     struct SusamuneQftDisplayCfg qftDisplay;
     struct SusamuneMetadataStyleCfg metadataStyle;
+    struct SusamuneInputStyleCfg inputStyle;
 };
 
 #define SUSAMUNE_CFG_PPC_PTR  ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PPC_BASE)
@@ -361,6 +397,7 @@ typedef char susamune_qft_display_cfg_size_check[(sizeof(struct SusamuneQftDispl
 typedef char susamune_qft_display_v1_tail_check[(__builtin_offsetof(struct SusamuneQftDisplayCfg, slotPresent) == 32) ? 1 : -1];
 typedef char susamune_metadata_style_cfg_size_check[(sizeof(struct SusamuneMetadataStyleCfg) == 832) ? 1 : -1];
 typedef char susamune_metadata_style_slots_check[(__builtin_offsetof(struct SusamuneMetadataStyleCfg, textRgb) == 64) ? 1 : -1];
+typedef char susamune_input_style_cfg_size_check[(sizeof(struct SusamuneInputStyleCfg) == 64) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_ack_check[(__builtin_offsetof(struct SusamuneILingPbCfg, ackSeq) == 32) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_values_check[(__builtin_offsetof(struct SusamuneILingPbCfg, values) == 64) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_size_check[(sizeof(struct SusamuneILingPbCfg) == 576) ? 1 : -1];
@@ -369,7 +406,8 @@ typedef char susamune_iling_pb_file_size_check[(sizeof(struct SusamuneILingPbFil
 typedef char susamune_cfg_iling_pb_check[(__builtin_offsetof(struct SusamuneCfg, ilingPbs) == 608) ? 1 : -1];
 typedef char susamune_cfg_qft_display_check[(__builtin_offsetof(struct SusamuneCfg, qftDisplay) == 1184) ? 1 : -1];
 typedef char susamune_cfg_metadata_style_check[(__builtin_offsetof(struct SusamuneCfg, metadataStyle) == 1248) ? 1 : -1];
-typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 2080) ? 1 : -1];
+typedef char susamune_cfg_input_style_check[(__builtin_offsetof(struct SusamuneCfg, inputStyle) == 2080) ? 1 : -1];
+typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 2144) ? 1 : -1];
 typedef char susamune_cfg_size_check[
     (sizeof(struct SusamuneCfg) <=
      SUSAMUNE_MEM2_PB_LIVE_PPC_BASE - SUSAMUNE_MEM2_CFG_PPC_BASE) ? 1 : -1];

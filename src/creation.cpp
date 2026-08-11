@@ -15,6 +15,9 @@ const char kOptionNames[] =
     "Text red\0Text green\0Text blue\0Text opacity\0Text brightness\0"
     "Background red\0Background green\0Background blue\0"
     "Background opacity\0Padding";
+const char kElementOptionNames[] =
+    "Element red\0Element green\0Element blue\0Element opacity\0"
+    "Element brightness";
 
 enum EditOption {
     OPTION_TEXT_R,
@@ -84,6 +87,20 @@ const char *glyphAt(const char *text, u16 index) {
     return *text ? text : nullptr;
 }
 
+int splitTextWidth(const char *text, int size, int *glyphs) {
+    int width = 0;
+    *glyphs = 0;
+    while (*text) {
+        const int bytes = glyphBytes(text);
+        char one[3] = {text[0], '\0', '\0'};
+        if (bytes == 2) one[1] = text[1];
+        width += Menu::textWidth(one, size);
+        text += bytes;
+        (*glyphs)++;
+    }
+    return width;
+}
+
 bool textChannel(const u8 (*textRgb)[3], u16 slots, u16 target,
                  int channel, u8 *value) {
     if (!textRgb || slots == 0) return false;
@@ -108,21 +125,24 @@ void adjustTextChannel(u8 (*textRgb)[3], u16 slots, u16 target,
 }
 
 void resetOption(CreationStyle &style, const CreationStyle &defaults,
-                 u8 (*textRgb)[3], const u8 defaultRgb[3], u16 slots,
-                 u8 option, u16 target) {
+                 u8 (*textRgb)[3], const u8 (*defaultRgb)[3],
+                 u16 defaultRgbSlots, u16 slots, u8 option, u16 target) {
     if (option <= OPTION_TEXT_B) {
         const int first = target ? target - 1 : 0;
         const int end   = target ? first + 1 : slots;
         for (int i = first; i < end; i++)
-            textRgb[i][option] = defaultRgb[option];
+            textRgb[i][option] =
+                defaultRgb[defaultRgbSlots > 1 ? i : 0][option];
         return;
     }
 
     styleValue(style, option) = styleValue(defaults, option);
 }
 
-const char *targetLabel(u16 target, const char *preview, char *out, int size) {
+const char *targetLabel(u16 target, const char *preview, const char *targetNames,
+                        char *out, int size) {
     if (target == 0) return "All";
+    if (targetNames) return PackedText::at(targetNames, target - 1);
     const char *glyph = glyphAt(preview, target - 1);
     if (!glyph || *glyph == ' ') {
         snprintf(out, size, "%u%s", target, glyph ? " (space)" : "");
@@ -142,6 +162,7 @@ void CreationEditor::reset() {
     mStyle        = nullptr;
     mTextRgb      = nullptr;
     mBackupRgb    = nullptr;
+    mTargetNames  = nullptr;
     mRepeatMask   = 0;
     mTextSlots    = 0;
     mTargetSlots  = 0;
@@ -153,12 +174,14 @@ void CreationEditor::reset() {
 }
 
 void CreationEditor::begin(CreationStyle *style, u8 (*textRgb)[3],
-                           u8 (*backupRgb)[3], u16 textSlots, u16 targetSlots) {
+                           u8 (*backupRgb)[3], u16 textSlots, u16 targetSlots,
+                           const char *targetNames) {
     if (!style || !textRgb || !backupRgb || textSlots == 0 || mEditing) return;
     mStyle        = style;
     mBackup       = *style;
     mTextRgb      = textRgb;
     mBackupRgb    = backupRgb;
+    mTargetNames  = targetNames;
     mTextSlots    = textSlots;
     mTargetSlots  = targetSlots && targetSlots < textSlots ? targetSlots : textSlots;
     for (u16 i = 0; i < mTextSlots; i++) {
@@ -193,7 +216,7 @@ u32 CreationEditor::repeatInput(TMarioGamePad *pad) {
 }
 
 u8 CreationEditor::update(TMarioGamePad *pad, const CreationStyle &defaults,
-                          const u8 defaultRgb[3]) {
+                          const u8 (*defaultRgb)[3], u16 defaultRgbSlots) {
     if (!mEditing || !mStyle || !pad) return UPDATE_NONE;
 
     const u32 pressed = pad->mButtons.mRapidInput;
@@ -214,8 +237,8 @@ u8 CreationEditor::update(TMarioGamePad *pad, const CreationStyle &defaults,
                 mEditing = false;
                 return UPDATE_FINISHED | UPDATE_CANCELLED;
             }
-            resetOption(*mStyle, defaults, mTextRgb, defaultRgb, mTextSlots,
-                        mOption, mTextTarget);
+            resetOption(*mStyle, defaults, mTextRgb, defaultRgb,
+                        defaultRgbSlots, mTextSlots, mOption, mTextTarget);
             mConfirm = CONFIRM_NONE;
             return UPDATE_CHANGED;
         }
@@ -296,10 +319,14 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
                    Color(255, 255, 255, 255));
 
     char targetBuf[24];
-    const char *target = targetLabel(mTextTarget, preview, targetBuf, sizeof(targetBuf));
+    const char *target = targetLabel(mTextTarget, preview, mTargetNames,
+                                     targetBuf, sizeof(targetBuf));
     char status[128];
     if (mTextTarget == 0)
-        snprintf(status, sizeof(status), "All characters");
+        snprintf(status, sizeof(status), mTargetNames ? "All elements"
+                                                       : "All characters");
+    else if (mTargetNames)
+        snprintf(status, sizeof(status), "%s", target);
     else
         snprintf(status, sizeof(status), "Character %s", target);
     menu->drawText(status, 622 - Menu::textWidth(status, 12), panelY + 11,
@@ -314,7 +341,8 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
     const bool sameR = textChannel(mTextRgb, mTextSlots, mTextTarget, 0, &r);
     const bool sameG = textChannel(mTextRgb, mTextSlots, mTextTarget, 1, &g);
     const bool sameB = textChannel(mTextRgb, mTextSlots, mTextTarget, 2, &b);
-    const char *rgbLabel = mTextTarget == 0 ? "Text RGB" : "Character RGB";
+    const char *rgbLabel = mTargetNames ? "Element RGB"
+        : (mTextTarget == 0 ? "Text RGB" : "Character RGB");
     if (sameR && sameG && sameB) {
         snprintf(status, sizeof(status),
                  "%s:%03u,%03u,%03u   Background RGB:%03u,%03u,%03u",
@@ -337,7 +365,10 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
             menu->fillBox(x - 3, y - 1, 294, 14, Color(90, 170, 255, 60));
             menu->drawText(">", x, y, 11, 11, Color(90, 170, 255, 255));
         }
-        menu->drawText(PackedText::at(kOptionNames, i), x + 12, y, 11, 11,
+        const char *optionName = PackedText::at(
+            mTargetNames && i <= OPTION_TEXT_BRIGHTNESS
+                ? kElementOptionNames : kOptionNames, i);
+        menu->drawText(optionName, x + 12, y, 11, 11,
                        selected ? Color(255, 255, 255, 255)
                                 : Color(200, 206, 220, 255));
 
@@ -362,8 +393,8 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
     }
 
     const char *controls = SUSAMUNE_GLYPH_C " U/D Option   " SUSAMUNE_GLYPH_C
-                           " L/R Adjust   START Next   " SUSAMUNE_GLYPH_X
-                           "+START Back";
+                           " L/R Adjust   START: Next   " SUSAMUNE_GLYPH_X
+                           "+START: Previous";
     menu->drawText(controls, 18, panelY + 135, 9, 9,
                    Color(150, 170, 205, 255));
     menu->drawText("D-pad Move   L/R Size",
@@ -471,13 +502,13 @@ void drawTextBox(Menu *menu, const CreationStyle &style,
     if (!menu || !text) return;
     const int size = clampi(20 * (int)style.scale / 100, 10, 40);
     const int pad  = style.padding == 0xff ? 0 : style.padding;
-    const int w    = Menu::textWidth(text, size);
+    int count;
+    const int w = splitTextWidth(text, size, &count);
     if (style.padding != 0xff) {
         menu->fillBox((int)style.x - pad, (int)style.y - pad,
                       w + pad * 2, size + pad * 2,
                       Color(style.bgR, style.bgG, style.bgB, style.bgA));
     }
-    const int count = glyphCount(text);
     const u16 first = rightAlignSlots && count < textSlots
                           ? (u16)(textSlots - count) : 0;
     drawTextLine(menu, style, textRgb, textSlots, text, style.x, style.y,
