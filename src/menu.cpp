@@ -429,19 +429,39 @@ private:
 //
 // Renders every setting tagged with `mCat` -- one tab per SettingCategory.
 // The setting/value store lives in settings.*; this only navigates and
-// draws. The filtered id list is rebuilt each frame off kSettingDescs
+// draws. The filtered id list is rebuilt each frame from Settings metadata
 // (SETTING_COUNT is tiny), so adding a setting needs no change here.
 // ---------------------------------------------------------------------
+namespace {
+
+const char kCategoryTitles[] =
+    "QoL\0Savestate\0Misc\0Cosmetic\0UI\0Timer";
+
+enum CategoryTitleOffset {
+    TITLE_QOL       = 0,
+    TITLE_SAVESTATE = TITLE_QOL + sizeof("QoL"),
+    TITLE_MISC      = TITLE_SAVESTATE + sizeof("Savestate"),
+    TITLE_COSMETIC  = TITLE_MISC + sizeof("Misc"),
+    TITLE_UI        = TITLE_COSMETIC + sizeof("Cosmetic"),
+    TITLE_TIMER     = TITLE_UI + sizeof("UI"),
+};
+
+static_assert(sizeof(kCategoryTitles) == 37, "category title offsets changed");
+static_assert(SETTING_COUNT <= 0x100, "setting ids no longer fit in a byte");
+static_assert(SETTING_CAT_COUNT <= 0x100, "setting categories no longer fit in a byte");
+
+}  // namespace
+
 class CategorySettingsTab : public MenuTab {
 public:
-    CategorySettingsTab(const char *title, SettingCategory cat)
-        : mTitle(title), mCat(cat), mSel(0) {}
+    CategorySettingsTab(u8 titleOffset, SettingCategory cat)
+        : mSel(0), mCat((u8)cat), mTitleOffset(titleOffset) {}
 
-    const char *title() const override { return mTitle; }
+    const char *title() const override { return kCategoryTitles + mTitleOffset; }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
-        SettingId ids[SETTING_COUNT];
-        int       n = buildList(ids);
+        u8  ids[SETTING_COUNT];
+        int n = buildList(ids);
         if (n == 0) {
             return;
         }
@@ -454,7 +474,7 @@ public:
         if (mSel >= n) {
             mSel = n - 1;
         }
-        SettingId id = ids[mSel];
+        SettingId id = (SettingId)ids[mSel];
         if ((rapid & TMarioGamePad::A) || (rapid & TMarioGamePad::CSTICK_RIGHT)) {
             gSettings.cycle(id, +1);
         } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
@@ -463,8 +483,8 @@ public:
     }
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
-        SettingId ids[SETTING_COUNT];
-        int       n = buildList(ids);
+        u8  ids[SETTING_COUNT];
+        int n = buildList(ids);
         if (n == 0) {
             menu->drawText("(none)", x + 4, y, ROW_SZ, ROW_SZ, cRowDim());
             return;
@@ -477,13 +497,12 @@ public:
         }
         int ry = y;
         for (int i = start; i < end; i++) {
-            SettingId          id       = ids[i];
-            const SettingDesc &d        = Settings::desc(id);
-            bool               selected = (i == mSel);
+            SettingId id       = (SettingId)ids[i];
+            bool      selected = (i == mSel);
             if (selected) {
                 drawRowHighlight(menu, x, ry, w, ROW_H);
             }
-            menu->drawText(d.name, x + 4, ry, ROW_SZ, ROW_SZ,
+            menu->drawText(Settings::name(id), x + 4, ry, ROW_SZ, ROW_SZ,
                            selected ? cRowSel() : cRow());
             const char *val = gSettings.valueLabel(id);
             int         vx  = x + w - Menu::textWidth(val, ROW_SZ) - 8;
@@ -495,116 +514,68 @@ public:
     }
 
 private:
-    int buildList(SettingId *out) const {
+    int buildList(u8 *out) const {
         int n = 0;
         for (int i = 0; i < SETTING_COUNT; i++) {
-            if (Settings::desc((SettingId)i).category == mCat) {
-                out[n++] = (SettingId)i;
+            if (Settings::category((SettingId)i) == (SettingCategory)mCat) {
+                out[n++] = (u8)i;
             }
         }
         return n;
     }
 
-    const char     *mTitle;
-    SettingCategory mCat;
-    int             mSel;
+    u8 mSel;
+    u8 mCat;
+    u8 mTitleOffset;
 };
 
-// ---------------------------------------------------------------------
-// Input Display tab
-// ---------------------------------------------------------------------
-class InputDisplayTab : public MenuTab {
-public:
-    InputDisplayTab() : mSel(0) {}
+static_assert(sizeof(CategorySettingsTab) == 8, "category tab must stay one slot");
 
-    const char *title() const override { return "Input"; }
-    bool grabsInput() const override { return gInputDisplay.editing(); }
-    bool fullScreen() const override { return gInputDisplay.editing(); }
+// ---------------------------------------------------------------------
+// Overlay configuration tabs
+// ---------------------------------------------------------------------
+class DisplayTab final : public MenuTab {
+public:
+    enum Kind : u8 {
+        INPUT,
+        METADATA,
+    };
+
+    DisplayTab(Kind kind) : mSel(0), mKind(kind) {}
+
+    const char *title() const override { return isInput() ? "Input" : "Metadata"; }
+    bool grabsInput() const override { return editing(); }
+    bool fullScreen() const override { return editing(); }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
-        if (gInputDisplay.editing()) {
-            gInputDisplay.updateEditor(pad);
+        if (editing()) {
+            updateEditor(pad);
             return;
         }
 
+        const int count = rowCount();
         u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
-            mSel = wrap(mSel - 1, InputDisplay::menuRowCount());
+            mSel = (u8)wrap(mSel - 1, count);
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
-            mSel = wrap(mSel + 1, InputDisplay::menuRowCount());
+            mSel = (u8)wrap(mSel + 1, count);
         }
         if ((rapid & TMarioGamePad::A) || (rapid & TMarioGamePad::CSTICK_RIGHT)) {
-            gInputDisplay.adjustMenuRow(mSel, +1);
+            adjustRow(mSel, +1);
         } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
-            gInputDisplay.adjustMenuRow(mSel, -1);
+            adjustRow(mSel, -1);
         }
     }
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
-        if (gInputDisplay.editing()) {
-            gInputDisplay.drawEditor(menu);
-            return;
-        }
-
-        int ry = y;
-        for (int i = 0; i < InputDisplay::menuRowCount(); i++) {
-            bool selected = i == mSel;
-            if (selected) drawRowHighlight(menu, x, ry, w, ROW_H);
-            menu->drawText(InputDisplay::menuRowName(i), x + 4, ry,
-                           ROW_SZ, ROW_SZ, selected ? cRowSel() : cRow());
-            const char *val = gInputDisplay.menuRowValue(i);
-            int vx = x + w - Menu::textWidth(val, ROW_SZ) - 8;
-            menu->drawText(val, vx, ry, ROW_SZ, ROW_SZ, cValue());
-            ry += ROW_H;
-        }
-
-        menu->drawText("Toggle bind changes visibility for this session only",
-                       x + 4, y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
-    }
-
-private:
-    int mSel;
-};
-
-// ---------------------------------------------------------------------
-// Metadata Display tab
-// ---------------------------------------------------------------------
-class MetadataDisplayTab : public MenuTab {
-public:
-    MetadataDisplayTab() : mSel(0) {}
-
-    const char *title() const override { return "Metadata"; }
-    bool grabsInput() const override { return gMetadataDisplay.editing(); }
-    bool fullScreen() const override { return gMetadataDisplay.editing(); }
-
-    void update(Menu *menu, TMarioGamePad *pad) override {
-        if (gMetadataDisplay.editing()) {
-            gMetadataDisplay.updateEditor(pad);
-            return;
-        }
-
-        u32 rapid = menu->navigationInput(pad);
-        if (rapid & TMarioGamePad::CSTICK_UP) {
-            mSel = wrap(mSel - 1, MetadataDisplay::menuRowCount());
-        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
-            mSel = wrap(mSel + 1, MetadataDisplay::menuRowCount());
-        }
-        if ((rapid & TMarioGamePad::A) || (rapid & TMarioGamePad::CSTICK_RIGHT)) {
-            gMetadataDisplay.adjustMenuRow(mSel, +1);
-        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
-            gMetadataDisplay.adjustMenuRow(mSel, -1);
-        }
-    }
-
-    void draw(Menu *menu, int x, int y, int w, int h) override {
-        if (gMetadataDisplay.editing()) {
-            gMetadataDisplay.drawEditor(menu);
+        if (editing()) {
+            drawEditor(menu);
             return;
         }
 
         const int hintY = y + h - FOOT_SZ;
         h -= ROW_H;
-        int count = MetadataDisplay::menuRowCount();
+        const int count = rowCount();
         int maxRows = h / ROW_H;
         int start = listScrollStart(mSel, count, maxRows);
         int end = start + maxRows;
@@ -614,21 +585,54 @@ public:
         for (int i = start; i < end; i++) {
             bool selected = i == mSel;
             if (selected) drawRowHighlight(menu, x, ry, w, ROW_H);
-            menu->drawText(MetadataDisplay::menuRowName(i), x + 4, ry,
+            menu->drawText(rowName(i), x + 4, ry,
                            ROW_SZ, ROW_SZ, selected ? cRowSel() : cRow());
-            const char *val = gMetadataDisplay.menuRowValue(i);
+            const char *val = rowValue(i);
             int vx = x + w - Menu::textWidth(val, ROW_SZ) - 8;
             menu->drawText(val, vx, ry, ROW_SZ, ROW_SZ, cValue());
             ry += ROW_H;
         }
         drawScrollHints(menu, x, y, w, h, start, end, count);
-        menu->drawText("Custom text: edit metadata_display in susamune.ini",
-                       x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
+        menu->drawText(footer(), x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
     }
 
 private:
-    int mSel;
+    bool isInput() const { return mKind == INPUT; }
+    bool editing() const {
+        return isInput() ? gInputDisplay.editing() : gMetadataDisplay.editing();
+    }
+    void updateEditor(TMarioGamePad *pad) {
+        if (isInput()) gInputDisplay.updateEditor(pad);
+        else gMetadataDisplay.updateEditor(pad);
+    }
+    void drawEditor(Menu *menu) const {
+        if (isInput()) gInputDisplay.drawEditor(menu);
+        else gMetadataDisplay.drawEditor(menu);
+    }
+    int rowCount() const {
+        return isInput() ? InputDisplay::menuRowCount() : MetadataDisplay::menuRowCount();
+    }
+    const char *rowName(int row) const {
+        return isInput() ? InputDisplay::menuRowName(row) : MetadataDisplay::menuRowName(row);
+    }
+    const char *rowValue(int row) const {
+        return isInput() ? gInputDisplay.menuRowValue(row)
+                         : gMetadataDisplay.menuRowValue(row);
+    }
+    void adjustRow(int row, int dir) {
+        if (isInput()) gInputDisplay.adjustMenuRow(row, dir);
+        else gMetadataDisplay.adjustMenuRow(row, dir);
+    }
+    const char *footer() const {
+        return isInput() ? "Toggle bind changes visibility for this session only"
+                         : "Custom text: edit metadata_display in susamune.ini";
+    }
+
+    u8   mSel;
+    Kind mKind;
 };
+
+static_assert(sizeof(DisplayTab) == 8, "display tab state grew");
 
 // ---------------------------------------------------------------------
 // Binds tab
@@ -694,7 +698,7 @@ public:
             if (selected) {
                 drawRowHighlight(menu, x, ry, w, ROW_H);
             }
-            menu->drawText(Binds::desc(id).name, x + 4, ry, ROW_SZ, ROW_SZ,
+            menu->drawText(Binds::name(id), x + 4, ry, ROW_SZ, ROW_SZ,
                            selected ? cRowSel() : cRow());
 
             const char *val;
@@ -748,8 +752,8 @@ u8 sSavestateBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sUiBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sTimerBuf[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
 u8 sILingBuf[sizeof(ILingTab)]                   __attribute__((aligned(8)));
-u8 sInputBuf[sizeof(InputDisplayTab)]           __attribute__((aligned(8)));
-u8 sMetadataBuf[sizeof(MetadataDisplayTab)]     __attribute__((aligned(8)));
+u8 sInputBuf[sizeof(DisplayTab)]                 __attribute__((aligned(8)));
+u8 sMetadataBuf[sizeof(DisplayTab)]              __attribute__((aligned(8)));
 u8 sBindsBuf[sizeof(BindsTab)]                 __attribute__((aligned(8)));
 }  // namespace
 
@@ -798,15 +802,17 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sPresetsBuf) WarpPresetsTab();
     mTabs[mNumTabs++] = new (sStagesBuf) WarpStagesTab();
 #endif
-    mTabs[mNumTabs++] = new (sQolBuf) CategorySettingsTab("QoL", SETTING_CAT_QOL);
-    mTabs[mNumTabs++] = new (sCosmeticBuf) CategorySettingsTab("Cosmetic", SETTING_CAT_COSMETIC);
-    mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab("Misc", SETTING_CAT_MISC);
-    mTabs[mNumTabs++] = new (sSavestateBuf) CategorySettingsTab("Savestate", SETTING_CAT_SAVESTATE);
-    mTabs[mNumTabs++] = new (sUiBuf) CategorySettingsTab("UI", SETTING_CAT_UI);
-    mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab("Timer", SETTING_CAT_TIMER);
+    mTabs[mNumTabs++] = new (sQolBuf) CategorySettingsTab(TITLE_QOL, SETTING_CAT_QOL);
+    mTabs[mNumTabs++] =
+        new (sCosmeticBuf) CategorySettingsTab(TITLE_COSMETIC, SETTING_CAT_COSMETIC);
+    mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab(TITLE_MISC, SETTING_CAT_MISC);
+    mTabs[mNumTabs++] =
+        new (sSavestateBuf) CategorySettingsTab(TITLE_SAVESTATE, SETTING_CAT_SAVESTATE);
+    mTabs[mNumTabs++] = new (sUiBuf) CategorySettingsTab(TITLE_UI, SETTING_CAT_UI);
+    mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab(TITLE_TIMER, SETTING_CAT_TIMER);
     mTabs[mNumTabs++] = new (sILingBuf) ILingTab();
-    mTabs[mNumTabs++] = new (sInputBuf) InputDisplayTab();
-    mTabs[mNumTabs++] = new (sMetadataBuf) MetadataDisplayTab();
+    mTabs[mNumTabs++] = new (sInputBuf) DisplayTab(DisplayTab::INPUT);
+    mTabs[mNumTabs++] = new (sMetadataBuf) DisplayTab(DisplayTab::METADATA);
     mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
 }
 
@@ -873,10 +879,14 @@ void Menu::fillBox(int x, int y, int w, int h, Color color) {
     J2DFillBox(x, y, w, h, color);
 }
 
-void Menu::fillPoly(const s16 *xy, int n, Color color) {
+namespace {
+
+__attribute__((noinline)) void drawPolygon(J2DOrthoGraph *ortho,
+                                           const s16 *xy, int n, bool closed,
+                                           const Color &color) {
     // setup2D() reasserts the flat vertex state and the position matrix, the
     // same preconditions J2DGrafContext::fillBox relies on.
-    if (!mOrtho) {
+    if (!ortho || (closed && n < 2)) {
         return;
     }
     // Vertices go to the write-gather pipe by address: GX.h reaches it through
@@ -884,39 +894,32 @@ void Menu::fillPoly(const s16 *xy, int n, Color color) {
     volatile u16 *const wgU16 = (volatile u16 *)0xCC008000;
     volatile u32 *const wgU32 = (volatile u32 *)0xCC008000;
 
-    mOrtho->setup2D();
+    ortho->setup2D();
     GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET);
-    GXBegin(GX_TRIANGLEFAN, GX_VTXFMT0, (u16)n);
+    if (closed) {
+        GXSetLineWidth(20, GX_TO_ZERO);
+    }
+    GXBegin(closed ? GX_LINESTRIP : GX_TRIANGLEFAN, GX_VTXFMT0,
+            (u16)(n + closed));
     const u32 packed = ((u32)color.r << 24) | ((u32)color.g << 16) |
                        ((u32)color.b << 8) | (u32)color.a;
-    for (int i = 0; i < n; i++) {
-        *wgU16 = (u16)xy[i * 2];
-        *wgU16 = (u16)xy[i * 2 + 1];
-        *wgU16 = 0;
-        *wgU32 = packed;
-    }
-}
-
-void Menu::strokePoly(const s16 *xy, int n, u8 lineWidth, Color color) {
-    if (!mOrtho || n < 2) {
-        return;
-    }
-    volatile u16 *const wgU16 = (volatile u16 *)0xCC008000;
-    volatile u32 *const wgU32 = (volatile u32 *)0xCC008000;
-
-    mOrtho->setup2D();
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET);
-    GXSetLineWidth(lineWidth, GX_TO_ZERO);
-    GXBegin(GX_LINESTRIP, GX_VTXFMT0, (u16)(n + 1));
-    const u32 packed = ((u32)color.r << 24) | ((u32)color.g << 16) |
-                       ((u32)color.b << 8) | (u32)color.a;
-    for (int i = 0; i <= n; i++) {
+    for (int i = 0; i < n + closed; i++) {
         const int j = (i == n) ? 0 : i;
         *wgU16 = (u16)xy[j * 2];
         *wgU16 = (u16)xy[j * 2 + 1];
         *wgU16 = 0;
         *wgU32 = packed;
     }
+}
+
+}  // namespace
+
+void Menu::fillPoly(const s16 *xy, int n, Color color) {
+    drawPolygon(mOrtho, xy, n, false, color);
+}
+
+void Menu::strokePoly(const s16 *xy, int n, Color color) {
+    drawPolygon(mOrtho, xy, n, true, color);
 }
 
 void Menu::switchTab(int dir) {

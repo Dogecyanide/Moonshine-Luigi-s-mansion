@@ -20,6 +20,7 @@
 #include "susamune/qft_timer.hxx"
 #include "susamune/pattern_selector.hxx"
 #include "susamune/warp_wheel.hxx"
+#include "susamune/visible_goop.hxx"
 #if ENABLE_DEBUG_WARPS
 #include "susamune/debug_warp.hxx"
 #endif
@@ -39,7 +40,7 @@ SavestateManager* gSavestateMgr = nullptr;
 //
 // The reserve is SUSAMUNE_ARENA_RESERVE_SIZE, not the region size: __OSArenaLo
 // sits a debug stack below the __ArenaLo the blob links at. Adding only the
-// region size puts the heap floor at MOD_BASE + 0x6000, inside the blob.
+// region size puts the heap floor at MOD_BASE + 0xE000, inside the blob.
 // SUSAMUNE_ARENA_RESERVE_SIZE must match arena_reserve in scripts/patches.py.
 extern "C" void* getArenaLo() {
     return (void*)(*(volatile u32*)SUSAMUNE_ADDR_OS_ARENA_LO +
@@ -120,6 +121,7 @@ extern "C" void onSetup(TMarDirector* director) {
     // Runs on every stage load, so this must stay above the once-only guard.
     featuresOnStageLoad();
     actionsOnStageLoad();
+    visibleGoopUpdate();
     gQFTTimer.onStageSetup(director);
     gAttemptCounter.onStageSetup(director);
 
@@ -198,6 +200,8 @@ extern "C" void afterDraw() {
     // GPU work are all complete, while the next game frame has not begun.
     THPPlayerDrawDone();
     if (gSavestateMgr) gSavestateMgr->processPendingLoad();
+    // gpPollution is stale until the async setup thread reaches onSetup.
+    if (gpMarDirector && gpMarDirector->_260 != 0) visibleGoopUpdate();
 
     {
         J2DOrthoGraph ortho(0, 0, 640, 480);

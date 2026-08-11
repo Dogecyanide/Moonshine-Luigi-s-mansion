@@ -65,13 +65,17 @@ static const char *const SettingKeys[] = { SUSAMUNE_SETTING_LIST(SUSAMUNE_SETTIN
 #undef SUSAMUNE_SETTING_KEY
 
 #define SETTING_KEY_COUNT ((u32)(sizeof(SettingKeys) / sizeof(SettingKeys[0])))
+typedef char SettingKeyCountFitsCfg[
+    SETTING_KEY_COUNT <= SUSAMUNE_CFG_MAX_SETTINGS ? 1 : -1];
 
-// Same, for the [binds] section.
+// Same, for the running disc's [binds_<region>] section.
 #define SUSAMUNE_BIND_KEY(id, key) key,
 static const char *const BindKeys[] = { SUSAMUNE_BIND_LIST(SUSAMUNE_BIND_KEY) };
 #undef SUSAMUNE_BIND_KEY
 
 #define BIND_KEY_COUNT ((u32)(sizeof(BindKeys) / sizeof(BindKeys[0])))
+typedef char BindKeyCountFitsCfg[
+    BIND_KEY_COUNT <= SUSAMUNE_CFG_MAX_BINDS ? 1 : -1];
 
 // Button bit <-> ini token. The third list field is the mod's font glyph.
 struct BindButton { u16 bit; const char *token; };

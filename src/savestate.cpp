@@ -66,6 +66,7 @@
 
 #include "Dolphin/CARD.h"
 #include "Dolphin/GX.h"
+#include "Dolphin/mem.h"
 #include "Dolphin/OS.h"
 #include "Dolphin/string.h"
 #if ENABLE_SAVESTATE_DBG
@@ -248,21 +249,14 @@ inline u8 *bufferPtr() {
     return reinterpret_cast<u8 *>(kSnapshotBase + kHeaderSize);
 }
 
-// Manual word-aligned copy. Avoid pulling in libc memcpy and mirror what
-// the existing code did.
-void wordCopy(void *dst, const void *src, size_t bytes) {
-    u32 *d        = static_cast<u32 *>(dst);
-    const u32 *s  = static_cast<const u32 *>(src);
-    size_t words  = bytes >> 2;
-    for (size_t i = 0; i < words; i++) {
-        d[i] = s[i];
-    }
-    u8 *db        = reinterpret_cast<u8 *>(d + words);
-    const u8 *sb  = reinterpret_cast<const u8 *>(s + words);
-    size_t tail   = bytes & 3u;
-    for (size_t i = 0; i < tail; i++) {
-        db[i] = sb[i];
-    }
+__attribute__((noinline)) u32 captureRegion(SavestateHeader *h, u32 offset,
+                                            u32 addr, u32 size) {
+    memcpy(bufferPtr() + offset, reinterpret_cast<const void *>(addr), size);
+    RegionEntry &region = h->regions[h->region_count++];
+    region.addr         = addr;
+    region.size         = size;
+    region.buf_offset   = offset;
+    return offset + size;
 }
 
 // ---------------------------------------------------------------------
@@ -460,13 +454,7 @@ bool SavestateManager::saveState() {
             continue;
         }
         u32 sz = kStaticRanges[i].end - kStaticRanges[i].start;
-        wordCopy(bufferPtr() + offset,
-                 reinterpret_cast<void *>(kStaticRanges[i].start), sz);
-        h->regions[h->region_count].addr       = kStaticRanges[i].start;
-        h->regions[h->region_count].size       = sz;
-        h->regions[h->region_count].buf_offset = offset;
-        h->region_count++;
-        offset += sz;
+        offset = captureRegion(h, offset, kStaticRanges[i].start, sz);
     }
 
     // Follow each tracked pointer and capture its target. These objects
@@ -485,23 +473,11 @@ bool SavestateManager::saveState() {
         if (target >= heapStart && target + pa.size <= heapEnd) {
             continue;
         }
-        wordCopy(bufferPtr() + offset, reinterpret_cast<void *>(target),
-                 pa.size);
-        h->regions[h->region_count].addr       = target;
-        h->regions[h->region_count].size       = pa.size;
-        h->regions[h->region_count].buf_offset = offset;
-        h->region_count++;
-        offset += pa.size;
+        offset = captureRegion(h, offset, target, pa.size);
     }
 
     // Heap last (largest payload).
-    wordCopy(bufferPtr() + offset, reinterpret_cast<void *>(heapStart),
-             heapSize);
-    h->regions[h->region_count].addr       = heapStart;
-    h->regions[h->region_count].size       = heapSize;
-    h->regions[h->region_count].buf_offset = offset;
-    h->region_count++;
-    offset += heapSize;
+    offset = captureRegion(h, offset, heapStart, heapSize);
 
     // Push the bytes out of dcache so a subsequent uncached read (e.g. by
     // a future load that swaps the BAT or by debug tooling) sees them.
@@ -611,9 +587,9 @@ bool SavestateManager::loadState() {
 
     for (u32 i = 0; i < h->region_count; i++) {
         const RegionEntry &r = h->regions[i];
-        wordCopy(reinterpret_cast<void *>(r.addr), bufferPtr() + r.buf_offset,
-                 r.size);
-        // wordCopy() has already placed the restored bytes in D-cache, so the
+        memcpy(reinterpret_cast<void *>(r.addr), bufferPtr() + r.buf_offset,
+               r.size);
+        // memcpy() has already placed the restored bytes in D-cache, so the
         // CPU can use them immediately. Store them for GX/DMA visibility, but
         // do not flush-and-invalidate the whole stage heap: doing so makes the
         // next frame fault every restored line back in from RAM.

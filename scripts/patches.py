@@ -29,6 +29,10 @@ patches = [
     # main is at 0x80005600 with size 0x44 in all three region maps, so the call
     # site is main+0x1c everywhere.
     {'jp': 0x8000561c, 'us': 0x8000561c, 'pal': 0x8000561c, 'sym': 'onAppInit', 'type': PatchType.BL},
+    # CARDMount: retry only an encoding mismatch with the opposite ANSI/SJIS
+    # standard, selecting the format actually recorded in the mounted card.
+    {'jp': 0x800a31fc, 'us': 0x803588dc, 'pal': 0x80350afc,
+     'sym': 'susamuneCardMount', 'type': PatchType.B},
 #   {'jp': 0x800fa110, 'us': ..., 'pal': ..., 'sym': 'onFinishAppState', 'type': PatchType.BL},
     # insert NOPs to speed up boot process
     # initialize__12TApplicationFv + 0x2c / +0x40.
@@ -45,8 +49,8 @@ patches = [
 ]
 
 # The mod is linked into a region carved from the BOTTOM of the game's heap
-# arena, at __ArenaLo. getArenaLo() (hooked onto OSGetArenaLo above) makes the
-# root heap start at __OSArenaLo + mod_region_size, leaving [__ArenaLo,
+# arena, at __ArenaLo. getArenaLo() (hooked onto OSGetArenaLo above) adds
+# arena_reserve to the runtime __OSArenaLo, leaving [__ArenaLo,
 # __ArenaLo + mod_region_size) free for the mod's code + data. The top of the
 # arena is deliberately left alone: the apploader stores the FST there. The
 # game's stack is untouched.

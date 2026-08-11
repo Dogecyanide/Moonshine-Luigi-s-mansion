@@ -75,14 +75,17 @@ def main():
     p.blob_max_size = patches.mod_blob_max_size
     p.add_linker_script_file(str(linker_script))
     p.add_obj_file(obj.name)
+    p.linker_flags.append("--gc-sections")
 
     for i, patch in enumerate(patches.patches):
         addr = patch[args.vers]
         if addr is None:
             raise ValueError(f"Patch {i} address unset for version {args.vers}!")
         if patch["type"] == patches.PatchType.B:
+            p.linker_flags.append(f"--undefined={patch['sym']}")
             p.hook_branch(patch[args.vers], patch["sym"], nop_count=patch.get("nop_count", 0))
         elif patch["type"] == patches.PatchType.BL:
+            p.linker_flags.append(f"--undefined={patch['sym']}")
             p.hook_branchlink(patch[args.vers], patch["sym"], nop_count=patch.get("nop_count", 0))
         elif patch["type"] == patches.PatchType.W32:
             p.hook_word(patch[args.vers], patch["val"])

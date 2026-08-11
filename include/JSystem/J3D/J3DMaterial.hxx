@@ -65,7 +65,7 @@ struct J3DIndTevStage {
 class J3DTevBlock {
 public:
     virtual void reset(J3DTevBlock *);
-    virtual u32 getType(s32 idx)                                               = 0;
+    virtual u32 getType()                                                      = 0;
     virtual size_t countDLSize(s32 idx)                                        = 0;
     virtual void setTexNo(s32 idx, u16 no)                                     = 0;
     virtual void setTexNo(s32 idx, const u16 *no)                              = 0;
@@ -106,7 +106,7 @@ public:
 class J3DTevBlock1 : public J3DTevBlock {
 public:
     virtual void reset(J3DTevBlock *) override;
-    virtual u32 getType(s32 idx) override;
+    virtual u32 getType() override;
     virtual size_t countDLSize(s32 idx) override;
     virtual void setTexNo(s32 idx, u16 no) override;
     virtual void setTexNo(s32 idx, const u16 *no) override;
@@ -147,7 +147,7 @@ public:
 class J3DTevBlock2 : public J3DTevBlock {
 public:
     virtual void reset(J3DTevBlock *) override;
-    virtual u32 getType(s32 idx) override;
+    virtual u32 getType() override;
     virtual size_t countDLSize(s32 idx) override;
     virtual void setTexNo(s32 idx, u16 no) override;
     virtual void setTexNo(s32 idx, const u16 *no) override;
@@ -188,7 +188,7 @@ public:
 class J3DTevBlock4 : public J3DTevBlock {
 public:
     virtual void reset(J3DTevBlock *) override;
-    virtual u32 getType(s32 idx) override;
+    virtual u32 getType() override;
     virtual size_t countDLSize(s32 idx) override;
     virtual void setTexNo(s32 idx, u16 no) override;
     virtual void setTexNo(s32 idx, const u16 *no) override;
@@ -229,7 +229,7 @@ public:
 class J3DTevBlock16 : public J3DTevBlock {
 public:
     virtual void reset(J3DTevBlock *) override;
-    virtual u32 getType(s32 idx) override;
+    virtual u32 getType() override;
     virtual size_t countDLSize(s32 idx) override;
     virtual void setTexNo(s32 idx, u16 no) override;
     virtual void setTexNo(s32 idx, const u16 *no) override;

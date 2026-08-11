@@ -108,6 +108,8 @@ endif()
 set(SHARED_FLAGS
     --target=powerpc-gecko-ibm-kuribo-eabi
     -Oz
+    -Xclang
+    -fmerge-functions
     -fno-exceptions
     -fno-rtti
     # `s8` in include/ is a typedef for plain `char`, which is unsigned on this
@@ -121,8 +123,8 @@ set(SHARED_FLAGS
     -nostdlib
     -fno-use-cxa-atexit
     -fno-c++-static-destructors
-    -fno-function-sections
-    -fno-data-sections)
+    -ffunction-sections
+    -fdata-sections)
 
 function(susamune_add_mod_object vers)
     string(TOUPPER "${vers}" _upper)
