@@ -75,6 +75,12 @@ void SusamuneLoadMod(u32 gameID)
 		memset(dst, 0, sizeof(*dst));
 		read = sizeof(*dst);
 	}
+	else if (dst->fileSize != size)
+	{
+		gprintf("Susamune: %s manifest size does not match the file\r\n", path);
+		memset(dst, 0, sizeof(*dst));
+		read = sizeof(*dst);
+	}
 	f_close(&fd);
 
 	DCFlushRange(dst, read);

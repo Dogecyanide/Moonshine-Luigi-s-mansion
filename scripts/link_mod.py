@@ -7,6 +7,35 @@ from dol_c_kit import Project
 import patches
 
 
+def check_shared_layout():
+    """Keep the build-side layout in lockstep with the shared launcher header."""
+    header = Path(__file__).parent.parent / "include" / "susamune" / "mod_bin.h"
+    text = header.read_text()
+
+    def hex_define(name):
+        match = re.search(
+            r"^#define\s+{}\s+(0x[0-9a-fA-F]+)u?\s*$".format(re.escape(name)),
+            text, re.M)
+        if not match:
+            raise RuntimeError("{} not found as a hex constant in {}".format(name, header))
+        return int(match.group(1), 16)
+
+    expected = {
+        "SUSAMUNE_MOD_BASE_JP": patches.base_addr["jp"],
+        "SUSAMUNE_MOD_BASE_US": patches.base_addr["us"],
+        "SUSAMUNE_MOD_BASE_PAL": patches.base_addr["pal"],
+        "SUSAMUNE_MOD_REGION_SIZE": patches.mod_region_size,
+        "SUSAMUNE_SCRATCH": patches.mod_scratch_size,
+        "SUSAMUNE_DEBUG_STACK_SIZE": patches.debug_stack_size,
+    }
+    for name, value in expected.items():
+        header_value = hex_define(name)
+        if header_value != value:
+            raise RuntimeError(
+                "{} is {:#x} in {} but {:#x} in patches.py".format(
+                    name, header_value, header, value))
+
+
 def check_arena_reserve(linker_script, base):
     """Verify the debug-stack gap this build's arena reserve assumes.
 
@@ -44,6 +73,8 @@ def main():
     ap.add_argument("--print-commands", action="store_true", help="Echo the raw compiler/linker argv")
     ap.add_argument("mode", choices=["patch_dol", "gecko", "launcher"])
     args = ap.parse_args()
+
+    check_shared_layout()
 
     obj = Path(args.obj).resolve()
     linker_script = Path(args.linker_script).resolve()

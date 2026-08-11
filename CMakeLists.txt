@@ -74,6 +74,7 @@ set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
 
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
 option(ENABLE_SAVESTATE_DBG "Enable savestate debug output" OFF)
+option(ENABLE_MEM_DIAGNOSTICS "Enable the MEM1 safety overlay and canaries" OFF)
 option(ENABLE_DEBUG_WARPS "Enable debug warp menu tabs and stage warping" OFF)
 option(UPDATE_ISO_METADATA "Update ISO metadata (game code 01 -> 02, change picture, name, etc.)" OFF)
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
@@ -101,6 +102,9 @@ set(MAP_FILE "${CMAKE_SOURCE_DIR}/maps/${VERS_PRIMARY}.map")
 # build directory.
 
 file(GLOB MOD_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
+if(NOT ENABLE_MEM_DIAGNOSTICS)
+    list(REMOVE_ITEM MOD_SOURCES "${CMAKE_SOURCE_DIR}/src/mem_diagnostics.cpp")
+endif()
 if(NOT ENABLE_DEBUG_WARPS)
     list(REMOVE_ITEM MOD_SOURCES "${CMAKE_SOURCE_DIR}/src/debug_warp.cpp")
 endif()
@@ -150,6 +154,7 @@ function(susamune_add_mod_object vers)
     target_compile_definitions(susamune_obj_${vers} PRIVATE
         IS_EMULATOR=$<BOOL:${IS_EMULATOR}>
         ENABLE_SAVESTATE_DBG=$<BOOL:${ENABLE_SAVESTATE_DBG}>
+        ENABLE_MEM_DIAGNOSTICS=$<BOOL:${ENABLE_MEM_DIAGNOSTICS}>
         ENABLE_DEBUG_WARPS=$<BOOL:${ENABLE_DEBUG_WARPS}>
         SUSAMUNE_VERSION_${_upper}=1)
 

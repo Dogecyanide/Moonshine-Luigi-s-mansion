@@ -15,6 +15,7 @@
 #include "susamune/actions.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
+#include "susamune/mem_diagnostics.hxx"
 #include "susamune/iling.hxx"
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
@@ -40,7 +41,7 @@ SavestateManager* gSavestateMgr = nullptr;
 //
 // The reserve is SUSAMUNE_ARENA_RESERVE_SIZE, not the region size: __OSArenaLo
 // sits a debug stack below the __ArenaLo the blob links at. Adding only the
-// region size puts the heap floor at MOD_BASE + 0xE000, inside the blob.
+// region size puts the heap floor at MOD_BASE + 0x16000, inside the blob.
 // SUSAMUNE_ARENA_RESERVE_SIZE must match arena_reserve in scripts/patches.py.
 extern "C" void* getArenaLo() {
     return (void*)(*(volatile u32*)SUSAMUNE_ADDR_OS_ARENA_LO +
@@ -58,6 +59,9 @@ extern "C" void onAppInit(TApplication* app) {
     gQFTTimer.init();
     gAttemptCounter.init();
     ILing::init();
+#if ENABLE_MEM_DIAGNOSTICS
+    memDiagnosticsInit();
+#endif
 
 #if !IS_EMULATOR
     // The launcher owns this option because Sunshine cannot persist its own
@@ -124,6 +128,9 @@ extern "C" void onSetup(TMarDirector* director) {
     visibleGoopUpdate();
     gQFTTimer.onStageSetup(director);
     gAttemptCounter.onStageSetup(director);
+#if ENABLE_MEM_DIAGNOSTICS
+    memDiagnosticsOnStageSetup();
+#endif
 
     if (inited) return; else inited = true;
 
@@ -190,6 +197,9 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     if (gMenu) {
         gMenu->update(gpApplication.mGamePads[0]);
     }
+#if ENABLE_MEM_DIAGNOSTICS
+    memDiagnosticsUpdate();
+#endif
 
     return state;
 }
@@ -216,6 +226,9 @@ extern "C" void afterDraw() {
         
         if (gMenu)
             gMenu->draw(&ortho);
+#if ENABLE_MEM_DIAGNOSTICS
+        memDiagnosticsDraw(gMenu);
+#endif
         ILing::draw(gMenu);
         if (!gMenu || !gMenu->shown())
             PatternSelector::draw(gMenu);

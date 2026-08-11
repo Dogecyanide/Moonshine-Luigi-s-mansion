@@ -52,6 +52,9 @@ namespace {
 
   static_assert(sizeof(TimerState) == 16, "QFT scratch layout changed");
   static_assert(__builtin_offsetof(TimerState, offsetQf) == 4, "QFT offset layout changed");
+  static_assert(SUSAMUNE_ADDR_QFT_TRANSITION_TARGET + sizeof(u16) <=
+                    SUSAMUNE_ADDR_MOD_SCRATCH + SUSAMUNE_SCRATCH,
+                "QFT fields exceed the fixed scratch tail");
 
   volatile TimerState *const sState =
     reinterpret_cast<volatile TimerState *>(SUSAMUNE_ADDR_QFT_STATE);

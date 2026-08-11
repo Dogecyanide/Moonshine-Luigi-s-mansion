@@ -1,6 +1,8 @@
 #ifndef SUSAMUNE_ADDRESSES_HXX
 #define SUSAMUNE_ADDRESSES_HXX
 
+#include "susamune/mod_bin.h"
+
 // Region-specific MEM1 layout for the supported retail revisions. Keep every
 // game-memory address here; see the corresponding maps/<version>.map file.
 // The build selects exactly one SUSAMUNE_VERSION_* definition in CMake.
@@ -85,11 +87,8 @@
 
 // Arena window reserved for the injected mod.
 #define SUSAMUNE_ADDR_MOD_BASE \
-    SUSAMUNE_MEM1_ADDR(0x80426020u, 0x80429800u, 0x80420d60u)
-#define SUSAMUNE_MOD_REGION_SIZE 0x10000u
-// Final fixed-address scratch reserved from the linked blob.
-#define SUSAMUNE_SCRATCH 0x40u
-#define SUSAMUNE_MOD_BLOB_MAX_SIZE (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
+    SUSAMUNE_MEM1_ADDR(SUSAMUNE_MOD_BASE_JP, SUSAMUNE_MOD_BASE_US, \
+                       SUSAMUNE_MOD_BASE_PAL)
 
 // The mod links at __ArenaLo, but OSInit hands the debug stack back to the
 // arena when no debug monitor is present (BI2DebugFlag < 2), leaving the
@@ -97,10 +96,6 @@
 // __ArenaLo in all three regions. getArenaLo() reserves from the runtime
 // value, so it must cover this gap as well as the region itself, or the root
 // heap starts 0x2000 INTO the blob. link_mod.py re-checks the gap per region.
-#define SUSAMUNE_DEBUG_STACK_SIZE 0x2000u
-#define SUSAMUNE_ARENA_RESERVE_SIZE \
-    (SUSAMUNE_MOD_REGION_SIZE + SUSAMUNE_DEBUG_STACK_SIZE)
-
 // This is an optional Quick-Freeze practice-code heap flag, not a game-map symbol.
 #define SUSAMUNE_ADDR_QF_TIMER_RESET \
     SUSAMUNE_MEM1_ADDR(0x817f00b3u, 0x817f00b3u, 0x817f00b3u)
