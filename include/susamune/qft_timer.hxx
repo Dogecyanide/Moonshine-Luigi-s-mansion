@@ -32,6 +32,23 @@ class QFTTimer {
   // Susamune warps are new attempts, not an in-level transition.
   void requestReset();
 
+  // Changes only when the timer actually starts a fresh stage attempt.
+  u32 attemptSerial() const;
+
+  // Consume the exact QF captured by the stage-loading transition hook.
+  // Returns once per stage transition.
+  bool consumeTransition(s32 *qf, u16 *target);
+
+  // Consume the final QF captured by the shine-stop hook.
+  // Returns once per stage.
+  bool consumeShine(s32 *qf);
+
+  // Consume the final QF captured by Corona's Bowser-stop hook.
+  bool consumeBowser(s32 *qf);
+
+  // Consume exact custom endpoints used by the Any% Plaza ILs.
+  bool consumeCustom(bool death, s32 *qf);
+
   // Keep the native timer in the same one-slot savestate as the director.
   void onSavestateSaved();
   void onSavestateLoaded();

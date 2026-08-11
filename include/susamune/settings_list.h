@@ -98,7 +98,9 @@
     X(SETTING_ATTEMPT_COUNTER,           "attempt_counter")                  \
     X(SETTING_ATTEMPT_IN_STAGE_CONTROLS, "attempt_in_stage_controls")       \
     /* -- Pattern selector (append-only persisted id) -- */                  \
-    X(SETTING_PATTERN_SELECTOR,          "pattern_selector")
+    X(SETTING_PATTERN_SELECTOR,          "pattern_selector")                \
+    /* -- ILing (append-only persisted id) -- */                             \
+    X(SETTING_ILING_FANFARE,             "iling_fanfare")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

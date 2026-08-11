@@ -8,10 +8,10 @@
 // =====================================================================
 // susamune_cfg.h
 //
-// The handoff block that carries persisted settings between the
-// Nintendont ARM kernel and the mod running on the PPC, and doubles as
-// the doorbell the mod rings to ask the kernel to write susamune.ini
-// back to the SD card. Lives at SUSAMUNE_MEM2_CFG_* (mem2_map.h).
+// The handoff block that carries persisted settings and ILing PBs between
+// the Nintendont ARM kernel and the mod running on the PPC. Independent
+// doorbells ask the kernel to write susamune.ini or the binary PB journal.
+// Lives at SUSAMUNE_MEM2_CFG_* (mem2_map.h).
 //
 // Shared by three toolchains, so this header is plain C with no type
 // dependencies -- it uses the built-in types directly rather than u32/u16,
@@ -19,14 +19,12 @@
 // the PPC are built big-endian, so the struct needs no byte swapping.
 //
 // Flow:
-//   boot  -- kernel parses /susamune.ini, fills magic/version/count/values,
-//            zeroes the sequence fields, flushes.
-//   init  -- mod invalidates, validates magic+version, copies values into
-//            its own BSS SettingsData (see settings.hxx). The MEM2 block is
-//            never read again during gameplay.
-//   save  -- mod copies BSS -> values, flushes, then bumps saveSeq. The
-//            kernel's main loop notices saveSeq != ackSeq, rewrites the ini,
-//            and reports back through status + ackSeq.
+//   boot  -- kernel loads the ini and current region's PB journal, zeroes the
+//            sequence fields, then flushes the block.
+//   init  -- mod invalidates, validates and copies both payloads into private
+//            live caches.
+//   save  -- mod publishes one payload before bumping its saveSeq. The kernel
+//            services that doorbell and answers through its status + ackSeq.
 //
 // CACHE-LINE OWNERSHIP (this is why the padding exists): the PPC flushes
 // whole 32-byte cache lines, so a field the ARM writes must never share a
@@ -148,6 +146,50 @@ struct SusamuneMetadataDisplayCfg {
 #define SUSAMUNE_CFG_FLAG_INPUT_DISPLAY 0x2u
 // Kernel understands metadataDisplay and [metadata_display_<region>].
 #define SUSAMUNE_CFG_FLAG_METADATA_DISPLAY 0x4u
+// Kernel understands the independent ILing PB payload and save doorbell.
+#define SUSAMUNE_CFG_FLAG_ILING_PBS 0x8u
+
+// IL PBs use stable result slots: ordinary rows use retail Shine ids, while
+// independent Secret and Any% rows occupy otherwise-unused ids through 120.
+// Seven spare values keep the payload cache-line-sized and allow append-only
+// additions without moving anything in the handoff block.
+#define SUSAMUNE_ILING_PB_MAGIC          0x53495042u  // 'SIPB'
+#define SUSAMUNE_ILING_PB_FILE_MAGIC     0x53504246u  // 'SPBF'
+#define SUSAMUNE_ILING_PB_VERSION        1u
+#define SUSAMUNE_ILING_PB_SLOT_COUNT     121u
+#define SUSAMUNE_ILING_PB_MAX_SLOTS      128u
+#define SUSAMUNE_ILING_PB_UNSET          (-1)
+#define SUSAMUNE_ILING_PB_MAX_QF         0x000AF9B0
+
+struct SusamuneILingPbCfg {
+    // --- cache line 0: written by the kernel at boot, by the mod on save ---
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short count;
+    unsigned int   saveSeq;
+    unsigned char  pad0[20];
+
+    // --- cache line 1: written ONLY by the kernel ---
+    unsigned int   ackSeq;
+    unsigned int   status;
+    unsigned char  pad1[24];
+
+    // --- cache lines 2+: written by the kernel at boot, by the mod on save ---
+    signed int values[SUSAMUNE_ILING_PB_MAX_SLOTS];
+};
+
+// Fixed binary record written by the ARM kernel. Two generations are kept per
+// region, so an interrupted write cannot destroy the previous valid PB list.
+struct SusamuneILingPbFile {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short count;
+    unsigned int   gameId;
+    unsigned int   generation;
+    unsigned int   checksum;
+    unsigned char  reserved[12];
+    signed int     values[SUSAMUNE_ILING_PB_MAX_SLOTS];
+};
 
 struct SusamuneCfg {
     // --- cache line 0: written by the kernel at boot, by the mod on save ---
@@ -172,6 +214,7 @@ struct SusamuneCfg {
     unsigned short binds[SUSAMUNE_CFG_MAX_BINDS];
     struct SusamuneInputDisplayCfg inputDisplay;
     struct SusamuneMetadataDisplayCfg metadataDisplay;
+    struct SusamuneILingPbCfg ilingPbs;
 };
 
 #define SUSAMUNE_CFG_PPC_PTR  ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PPC_BASE)
@@ -216,6 +259,15 @@ typedef char susamune_input_cfg_size_check[(sizeof(struct SusamuneInputDisplayCf
 typedef char susamune_cfg_input_check[(__builtin_offsetof(struct SusamuneCfg, inputDisplay) == 320) ? 1 : -1];
 typedef char susamune_metadata_cfg_size_check[(sizeof(struct SusamuneMetadataDisplayCfg) == 256) ? 1 : -1];
 typedef char susamune_cfg_metadata_check[(__builtin_offsetof(struct SusamuneCfg, metadataDisplay) == 352) ? 1 : -1];
-typedef char susamune_cfg_size_check[(sizeof(struct SusamuneCfg) <= SUSAMUNE_MEM2_CFG_SIZE) ? 1 : -1];
+typedef char susamune_iling_pb_cfg_ack_check[(__builtin_offsetof(struct SusamuneILingPbCfg, ackSeq) == 32) ? 1 : -1];
+typedef char susamune_iling_pb_cfg_values_check[(__builtin_offsetof(struct SusamuneILingPbCfg, values) == 64) ? 1 : -1];
+typedef char susamune_iling_pb_cfg_size_check[(sizeof(struct SusamuneILingPbCfg) == 576) ? 1 : -1];
+typedef char susamune_iling_pb_file_values_check[(__builtin_offsetof(struct SusamuneILingPbFile, values) == 32) ? 1 : -1];
+typedef char susamune_iling_pb_file_size_check[(sizeof(struct SusamuneILingPbFile) == 544) ? 1 : -1];
+typedef char susamune_cfg_iling_pb_check[(__builtin_offsetof(struct SusamuneCfg, ilingPbs) == 608) ? 1 : -1];
+typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 1184) ? 1 : -1];
+typedef char susamune_cfg_size_check[
+    (sizeof(struct SusamuneCfg) <=
+     SUSAMUNE_MEM2_PB_LIVE_PPC_BASE - SUSAMUNE_MEM2_CFG_PPC_BASE) ? 1 : -1];
 
 #endif  // SUSAMUNE_CFG_H

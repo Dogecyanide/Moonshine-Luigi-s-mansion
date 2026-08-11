@@ -15,6 +15,7 @@
 #include "susamune/binds.hxx"
 #include "susamune/glyphs.hxx"
 #include "susamune/input_display.hxx"
+#include "susamune/iling.hxx"
 #include "susamune/metadata_display.hxx"
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
@@ -193,6 +194,125 @@ void bgmStatsDraw(Menu *menu) {
 }  // namespace
 
 // ---------------------------------------------------------------------
+// IL and travel practice
+// ---------------------------------------------------------------------
+class ILingTab : public MenuTab {
+public:
+    ILingTab() : mSel(0), mConfirmDelete(false) {}
+
+    const char *title() const override { return "ILs"; }
+    bool grabsInput() const override { return mConfirmDelete; }
+
+    void update(Menu *menu, TMarioGamePad *pad) override {
+        if (mConfirmDelete) {
+            const u32 rapid = pad->mButtons.mRapidInput;
+            if (rapid & TMarioGamePad::A) {
+                ILing::clearPB(mSel);
+                mConfirmDelete = false;
+                menu->toast("PB deleted");
+            } else if (rapid & TMarioGamePad::B) {
+                mConfirmDelete = false;
+            }
+            return;
+        }
+
+        const u32 rapid = menu->navigationInput(pad);
+        if (rapid & TMarioGamePad::CSTICK_UP) {
+            mSel = wrap(mSel - 1, ILing::count());
+        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+            mSel = wrap(mSel + 1, ILing::count());
+        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            mSel = ILing::jumpGroup(mSel, -1);
+        } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
+            mSel = ILing::jumpGroup(mSel, 1);
+        }
+        if (rapid & TMarioGamePad::A) {
+            if (ILing::start(mSel)) {
+                menu->hide();
+            } else {
+                menu->toast("Warps disabled");
+            }
+        } else if ((rapid & TMarioGamePad::X) && ILing::pbQf(mSel) >= 0) {
+            mConfirmDelete = true;
+        } else if (rapid & TMarioGamePad::Z) {
+            gSettings.cycle(SETTING_ILING_FANFARE, +1);
+        }
+    }
+
+    void draw(Menu *menu, int x, int y, int w, int h) override {
+        if (mConfirmDelete) {
+            const char *question = "Delete PB?";
+            const char *entry = ILing::label(mSel);
+            const char *hint = SUSAMUNE_GLYPH_A " Yes    " SUSAMUNE_GLYPH_B " No";
+            menu->fillBox(x, y + 34, w, 104, JUtility::TColor(36, 30, 20, 245));
+            menu->fillBox(x, y + 34, w, 3, cAccent());
+            menu->drawText(question,
+                           x + (w - Menu::textWidth(question, ROW_SZ)) / 2,
+                           y + 52, ROW_SZ, ROW_SZ, cRowSel());
+            menu->drawText(entry,
+                           x + (w - Menu::textWidth(entry, ROW_SZ)) / 2,
+                           y + 78, ROW_SZ, ROW_SZ, cValue());
+            menu->drawText(hint,
+                           x + (w - Menu::textWidth(hint, FOOT_SZ)) / 2,
+                           y + 112, FOOT_SZ, FOOT_SZ, cFooter());
+            return;
+        }
+
+        const int entries = ILing::count();
+        const int listH = h - ROW_H;
+        const int maxRows = listH / ROW_H;
+        const int start = listScrollStart(mSel, entries, maxRows);
+        int end = start + maxRows;
+        if (end > entries) {
+            end = entries;
+        }
+
+        int ry = y;
+        for (int i = start; i < end; i++, ry += ROW_H) {
+            const bool selected = i == mSel;
+            if (selected) {
+                drawRowHighlight(menu, x, ry, w, ROW_H);
+                menu->drawText(">", x - 2, ry, ROW_SZ, ROW_SZ, cAccent());
+            }
+            if (ILing::beginsGroup(i)) {
+                menu->fillBox(x + 4, ry - 6, w - 16, 1, cRowDim());
+            }
+            menu->drawText(ILing::label(i), x + 12, ry, ROW_SZ, ROW_SZ,
+                           selected ? cRowSel() : cRow());
+
+            char pb[24];
+            const char *value = "[PB: --]";
+            const s32 qf = ILing::pbQf(i);
+            if (qf >= 0) {
+                const s32 millis = (qf * 1001) / 120;
+                snprintf(pb, sizeof(pb), "[PB: %d:%02d.%03d]",
+                         (int)(millis / 60000),
+                         (int)((millis / 1000) % 60),
+                         (int)(millis % 1000));
+                value = pb;
+            }
+            menu->drawText(value, x + w - Menu::textWidth(value, ROW_SZ) - 8,
+                           ry, ROW_SZ, ROW_SZ, cValue());
+        }
+
+        drawScrollHints(menu, x, y, w, listH, start, end, entries);
+        menu->drawText(SUSAMUNE_GLYPH_A " Start  " SUSAMUNE_GLYPH_X
+                       " Delete  " SUSAMUNE_GLYPH_C " U/D Scroll L/R Group",
+                       x + 4, y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+        const char *fanfare = gSettings.getBool(SETTING_ILING_FANFARE)
+                                   ? SUSAMUNE_GLYPH_Z " Fanfare: On"
+                                   : SUSAMUNE_GLYPH_Z " Fanfare: Off";
+        menu->drawText(fanfare,
+                       x + w - Menu::textWidth(fanfare, FOOT_SZ) - 8,
+                       y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+private:
+    int mSel;
+    bool mConfirmDelete;
+};
+
+// ---------------------------------------------------------------------
 // Warp presets tab
 // ---------------------------------------------------------------------
 #if ENABLE_DEBUG_WARPS
@@ -203,7 +323,7 @@ public:
     const char *title() const override { return "Warps"; }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
-        u32 rapid = pad->mButtons.mRapidInput;
+        u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
             mSel = wrap(mSel - 1, Warp::kNumPresets);
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
@@ -251,7 +371,7 @@ public:
     const char *title() const override { return "Stages"; }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
-        u32 rapid = pad->mButtons.mRapidInput;
+        u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
             mArea = wrap(mArea - 1, WARP_NUM_STAGES);
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
@@ -325,7 +445,7 @@ public:
         if (n == 0) {
             return;
         }
-        u32 rapid = pad->mButtons.mRapidInput;
+        u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
             mSel = wrap(mSel - 1, n);
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
@@ -407,7 +527,7 @@ public:
             return;
         }
 
-        u32 rapid = pad->mButtons.mRapidInput;
+        u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
             mSel = wrap(mSel - 1, InputDisplay::menuRowCount());
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
@@ -463,7 +583,7 @@ public:
             return;
         }
 
-        u32 rapid = pad->mButtons.mRapidInput;
+        u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
             mSel = wrap(mSel - 1, MetadataDisplay::menuRowCount());
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
@@ -529,9 +649,8 @@ public:
     bool grabsInput() const override { return gBinds.recording(); }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
-        u32 rapid = pad->mButtons.mRapidInput;
-
         if (gBinds.recording()) {
+            const u32 rapid = pad->mButtons.mRapidInput;
             // Only the C-stick is safe to react to here: every real button is
             // a candidate for the combo being recorded.
             if (rapid & (TMarioGamePad::CSTICK_LEFT | TMarioGamePad::CSTICK_RIGHT |
@@ -541,6 +660,7 @@ public:
             return;
         }
 
+        const u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
             mSel = wrap(mSel - 1, BIND_COUNT);
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
@@ -627,6 +747,7 @@ u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
 u8 sSavestateBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sUiBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
 u8 sTimerBuf[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
+u8 sILingBuf[sizeof(ILingTab)]                   __attribute__((aligned(8)));
 u8 sInputBuf[sizeof(InputDisplayTab)]           __attribute__((aligned(8)));
 u8 sMetadataBuf[sizeof(MetadataDisplayTab)]     __attribute__((aligned(8)));
 u8 sBindsBuf[sizeof(BindsTab)]                 __attribute__((aligned(8)));
@@ -641,6 +762,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mToastBuf[0] = '\0';
     mToastFrames = 0;
     mSaveWatch   = false;
+    mCRepeatFrames = 0;
 
     // Cache font metrics. J2DTextBox::draw(x, y) places the text *baseline* at
     // y (glyphs render upward from it: top = y - ascent*size/height). drawText
@@ -682,6 +804,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sSavestateBuf) CategorySettingsTab("Savestate", SETTING_CAT_SAVESTATE);
     mTabs[mNumTabs++] = new (sUiBuf) CategorySettingsTab("UI", SETTING_CAT_UI);
     mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab("Timer", SETTING_CAT_TIMER);
+    mTabs[mNumTabs++] = new (sILingBuf) ILingTab();
     mTabs[mNumTabs++] = new (sInputBuf) InputDisplayTab();
     mTabs[mNumTabs++] = new (sMetadataBuf) MetadataDisplayTab();
     mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
@@ -798,6 +921,20 @@ void Menu::strokePoly(const s16 *xy, int n, u8 lineWidth, Color color) {
 
 void Menu::switchTab(int dir) {
     mCurTab = wrap(mCurTab + dir, mNumTabs);
+    mCRepeatFrames = 0;
+}
+
+u32 Menu::navigationInput(TMarioGamePad *pad) {
+    u32 rapid = pad->mButtons.mRapidInput;
+    const u32 vertical = pad->mButtons.mInput &
+        (TMarioGamePad::CSTICK_UP | TMarioGamePad::CSTICK_DOWN);
+    if (!vertical || (rapid & vertical)) {
+        mCRepeatFrames = 0;
+    } else if (++mCRepeatFrames >= 18) {
+        rapid |= vertical;
+        mCRepeatFrames = 14;
+    }
+    return rapid;
 }
 
 // =====================================================================
@@ -838,6 +975,14 @@ void Menu::requestSettingsSave() {
     }
     mSaveWatch = true;
     toast("Saving settings...");
+}
+
+void Menu::hide() {
+    mShown = false;
+    if (gSettings.dirty() || gBinds.dirty() || gInputDisplay.dirty() ||
+        gMetadataDisplay.dirty()) {
+        requestSettingsSave();
+    }
 }
 
 void Menu::pollSettingsSave() {
@@ -944,6 +1089,7 @@ void Menu::update(TMarioGamePad *pad) {
     // A tab recording a button combo owns the pad outright: the close combo and
     // the tab-switch buttons are all bindable, so nothing else may look at them.
     if (mShown && mTabs[mCurTab]->grabsInput()) {
+        mCRepeatFrames = 0;
         mTabs[mCurTab]->update(this, pad);
         return;
     }
@@ -959,6 +1105,7 @@ void Menu::update(TMarioGamePad *pad) {
         return;
     }
     if (!mShown) {
+        mCRepeatFrames = 0;
         return;
     }
 

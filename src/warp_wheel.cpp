@@ -13,6 +13,7 @@
 #include "susamune/addresses.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/glyphs.hxx"
+#include "susamune/iling.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/qft_timer.hxx"
 #include "susamune/settings.hxx"
@@ -34,7 +35,9 @@ namespace {
 
 bool             sArmed;
 bool             sKeepSpawn;
+bool             sOverrideSource;
 LevelWarp::Dest  sDest;
+LevelWarp::Dest  sSource;
 LevelWarp::Dest  sLast;
 bool             sLastValid;
 bool             sTailPending;
@@ -307,6 +310,13 @@ void warpTo(const Dest &dest) {
     sLastValid = true;
     sArmed     = true;
     sKeepSpawn = false;
+    sOverrideSource = false;
+}
+
+void warpFrom(const Dest &source, const Dest &dest) {
+    warpTo(dest);
+    sSource = source;
+    sOverrideSource = true;
 }
 
 void warpToLast() {
@@ -314,6 +324,7 @@ void warpToLast() {
         sDest      = sLast;
         sArmed     = true;
         sKeepSpawn = false;
+        sOverrideSource = false;
     }
 }
 
@@ -324,6 +335,7 @@ void restart(bool keepSpawn) {
     sDest.gameInt3           = currentGameInt3();
     sArmed                   = true;
     sKeepSpawn               = keepSpawn;
+    sOverrideSource          = false;
 }
 
 u8 kick(TMarDirector *director, u8 state) {
@@ -363,13 +375,24 @@ s32 onDirected(s32 appState) {
     if (sTailPending) {
         sTailPending = false;
         applyDest(sDest);
+        if (sOverrideSource) {
+            gpApplication.mCurrentScene.mAreaID    = sSource.area;
+            gpApplication.mCurrentScene.mEpisodeID = sSource.episode;
+            gpApplication.mCurrentScene.mFlag      = 0;
+            sOverrideSource = false;
+        }
+        ILing::onWarpTail();
         return TApplication::CONTEXT_DIRECT_STAGE;
     }
 
     // Original Level Select: while an ordinary file/stage departure finishes,
     // a held chart combination redirects the next scene. Instant Level Select
     // uses the same resolver earlier in WarpWheel::update().
-    if (appState > 1 && gpApplication.mGamePads[0]) {
+    const TGameSequence &next = gpApplication.mNextScene;
+    const bool selectorExit =
+        (next.mAreaID == TGameSequence::AREA_DOLPIC && next.mEpisodeID <= 9) ||
+        (next.mAreaID == TGameSequence::AREA_AIRPORT && next.mEpisodeID == 0);
+    if (appState > 1 && selectorExit && gpApplication.mGamePads[0]) {
         Dest selected;
         ClassicCommand command =
             resolveClassicSelector(gpApplication.mGamePads[0], false, &selected);

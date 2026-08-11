@@ -15,7 +15,8 @@ MEM2
 0x91900000-0x91EE0000=patch.bin / patch.txt loader-to-kernel handoff
 0x91EE0000-0x91F00000=Susamune mod_<region>.bin staging (same handoff lifetime; dead once PatchSusamune has copied it to MEM1)
 0x91F00000-0x92EF0000=Susamune savestate snapshot (dedicated)
-0x92EF0000-0x92F00000=Susamune settings block (susamune.ini handoff + save doorbell)
+0x92EF0000-0x92EFFE00=Susamune settings block (susamune.ini handoff + save doorbell)
+0x92EFFE00-0x92F00000=Susamune PPC-only live PB mirror
 
 0x92F00000-0x93000000=Nintendont kernel
 

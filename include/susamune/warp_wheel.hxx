@@ -33,6 +33,9 @@ struct Dest {
 
 // Arm a warp. warpTo() also records the destination for warpToLast().
 void warpTo(const Dest &dest);
+// Warp to `dest`, but make the next director see `source` as the stage Mario
+// just left. Used by travel practice to select the retail Plaza return point.
+void warpFrom(const Dest &source, const Dest &dest);
 void warpToLast();
 // Reload the current area, by the same path a wheel warp takes. keepSpawn
 // brings Mario back out of the entrance he arrived through instead of the

@@ -17,6 +17,7 @@
 #include "susamune/features.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/susamune_cfg.h"
 
 namespace {
 
@@ -36,6 +37,7 @@ namespace {
     STOP_NONE,
     STOP_SHINE,
     STOP_BOWSER,
+    STOP_CUSTOM,
   };
 
   struct TimerState {
@@ -53,18 +55,31 @@ namespace {
 
   volatile TimerState *const sState =
     reinterpret_cast<volatile TimerState *>(SUSAMUNE_ADDR_QFT_STATE);
+  volatile s32 *const sDeathQf =
+    reinterpret_cast<volatile s32 *>(SUSAMUNE_ADDR_QFT_DEATH_QF);
+  volatile s32 *const sPlantQf =
+    reinterpret_cast<volatile s32 *>(SUSAMUNE_ADDR_QFT_PLANT_QF);
+  volatile s32 *const sTransitionQf =
+    reinterpret_cast<volatile s32 *>(SUSAMUNE_ADDR_QFT_TRANSITION_QF);
+  volatile u16 *const sTransitionTarget =
+    reinterpret_cast<volatile u16 *>(SUSAMUNE_ADDR_QFT_TRANSITION_TARGET);
 
-  const s32 kMaxQf          = 0x000AF9B0;
+  const s32 kMaxQf          = SUSAMUNE_ILING_PB_MAX_QF;
   const int kFreezeFrames[] = {0, 15, 30, 60, 90, 150};
 
   bool sStageReady;
   bool sStagePending;
   bool sResetRequested;
+  bool sFinalConsumed;
   bool sBigShown;
-  u8 sLastBigMode;
+  bool sRetailTimerOwned;
+  u32 sAttemptSerial;
   TMarDirector *sStageDirector;
   TimerState sSavedState;
   bool sHaveSavedState;
+  bool sSavedFinalConsumed;
+  bool sSavedRetailTimerOwned;
+  u32 sSavedAttemptSerial;
 
 // PowerPC address materialisation for fixed scratch. D-form offsets are
 // signed, so use @ha/@l rather than a plain high half.
@@ -73,6 +88,9 @@ namespace {
 #define QFT_HA       PPC_HA(SUSAMUNE_ADDR_QFT_STATE)
 #define QFT_OFF(field)                                                                             \
   ((PPC_LO(SUSAMUNE_ADDR_QFT_STATE) + __builtin_offsetof(TimerState, field)) & 0xFFFFu)
+
+  const u32 kLoadDirectorR12 =
+    SUSAMUNE_MEM1_ADDR(0x818D97E8u, 0x818D9FB8u, 0x818D9EE0u);
 
   // Core QFT lifecycle hooks. These are the non-rendering portions of QFT 1.5,
   // rebased from 0x817F00B2 to the mod's reserved scratch.
@@ -143,8 +161,33 @@ namespace {
     0x3CA00000u | QFT_HA, 0x98050000u | QFT_OFF(restart),
     0x801E005Cu,          0x30000004u,
     0x5400003Au,          0x90050000u | QFT_OFF(freezeQf),
+    0x90050000u | PPC_LO(SUSAMUNE_ADDR_QFT_TRANSITION_QF),
     0x3800FFFFu,          0x90050000u | QFT_OFF(freezeFrames),
+    0xB3850000u | PPC_LO(SUSAMUNE_ADDR_QFT_TRANSITION_TARGET),
     0x60000000u,          0x00000000u,
+  };
+
+  u32 sCaveDeath[] = {
+    kLoadDirectorR12,
+    0x800C005Cu,  // lwz r0,0x5c(r12)
+    0x3D800000u | PPC_HA(SUSAMUNE_ADDR_QFT_DEATH_QF),
+    0x900C0000u | PPC_LO(SUSAMUNE_ADDR_QFT_DEATH_QF),
+    0x38000000u,  // r0 is live: the next retail instruction stores health
+    0x907F0118u,  // displaced stw r3,0x118(r31)
+    0x00000000u,
+  };
+
+  u32 sCavePlant[] = {
+    0x80040020u,  // lwz r0,0x20(r4): nerve timer
+    0x2C000000u,
+    0x40820018u,  // only the first Die tick represents the final hit
+    kLoadDirectorR12,
+    0x816C005Cu,
+    0x396BFFFFu,  // Die begins one QF after health reaches zero
+    0x3D800000u | PPC_HA(SUSAMUNE_ADDR_QFT_PLANT_QF),
+    0x916C0000u | PPC_LO(SUSAMUNE_ADDR_QFT_PLANT_QF),
+    0x7C0802A6u,  // displaced mflr r0
+    0x00000000u,
   };
 
   struct CoreHook {
@@ -163,6 +206,8 @@ namespace {
     CORE(0x800EBD78u, 0x8029880Cu, 0x802906A4u, sCaveRestartFromInit),
     CORE(0x800EC72Cu, 0x802991A8u, 0x80291040u, sCaveFreezeTransitionA),
     CORE(0x800ED8F0u, 0x8029A36Cu, 0x80292204u, sCaveFreezeTransitionB),
+    CORE(0x801222D8u, 0x80243148u, 0x8023AED4u, sCaveDeath),
+    CORE(0x8030AD28u, 0x800F9198u, 0x800F2838u, sCavePlant),
   };
 
   const u32 kLegacyRenderSite     = SUSAMUNE_MEM1_ADDR(0x802069E0u, 0x801441C0u, 0x80138DFCu);
@@ -443,6 +488,13 @@ namespace {
     return liveQf();
   }
 
+  s32 sunshineQf() {
+    // Loading zones hold the visible split while the real clock carries on.
+    if (!sState->stopped && sState->freezeFrames == -1)
+      return clampQf(sState->offsetQf + sState->freezeQf);
+    return liveQf();
+  }
+
   s32 qfToMillis(s32 qf) { return (qf * 1001) / 120; }
 
   s32 qfToRoundedCentis(s32 qf) {
@@ -473,13 +525,20 @@ namespace {
       return;
     }
 
+    TGCConsole2 *console = gpMarDirector->mGCConsole;
+    if (console->mIsTimerMoving) {
+      sRetailTimerOwned = true;
+      sBigShown = false;
+    }
+    if (sRetailTimerOwned)
+      return;
+
     u8 mode   = gSettings.get(SETTING_TIMER_SUNSHINE_VISIBILITY);
     bool want = mode == SUNSHINE_ALWAYS || (mode == SUNSHINE_SHINE_ONLY && finalStop());
 
     if (!want) {
-      if (sBigShown || mode != sLastBigMode)
+      if (sBigShown)
         hideBigTimer();
-      sLastBigMode = mode;
       return;
     }
 
@@ -487,8 +546,7 @@ namespace {
       gpMarDirector->mGCConsole->startAppearTimer(0, 0);
       sBigShown = true;
     }
-    gpMarDirector->mGCConsole->setTimer(qfToRoundedCentis(liveQf()));
-    sLastBigMode = mode;
+    gpMarDirector->mGCConsole->setTimer(qfToRoundedCentis(sunshineQf()));
   }
 
 }  // namespace
@@ -503,12 +561,17 @@ void QFTTimer::init() {
   sState->offsetQf     = -4;
   sState->freezeQf     = 0;
   sState->freezeFrames = 0;
+  *sDeathQf            = -1;
+  *sPlantQf            = -1;
+  *sTransitionTarget   = 0xFFFF;
 
   sStageReady     = false;
   sStagePending   = false;
   sResetRequested = true;
+  sFinalConsumed = false;
   sBigShown       = false;
-  sLastBigMode    = 0xFF;
+  sRetailTimerOwned = false;
+  sAttemptSerial  = 0;
   sStageDirector  = nullptr;
   sHaveSavedState = false;
 
@@ -545,6 +608,7 @@ void QFTTimer::beginFrame() {
       sState->restart    = 0;
       sState->stopReason = STOP_NONE;
       sState->offsetQf   = -4;
+      sAttemptSerial++;
     }
     sResetRequested = false;
   }
@@ -567,10 +631,14 @@ void QFTTimer::onStageSetup(TMarDirector *director) {
   }
 
   sState->freezeFrames = 0;
+  *sDeathQf            = -1;
+  *sPlantQf            = -1;
+  *sTransitionTarget   = 0xFFFF;
+  sFinalConsumed = false;
   sStageReady    = false;
   sStagePending  = true;
   sBigShown      = false;
-  sLastBigMode   = 0xFF;
+  sRetailTimerOwned = false;
   sStageDirector = director;
 }
 
@@ -587,7 +655,10 @@ void QFTTimer::draw(Menu *menu) const {
 
   bool show = mode == COMPACT_ALWAYS;
   if (mode == COMPACT_ON_FREEZE) {
-    if (sState->stopped) {
+    if (sRetailTimerOwned) {
+      // The retail timer owns the large panel; keep the full IL clock visible.
+      show = true;
+    } else if (sState->stopped) {
       // The Sunshine result owns Shine/Bowser finishes unless the user
       // hid it; avoid showing the same final time twice.
       show = gSettings.get(SETTING_TIMER_SUNSHINE_VISIBILITY) == SUNSHINE_HIDDEN;
@@ -616,8 +687,62 @@ void QFTTimer::draw(Menu *menu) const {
 
 void QFTTimer::requestReset() {
   sResetRequested      = true;
+  sFinalConsumed       = false;
   sState->restart      = 1;
   sState->freezeFrames = 0;
+  *sDeathQf            = -1;
+  *sPlantQf            = -1;
+  *sTransitionTarget   = 0xFFFF;
+}
+
+u32 QFTTimer::attemptSerial() const { return sAttemptSerial; }
+
+bool QFTTimer::consumeTransition(s32 *qf, u16 *target) {
+  if (!qf || !target || *sTransitionTarget == 0xFFFF) {
+    return false;
+  }
+  const s32 result = clampQf(sState->offsetQf + *sTransitionQf);
+  *target = *sTransitionTarget;
+  *sTransitionTarget = 0xFFFF;
+  sState->offsetQf = result;
+  sState->stopped = 1;
+  sState->stopReason = STOP_CUSTOM;
+  sFinalConsumed = true;
+  *qf = result;
+  return true;
+}
+
+static bool consumeStop(s32 *qf, u8 reason) {
+  if (!qf || !sStageReady || gpMarDirector != sStageDirector ||
+      sFinalConsumed || !sState->stopped || sState->stopReason != reason) {
+    return false;
+  }
+  sFinalConsumed = true;
+  *qf = clampQf(sState->offsetQf);
+  return true;
+}
+
+bool QFTTimer::consumeShine(s32 *qf) { return consumeStop(qf, STOP_SHINE); }
+
+bool QFTTimer::consumeBowser(s32 *qf) { return consumeStop(qf, STOP_BOWSER); }
+
+static bool consumeCustomEvent(volatile s32 *eventQf, s32 *qf) {
+  if (!qf || !sStageReady || gpMarDirector != sStageDirector ||
+      sFinalConsumed || *eventQf < 0) {
+    return false;
+  }
+  const s32 result = clampQf((sState->offsetQf + *eventQf + 4) & ~3);
+  *eventQf          = -1;
+  sState->offsetQf  = result;
+  sState->stopped   = 1;
+  sState->stopReason = STOP_CUSTOM;
+  sFinalConsumed    = true;
+  *qf               = result;
+  return true;
+}
+
+bool QFTTimer::consumeCustom(bool death, s32 *qf) {
+  return consumeCustomEvent(death ? sDeathQf : sPlantQf, qf);
 }
 
 void QFTTimer::onSavestateSaved() {
@@ -628,6 +753,9 @@ void QFTTimer::onSavestateSaved() {
   sSavedState.offsetQf     = sState->offsetQf;
   sSavedState.freezeQf     = sState->freezeQf;
   sSavedState.freezeFrames = sState->freezeFrames;
+  sSavedFinalConsumed      = sFinalConsumed;
+  sSavedRetailTimerOwned    = sRetailTimerOwned;
+  sSavedAttemptSerial      = sAttemptSerial;
   sHaveSavedState          = true;
 }
 
@@ -641,6 +769,14 @@ void QFTTimer::onSavestateLoaded() {
   sState->offsetQf     = sSavedState.offsetQf;
   sState->freezeQf     = sSavedState.freezeQf;
   sState->freezeFrames = sSavedState.freezeFrames;
+  sFinalConsumed       = sSavedFinalConsumed;
+  sRetailTimerOwned     = sSavedRetailTimerOwned;
+  sAttemptSerial       = sSavedAttemptSerial;
+  // Hook scratch is outside the snapshot. Drop events from the abandoned
+  // future so a pre-finish state waits for the endpoint again.
+  *sDeathQf            = -1;
+  *sPlantQf            = -1;
+  *sTransitionTarget   = 0xFFFF;
 }
 
 #undef QFT_OFF

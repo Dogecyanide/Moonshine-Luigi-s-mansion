@@ -37,8 +37,8 @@ enum SettingId {
 };
 #undef SUSAMUNE_SETTING_ENUM
 
-// Which menu tab a setting appears under. The menu builds one generic tab per
-// category and renders the settings tagged with it.
+// Which menu tab a setting appears under. CUSTOM is rendered by its owning
+// feature tab; the others use generic category tabs.
 enum SettingCategory {
     SETTING_CAT_QOL,
     SETTING_CAT_SAVESTATE,
@@ -46,6 +46,7 @@ enum SettingCategory {
     SETTING_CAT_COSMETIC,
     SETTING_CAT_UI,
     SETTING_CAT_TIMER,
+    SETTING_CAT_CUSTOM,
     SETTING_CAT_COUNT
 };
 

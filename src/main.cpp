@@ -15,6 +15,7 @@
 #include "susamune/actions.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
+#include "susamune/iling.hxx"
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
 #include "susamune/pattern_selector.hxx"
@@ -55,6 +56,7 @@ extern "C" void onAppInit(TApplication* app) {
     gSettings.init();
     gQFTTimer.init();
     gAttemptCounter.init();
+    ILing::init();
 
 #if !IS_EMULATOR
     // The launcher owns this option because Sunshine cannot persist its own
@@ -111,7 +113,9 @@ extern "C" void onSetup(TMarDirector* director) {
     // destructor never clears that global. Stages without a pollution manager
     // would otherwise inherit a pointer into the previous stage's freed heap.
     gpPollution = nullptr;
+    ILing::beforeStageSetup();
     director->setupObjects();
+    ILing::onStageSetup();
 
     // Runs on every stage load, so this must stay above the once-only guard.
     featuresOnStageLoad();
@@ -169,6 +173,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
         state = LevelWarp::onDirected(state);
 
     gQFTTimer.update();
+    ILing::update();
     gAttemptCounter.update();
 
     // Apply/restore the toggled memory-patch features (ported gecko codes).
@@ -207,6 +212,7 @@ extern "C" void afterDraw() {
         
         if (gMenu)
             gMenu->draw(&ortho);
+        ILing::draw(gMenu);
         if (!gMenu || !gMenu->shown())
             PatternSelector::draw(gMenu);
         if (!gSettings.getBool(SETTING_DISABLE_WARPS))

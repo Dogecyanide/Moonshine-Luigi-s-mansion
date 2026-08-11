@@ -59,6 +59,7 @@
 #include "susamune/binds.hxx"
 #include "susamune/mem2_map.h"
 #include "susamune/qft_timer.hxx"
+#include "susamune/iling.hxx"
 #include "susamune/settings.hxx"
 #if ENABLE_SAVESTATE_DBG
 #endif
@@ -515,6 +516,7 @@ bool SavestateManager::saveState() {
     OSRestoreInterrupts(ints);
 
     gQFTTimer.onSavestateSaved();
+    ILing::onSavestateSaved();
     SET_STATUS("saved");
     return true;
 }
@@ -643,6 +645,7 @@ bool SavestateManager::loadState() {
     OSRestoreInterrupts(ints);
 
     gQFTTimer.onSavestateLoaded();
+    ILing::onSavestateLoaded();
     SET_STATUS("loaded");
     return true;
 }
