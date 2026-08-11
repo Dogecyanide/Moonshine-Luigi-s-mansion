@@ -3,28 +3,49 @@
 //
 // The bind table and the recorder behind it. See binds.hxx for the design;
 // actions.cpp reads binds through gBinds and menu.cpp's Binds tab renders
-// and records them generically off kBindDescs.
+// and records them generically off the packed description pools.
 // =====================================================================
 
 #include "susamune/binds.hxx"
 
 #include "JSystem/JUtility/JUTGamePad.hxx"
 #include "susamune/glyphs.hxx"
+#include "susamune/packed_text.hxx"
 #include "Dolphin/string.h"
 
 namespace {
 
-// Button bit -> menu glyph, in the order a combo is rendered. The ini token in
-// SUSAMUNE_BIND_BUTTON_LIST is dropped: only the launcher reads susamune.ini.
-struct BindButton {
-    u16         bit;
-    const char *display;
-};
-#define SUSAMUNE_BIND_BUTTON_ROW(bit, token, display) { (u16)(bit), display },
-const BindButton kButtons[] = { SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_BIND_BUTTON_ROW) };
-#undef SUSAMUNE_BIND_BUTTON_ROW
+// kButtonShifts reconstructs each mask with `1u << shift`; reject any future
+// row that is not exactly one representable u16 bit.
+#define SUSAMUNE_ASSERT_BIND_BUTTON(bit, token, display)                  \
+    static_assert((bit) != 0 && (((bit) & ((bit) - 1)) == 0) &&          \
+                      (unsigned)(bit) <= 0x8000u,                         \
+                  "bind button must be one nonzero u16 bit");
+SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_ASSERT_BIND_BUTTON)
+#undef SUSAMUNE_ASSERT_BIND_BUTTON
 
-const int kNumButtons = (int)(sizeof(kButtons) / sizeof(kButtons[0]));
+#define SUSAMUNE_BIND_BUTTON_OR(bit, token, display) | (unsigned)(bit)
+constexpr unsigned kListedButtonMask =
+    0 SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_BIND_BUTTON_OR);
+#undef SUSAMUNE_BIND_BUTTON_OR
+static_assert(kListedButtonMask == SUSAMUNE_BIND_BUTTON_MASK,
+              "bind button mask and button list differ");
+
+// The ini tokens are launcher-only. Store glyphs densely and reconstruct the
+// one-hot button bits from their positions.
+#define SUSAMUNE_BIND_BUTTON_DISPLAY(bit, token, display) display "\0"
+const char kButtonDisplays[] =
+    SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_BIND_BUTTON_DISPLAY);
+#undef SUSAMUNE_BIND_BUTTON_DISPLAY
+
+#define SUSAMUNE_BIND_BUTTON_SHIFT(bit, token, display)                     \
+    (u8)__builtin_ctz((unsigned)(bit)),
+const u8 kButtonShifts[] = {
+    SUSAMUNE_BIND_BUTTON_LIST(SUSAMUNE_BIND_BUTTON_SHIFT)
+};
+#undef SUSAMUNE_BIND_BUTTON_SHIFT
+
+const int kNumButtons = (int)(sizeof(kButtonShifts) / sizeof(kButtonShifts[0]));
 
 const char kDisplaySeparator[] = SUSAMUNE_GLYPH_AMP;
 
@@ -42,34 +63,25 @@ const u16 kDDown = JUTGamePad::DPAD_DOWN;
 const u16 kDLeft = JUTGamePad::DPAD_LEFT;
 const u16 kDRght = JUTGamePad::DPAD_RIGHT;
 
-// Descriptor table, indexed by BindId. Defaults are the button combinations
-// the original gecko codes hardcode (doc/gecko_codes.md).
-const BindDesc kBindDescs[BIND_COUNT] = {
-    { "Regrab last held object", (u16)(kX | kDUp) },
-    { "Spawn Yoshi: green", (u16)(kY | kDUp) },
-    { "Spawn Yoshi: orange", (u16)(kY | kDLeft) },
-    { "Spawn Yoshi: purple", (u16)(kY | kDRght) },
-    { "Spawn Yoshi: pink", (u16)(kY | kDDown) },
-    { "Fast forward 4x", (u16)(kB | kDLeft) },
-    { "Fast forward 8x", (u16)(kB | kDRght) },
-    { "Open " SUSAMUNE_GLYPH_AMP " close menu", (u16)(kY | kStart) },
-    { "Savestate: save", kDLeft },
-    { "Savestate: load", kDRght },
-    { "Open warp wheel", kZ },
-    { "Full restart", (u16)(kZ | kB | kDUp) },
-    { "Warp to last selected", (u16)(kY | kB | kDUp) },
-    { "Instant restart", (u16)(kB | kDUp) },
-    // Unbound by default: the existing speedrun/practice combos deliberately
-    // occupy most convenient combinations, and silently colliding is worse
-    // than asking the user to choose one.
-    { "Toggle input display", 0 },
-    { "Show attempt counter", kDLeft },
-    { "Add attempt", kDRght },
-    { "Attempt -1", (u16)(kR | kX | kDLeft) },
-    { "Attempt +1", (u16)(kR | kX | kDRght) },
-    { "Success -1", (u16)(kR | kX | kDDown) },
-    { "Success +1", (u16)(kR | kX | kDUp) },
+// Names and defaults share one canonical row list without paying for a pointer
+// beside every string.
+#define BIND_DESC(name, defaultMask) name "\0"
+const char kBindNames[] =
+#include "binds_descs.inc"
+;
+#undef BIND_DESC
+
+#define BIND_DESC(name, defaultMask) (u16)(defaultMask),
+const u16 kDefaultMasks[] = {
+#include "binds_descs.inc"
 };
+#undef BIND_DESC
+
+#define BIND_DESC(name, defaultMask) +1
+const int kBindDescCount = 0
+#include "binds_descs.inc"
+;
+#undef BIND_DESC
 
 int popCount(u16 v) {
     int n = 0;
@@ -85,7 +97,7 @@ Binds gBinds;
 
 void Binds::resetDefaults() {
     for (int i = 0; i < BIND_COUNT; i++) {
-        mMask[i] = kBindDescs[i].defaultMask;
+        mMask[i] = kDefaultMasks[i];
     }
     mHeld       = 0;
     mPrevHeld   = 0;
@@ -192,7 +204,7 @@ void Binds::cancelRecord() {
 
 void Binds::commitRecord() {
     if (mRecAccum != 0) {
-        set(mRecTarget, mRecAccum);
+        set((BindId)mRecTarget, mRecAccum);
     }
     mRecState = REC_OFF;
     mRecAccum = 0;
@@ -202,14 +214,17 @@ void Binds::format(u16 mask, char *out) {
     out[0] = '\0';
     mask &= SUSAMUNE_BIND_BUTTON_MASK;
 
+    const char *display = kButtonDisplays;
     for (int i = 0; i < kNumButtons; i++) {
-        if (!(mask & kButtons[i].bit)) {
-            continue;
+        const char *next = display;
+        while (*next++) {}
+        if (mask & (u16)(1u << kButtonShifts[i])) {
+            if (out[0]) {
+                strcat(out, kDisplaySeparator);
+            }
+            strcat(out, display);
         }
-        if (out[0]) {
-            strcat(out, kDisplaySeparator);
-        }
-        strcat(out, kButtons[i].display);
+        display = next;
     }
 
     if (!out[0]) {
@@ -217,9 +232,11 @@ void Binds::format(u16 mask, char *out) {
     }
 }
 
-const BindDesc &Binds::desc(BindId id) { return kBindDescs[id]; }
+const char *Binds::name(BindId id) {
+    return PackedText::at(kBindNames, (int)id);
+}
 
-// kBindDescs is indexed by BindId and must stay row-for-row aligned with
-// SUSAMUNE_BIND_LIST, exactly as kSettingDescs is with SUSAMUNE_SETTING_LIST.
-static_assert(sizeof(kBindDescs) / sizeof(kBindDescs[0]) == BIND_COUNT,
-              "kBindDescs must have one row per SUSAMUNE_BIND_LIST entry");
+static_assert(sizeof(kDefaultMasks) / sizeof(kDefaultMasks[0]) == BIND_COUNT,
+              "bind defaults must match SUSAMUNE_BIND_LIST");
+static_assert(kBindDescCount == BIND_COUNT,
+              "bind descriptions must match SUSAMUNE_BIND_LIST");

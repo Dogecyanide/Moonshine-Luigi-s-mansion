@@ -45,8 +45,8 @@ patches = [
 ]
 
 # The mod is linked into a region carved from the BOTTOM of the game's heap
-# arena, at __ArenaLo. getArenaLo() (hooked onto OSGetArenaLo above) makes the
-# root heap start at __OSArenaLo + mod_region_size, leaving [__ArenaLo,
+# arena, at __ArenaLo. getArenaLo() (hooked onto OSGetArenaLo above) adds
+# arena_reserve to the runtime __OSArenaLo, leaving [__ArenaLo,
 # __ArenaLo + mod_region_size) free for the mod's code + data. The top of the
 # arena is deliberately left alone: the apploader stores the FST there. The
 # game's stack is untouched.

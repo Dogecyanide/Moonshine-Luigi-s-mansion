@@ -15,6 +15,7 @@
 #include "susamune/glyphs.hxx"
 #include "susamune/iling.hxx"
 #include "susamune/menu.hxx"
+#include "susamune/packed_text.hxx"
 #include "susamune/qft_timer.hxx"
 #include "susamune/settings.hxx"
 
@@ -25,7 +26,36 @@ typedef JUtility::TColor Color;
 const u8 kAreaHotel  = 7;
 const u8 kAreaCasino = 14;
 
+constexpr u8 kParentAreas[] = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 6,  // 0x00
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 5, 6, 0xFF,  // 0x08
+    9, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  // 0x10
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 3, 9,  // 0x18
+    4, 4, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  // 0x20
+    6, 5, 8, 0xFF, 9, 0xFF, 2, 2,  // 0x28
+    3, 0xFF, 5, 6, 0xFF, 0xFF, 0xFF, 2,  // 0x30
+    6, 9, 5, 3,  // 0x38
+};
+
+static_assert(sizeof(kParentAreas) == 0x3C, "parent-area table size changed");
+static_assert(kParentAreas[0x37] == 2 && kParentAreas[0x2F] == 2 &&
+                  kParentAreas[0x2E] == 2 && kParentAreas[0x3B] == 3 &&
+                  kParentAreas[0x1E] == 3 && kParentAreas[0x30] == 3 &&
+                  kParentAreas[0x20] == 4 && kParentAreas[0x21] == 4 &&
+                  kParentAreas[0x3A] == 5 && kParentAreas[0x32] == 5 &&
+                  kParentAreas[0x29] == 5 && kParentAreas[0x0D] == 5 &&
+                  kParentAreas[0x33] == 6 && kParentAreas[0x28] == 6 &&
+                  kParentAreas[0x38] == 6 && kParentAreas[0x07] == 6 &&
+                  kParentAreas[0x0E] == 6 && kParentAreas[0x2A] == 8 &&
+                  kParentAreas[0x2C] == 9 && kParentAreas[0x39] == 9 &&
+                  kParentAreas[0x1F] == 9 && kParentAreas[0x10] == 9,
+              "parent-area mapping changed");
+
 }  // namespace
+
+u8 LevelWarp::parentArea(u8 area) {
+    return area < sizeof(kParentAreas) ? kParentAreas[area] : 0xFF;
+}
 
 // =====================================================================
 // Warp mechanism
@@ -233,18 +263,12 @@ LevelWarp::Dest currentDest(bool parent) {
 
     // Y in the transition selector returns sublevels to their parent beach;
     // Z keeps the exact area. Main stages and standalone specials stay put.
-    switch (cur.mAreaID) {
-    case 0x37: case 0x2f: case 0x2e: dest.area = 2; break;
-    case 0x3b: case 0x1e: case 0x30: dest.area = 3; break;
-    case 0x20: case 0x21:            dest.area = 4; break;
-    case 0x3a: case 0x32: case 0x29: dest.area = 5; break;
-    case 0x33: case 0x28: case 0x38:
-    case 0x07: case 0x0e:            dest.area = 6; break;
-    case 0x2a:                       dest.area = 8; break;
-    case 0x2c: case 0x39: case 0x1f:
-    case 0x10:                       dest.area = 9; break;
-    default: return dest;
-    }
+    // Pinna Park is a main area here, while IL route matching also treats it
+    // as the parent of its embedded scenario scenes.
+    if (cur.mAreaID == 0x0D) return dest;
+    const u8 parentArea = LevelWarp::parentArea(cur.mAreaID);
+    if (parentArea == 0xFF) return dest;
+    dest.area = parentArea;
     dest.episode = dest.gameInt3;
     return dest;
 }
@@ -435,99 +459,170 @@ namespace {
 const int kNumSlots = 9;
 
 // One region of a wheel. `slot` is where it sits: slices run clockwise from
-// the up notch and 8 is the centre. Wheels are sparse, so only the positions
-// that exist are listed -- `slot` rides in the padding the label pointer's
-// alignment leaves behind and costs nothing.
+// the up notch and 8 is the centre. Labels live in the same order in the NUL
+// pool below, keeping each sparse destination to four bytes.
 struct Slot {
-    const char *label;
-    u8          slot;
-    u8          area;
-    u8          episode;
-    u8          gameInt3;
+    u8 slot;
+    u8 area;
+    u8 episode;
+    u8 gameInt3;
 };
+
+template <unsigned N>
+constexpr int stringCount(const char (&pool)[N]) {
+    int count = 0;
+    for (unsigned i = 0; i < N; i++) {
+        if (pool[i] == '\0') count++;
+    }
+    return count;
+}
+
+constexpr char kSlotLabels[] =
+    "Windmill\0"
+    "Bianco 3\0"
+    "Bianco 6\0"
+    "Blooper\0"
+    "Blooper Race\0"
+    "Ricco 4\0"
+    "Gelato 1\0"
+    "Sand Bird\0"
+    "Mecha-Bowser\0"
+    "Pinna 2\0"
+    "Pinna 6\0"
+    "Balloons\0"
+    "Sirena 2\0"
+    "Sirena 4\0"
+    "King Boo\0"
+    "Pianta 5\0"
+    "Bottle\0"
+    "Eel\0"
+    "Noki 6\0"
+    "Red Fish\0"
+    "Ep2 Hotel\0"
+    "Ep3 Hotel\0"
+    "Ep4 Hotel\0"
+    "Ep4 Casino\0"
+    "Ep5 Hotel\0"
+    "Ep5 Casino\0"
+    "Ep7 Hotel\0"
+    "Ep8 Reds\0"
+    "Bianco Plant\0"
+    "Bianco Chase\0"
+    "R" SUSAMUNE_GLYPH_AMP "G Plants\0"
+    "Peaceful\0"
+    "Pinna Cut\0"
+    "Yoshi\0"
+    "Flooded\0"
+    "Beach Pipe\0"
+    "Pachinko\0"
+    "Grass Pipe\0"
+    "Lilypad\0"
+    "Jail\0"
+    "Airstrip\0"
+    "Air Reds\0"
+    "Bowser\0"
+    "Corona";
 
 // Every stored wheel's regions end to end, grouped in kWheels order.
-const Slot kSlots[] = {
+constexpr Slot kSlots[] = {
     // Bianco subareas
-    { "Windmill", 1, 0x37, 0, 1 },
-    { "Bianco 3", 2, 0x2F, 0, 2 },
-    { "Bianco 6", 5, 0x2E, 0, 5 },
+    { 1, 0x37, 0, 1 },
+    { 2, 0x2F, 0, 2 },
+    { 5, 0x2E, 0, 5 },
     // Ricco subareas. Both Gooper Blooper fights are the one scene ricco8
     // behind area 0x3B, which has a single scenario, so there is only one.
-    { "Blooper", 0, 0x3B, 0, 0 },
-    { "Blooper Race", 1, 0x1E, 0, 1 },
-    { "Ricco 4", 3, 0x30, 0, 3 },
+    { 0, 0x3B, 0, 0 },
+    { 1, 0x1E, 0, 1 },
+    { 3, 0x30, 0, 3 },
     // Gelato subareas
-    { "Gelato 1", 0, 0x20, 0, 0 },
-    { "Sand Bird", 3, 0x21, 0, 3 },
+    { 0, 0x20, 0, 0 },
+    { 3, 0x21, 0, 3 },
     // Pinna subareas
-    { "Mecha-Bowser", 0, 0x3A, 1, 0 },
-    { "Pinna 2", 1, 0x32, 0, 1 },
-    { "Pinna 6", 5, 0x29, 0, 5 },
-    { "Balloons", 7, 0x3A, 0, 7 },
+    { 0, 0x3A, 1, 0 },
+    { 1, 0x32, 0, 1 },
+    { 5, 0x29, 0, 5 },
+    { 7, 0x3A, 0, 7 },
     // Sirena subareas
-    { "Sirena 2", 1, 0x33, 0, 1 },
-    { "Sirena 4", 3, 0x28, 0, 3 },
-    { "King Boo", 4, 0x38, 0, 4 },
+    { 1, 0x33, 0, 1 },
+    { 3, 0x28, 0, 3 },
+    { 4, 0x38, 0, 4 },
     // Pianta subareas
-    { "Pianta 5", 4, 0x2A, 0, 4 },
+    { 4, 0x2A, 0, 4 },
     // Noki subareas
-    { "Bottle", 2, 0x2C, 0, 2 },
-    { "Eel", 3, 0x39, 0, 3 },
-    { "Noki 6", 5, 0x1F, 0, 5 },
-    { "Red Fish", 7, 0x10, 0, 7 },
+    { 2, 0x2C, 0, 2 },
+    { 3, 0x39, 0, 3 },
+    { 5, 0x1F, 0, 5 },
+    { 7, 0x10, 0, 7 },
     // Sirena hotel. The hotel and the casino each hide several scenarios
     // behind one area id; gameInt3 is what separates them.
-    { "Ep2 Hotel", 0, 7, 0, 1 },
-    { "Ep3 Hotel", 1, 7, 1, 2 },
-    { "Ep4 Hotel", 2, 7, 2, 3 },
-    { "Ep4 Casino", 3, 14, 0, 3 },
-    { "Ep5 Hotel", 4, 7, 2, 4 },
-    { "Ep5 Casino", 5, 14, 1, 4 },
-    { "Ep7 Hotel", 6, 7, 3, 6 },
-    { "Ep8 Reds", 7, 7, 4, 7 },
+    { 0, 7, 0, 1 },
+    { 1, 7, 1, 2 },
+    { 2, 7, 2, 3 },
+    { 3, 14, 0, 3 },
+    { 4, 7, 2, 4 },
+    { 5, 14, 1, 4 },
+    { 6, 7, 3, 6 },
+    { 7, 7, 4, 7 },
     // Delfino Plaza
-    { "Bianco Plant", 0, 1, 0, 0 },
-    { "Bianco Chase", 1, 1, 1, 0 },
-    { "R" SUSAMUNE_GLYPH_AMP "G Plants", 2, 1, 5, 0 },
-    { "Peaceful", 3, 1, 2, 0 },
-    { "Pinna Cut", 4, 1, 7, 0 },
-    { "Yoshi", 5, 1, 8, 0 },
-    { "Flooded", 6, 1, 9, 0 },
+    { 0, 1, 0, 0 },
+    { 1, 1, 1, 0 },
+    { 2, 1, 5, 0 },
+    { 3, 1, 2, 0 },
+    { 4, 1, 7, 0 },
+    { 5, 1, 8, 0 },
+    { 6, 1, 9, 0 },
     // Delfino secrets
-    { "Beach Pipe", 0, 0x15, 0, 0 },
-    { "Pachinko", 1, 0x16, 0, 0 },
-    { "Grass Pipe", 2, 0x17, 0, 0 },
-    { "Lilypad", 3, 0x18, 0, 0 },
-    { "Jail", 4, 0x1D, 0, 0 },
-    { "Airstrip", 5, 0x00, 0, 0 },
-    { "Air Reds", 6, 0x14, 0, 0 },
-    { "Bowser", 7, 0x3C, 0, 0 },
-    { "Corona", 8, 0x34, 0, 0 },
+    { 0, 0x15, 0, 0 },
+    { 1, 0x16, 0, 0 },
+    { 2, 0x17, 0, 0 },
+    { 3, 0x18, 0, 0 },
+    { 4, 0x1D, 0, 0 },
+    { 5, 0x00, 0, 0 },
+    { 6, 0x14, 0, 0 },
+    { 7, 0x3C, 0, 0 },
+    { 8, 0x34, 0, 0 },
 };
 
-// A stored wheel: its title and its half-open range of kSlots. Holding the
-// range rather than a pointer and a count keeps this at two words.
+static_assert(sizeof(Slot) == 4, "Slot must stay packed");
+static_assert(stringCount(kSlotLabels) == sizeof(kSlots) / sizeof(kSlots[0]),
+              "Slot labels must match kSlots");
+
+// A stored wheel's half-open range of kSlots. Titles follow the same order in
+// kWheelTitles, so a wheel needs only the two range bytes.
 struct Wheel {
-    const char *title;
-    u8          first;
-    u8          count;
+    u8 first;
+    u8 count;
 };
+
+constexpr char kWheelTitles[] =
+    "Bianco Subareas\0"
+    "Ricco Subareas\0"
+    "Gelato Subareas\0"
+    "Pinna Subareas\0"
+    "Sirena Subareas\0"
+    "Pianta Subareas\0"
+    "Noki Subareas\0"
+    "Sirena Hotel\0"
+    "Delfino Plaza\0"
+    "Delfino Secrets";
 
 constexpr Wheel kWheels[] = {
-    { "Bianco Subareas", 0, 3 },
-    { "Ricco Subareas", 3, 3 },
-    { "Gelato Subareas", 6, 2 },
-    { "Pinna Subareas", 8, 4 },
-    { "Sirena Subareas", 12, 3 },
-    { "Pianta Subareas", 15, 1 },
-    { "Noki Subareas", 16, 4 },
-    { "Sirena Hotel", 20, 8 },
-    { "Delfino Plaza", 28, 7 },
-    { "Delfino Secrets", 35, 9 },
+    { 0, 3 },
+    { 3, 3 },
+    { 6, 2 },
+    { 8, 4 },
+    { 12, 3 },
+    { 15, 1 },
+    { 16, 4 },
+    { 20, 8 },
+    { 28, 7 },
+    { 35, 9 },
 };
 
 constexpr int kNumWheels = sizeof(kWheels) / sizeof(kWheels[0]);
+static_assert(sizeof(Wheel) == 2, "Wheel must stay packed");
+static_assert(stringCount(kWheelTitles) == kNumWheels,
+              "Wheel titles must match kWheels");
 
 // The ranges must tile kSlots exactly, which catches a group whose size
 // changed without the following groups' offsets moving with it.
@@ -538,25 +633,37 @@ static_assert(kWheels[kNumWheels - 1].first + kWheels[kNumWheels - 1].count ==
 // A region of the root wheel. `episodeArea` non-zero means its main wheel is
 // generated rather than stored: eight slices, one per episode of that area.
 struct Root {
-    const char *label;
-    u8          episodeArea;
-    s8          mainWheel;
-    s8          subWheel;
+    u8 episodeArea;
+    s8 mainWheel;
+    s8 subWheel;
 };
 
-const Root kRoot[kNumSlots] = {
-    { "Bianco", 2, -1, 0 },
-    { "Ricco", 3, -1, 1 },
-    { "Gelato", 4, -1, 2 },
-    { "Pinna", 5, -1, 3 },
-    { "Sirena", 6, -1, 4 },
-    { "Pianta", 8, -1, 5 },
-    { "Noki", 9, -1, 6 },
-    { "Hotel", 0, 7, -1 },
-    { "Delfino", 0, 8, 9 },
+constexpr char kRootLabels[] =
+    "Bianco\0"
+    "Ricco\0"
+    "Gelato\0"
+    "Pinna\0"
+    "Sirena\0"
+    "Pianta\0"
+    "Noki\0"
+    "Hotel\0"
+    "Delfino";
+
+constexpr Root kRoot[kNumSlots] = {
+    { 2, -1, 0 },
+    { 3, -1, 1 },
+    { 4, -1, 2 },
+    { 5, -1, 3 },
+    { 6, -1, 4 },
+    { 8, -1, 5 },
+    { 9, -1, 6 },
+    { 0, 7, -1 },
+    { 0, 8, 9 },
 };
 
-const char kEpisodeLabels[8][2] = { "1", "2", "3", "4", "5", "6", "7", "8" };
+static_assert(sizeof(Root) == 3, "Root must stay packed");
+static_assert(stringCount(kRootLabels) == kNumSlots,
+              "Root labels must match kRoot");
 
 }  // namespace
 
@@ -640,20 +747,26 @@ const char *currentTitle() {
         return "Warp";
     }
     s8 wheel = currentWheel();
-    return wheel >= 0 ? kWheels[wheel].title : kRoot[sRoot].label;
+    return wheel >= 0 ? PackedText::at(kWheelTitles, wheel)
+                      : PackedText::at(kRootLabels, sRoot);
 }
 
 // Label for slice `i` of the wheel on screen, or null when it is empty.
-const char *slotLabel(int i) {
+const char *slotLabel(int i, char *episodeLabel) {
     if (sRoot < 0) {
-        return kRoot[i].label;
+        return PackedText::at(kRootLabels, i);
     }
     const Wheel *wheel = currentWheelData();
     if (wheel) {
         const Slot *slot = findSlot(wheel, i);
-        return slot ? slot->label : nullptr;
+        return slot ? PackedText::at(kSlotLabels, (int)(slot - kSlots)) : nullptr;
     }
-    return i < 8 ? kEpisodeLabels[i] : nullptr;
+    if (i >= 8) {
+        return nullptr;
+    }
+    episodeLabel[0] = (char)('1' + i);
+    episodeLabel[1] = '\0';
+    return episodeLabel;
 }
 
 // Resolve slice `i` to a destination. False when the slice is empty.
@@ -708,7 +821,8 @@ void drawCentred(const char *text, int cx, int y, int size, Color color) {
 }
 
 void drawSlice(int i, bool selected) {
-    const char *label = slotLabel(i);
+    char episodeLabel[2];
+    const char *label = slotLabel(i, episodeLabel);
     if (!label) {
         return;
     }
@@ -728,7 +842,8 @@ void drawSlice(int i, bool selected) {
 }
 
 void drawCentre(bool selected) {
-    const char *label = slotLabel(kCentreSlot);
+    char episodeLabel[2];
+    const char *label = slotLabel(kCentreSlot, episodeLabel);
     if (!label) {
         return;
     }

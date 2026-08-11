@@ -8,6 +8,18 @@
 class Menu;
 class TMarioGamePad;
 
+struct MetadataDisplayLiveCfg {
+    u16 x;
+    u16 y;
+    u16 fieldMask;
+    u8  startVisible;
+    u8  scale;
+    u8  labelMode;
+    u8  backgroundAlpha;
+};
+
+static_assert(sizeof(MetadataDisplayLiveCfg) == 10, "metadata live config layout changed");
+
 class MetadataDisplay {
 public:
     enum Field {
@@ -45,17 +57,28 @@ public:
     bool editing() const { return mEditing; }
 
 private:
+    struct EditBackup {
+        u16 x;
+        u16 y;
+        u8  scale;
+        u8  backgroundAlpha;
+    };
+
     void resetLayout();
     void clampLayout();
     void markDirty();
     void finishEditor(bool keep);
 
-    SusamuneMetadataDisplayCfg mCfg;
-    SusamuneMetadataDisplayCfg mEditBackup;
+    const char                *mFormat;
+    MetadataDisplayLiveCfg     mCfg;
+    EditBackup                 mEditBackup;
     bool                       mDirty;
     bool                       mDirtyBeforeEdit;
     bool                       mEditing;
+    u8                         mFormatLength;
 };
+
+static_assert(sizeof(MetadataDisplay) == 24, "metadata display state grew");
 
 extern MetadataDisplay gMetadataDisplay;
 

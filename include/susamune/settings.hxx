@@ -23,12 +23,10 @@
 // no coherency rules -- features.cpp reads settings every frame.
 // =====================================================================
 
-// The full set of settings. Add a row to SUSAMUNE_SETTING_LIST
-// (settings_list.h) and a matching row in kSettingDescs (settings.cpp);
-// nothing else needs to change. The list order controls the values[] layout
-// -- which is also the on-disc layout, so it must stay append-only -- and the
-// within-category display order in the menu (which filters by category), so
-// keep each category's entries grouped.
+// The full set of settings. Append a row to SUSAMUNE_SETTING_LIST
+// (settings_list.h) and the same ordinal to src/settings_descs.inc. The list
+// order is the persisted values[] layout, so new IDs go only at the global
+// tail; the descriptor category controls which menu tab displays each row.
 #define SUSAMUNE_SETTING_ENUM(id, key) id,
 enum SettingId {
     SUSAMUNE_SETTING_LIST(SUSAMUNE_SETTING_ENUM)
@@ -50,25 +48,6 @@ enum SettingCategory {
     SETTING_CAT_COUNT
 };
 
-// Static, const description of one setting. Field order and widths are chosen
-// so a row is 12 bytes rather than 24; there are ~30 of these.
-struct SettingDesc {
-    const char        *name;          // label shown in the menu
-    const char *const *choices;       // null => bool, rendered On / Off
-    u8                 numChoices;    // 2 for a bool
-    u8                 defaultValue;
-    u8                 category;      // a SettingCategory
-};
-
-// The live payload, in the mod's BSS. POD; magic + version mirror the
-// savestate header so a stale blob is rejected rather than misread.
-struct SettingsData {
-    u32 magic;
-    u16 version;
-    u16 count;
-    u8  values[SETTING_COUNT];
-};
-
 // Progress of an in-flight save, for the on-screen toast. The write itself is
 // performed asynchronously by the Nintendont ARM kernel (the PPC cannot touch
 // the SD card), so a save is a request plus a poll, never a blocking call.
@@ -80,6 +59,8 @@ enum SettingsSaveState {
     SETTINGS_SAVE_TIMEOUT,  // kernel never answered (old/stock launcher?)
     SETTINGS_SAVE_UNSUPPORTED,  // emulator build: no persistence backend
 };
+static_assert(SETTINGS_SAVE_UNSUPPORTED <= 0xFF,
+              "settings save state no longer fits in a byte");
 
 class Settings {
 public:
@@ -105,7 +86,7 @@ public:
     // state, transitioning PENDING -> OK / ERROR / TIMEOUT.
     SettingsSaveState pollSave();
 
-    SettingsSaveState saveState() const { return mSaveState; }
+    SettingsSaveState saveState() const { return (SettingsSaveState)mSaveState; }
 
     // FatFS FRESULT from the last failed save, for the toast text.
     u32 lastError() const { return mLastError; }
@@ -114,8 +95,8 @@ public:
     // avoid touching the SD card when nothing was edited.
     bool dirty() const { return mDirty; }
 
-    u8   get(SettingId id) const { return mData.values[id]; }
-    bool getBool(SettingId id) const { return mData.values[id] != 0; }
+    u8   get(SettingId id) const { return mValues[id]; }
+    bool getBool(SettingId id) const { return mValues[id] != 0; }
     void set(SettingId id, u8 value);
 
     // Advance a setting's value by dir (+1 / -1), wrapping. Toggles a bool,
@@ -125,16 +106,20 @@ public:
     // Human-readable label for the current value ("On"/"Off" or a choice).
     const char *valueLabel(SettingId id) const;
 
-    static const SettingDesc &desc(SettingId id);
+    static const char     *name(SettingId id);
+    static SettingCategory category(SettingId id);
 
 private:
-    SettingsData      mData;
-    bool              mDirty;
-    SettingsSaveState mSaveState;
-    u32               mLastError;
-    u32               mSaveSeq;      // the sequence number we are waiting on
-    u32               mSaveWaitFrames;
+    u8   mValues[SETTING_COUNT];
+    bool mDirty;
+    u8   mSaveState;
+    u32  mLastError;
+    u32  mSaveSeq;      // the sequence number we are waiting on
+    u32  mSaveWaitFrames;
 };
+
+static_assert(sizeof(Settings) == ((SETTING_COUNT + 5) & ~3) + 12,
+              "Settings live state layout changed");
 
 // Single global instance. POD (no virtuals / no ctor), so it lives in BSS
 // zero-initialised; resetDefaults() installs real defaults at boot.

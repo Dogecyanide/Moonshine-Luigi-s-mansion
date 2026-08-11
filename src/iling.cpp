@@ -10,6 +10,7 @@
 #include "SMS/System/Application.hxx"
 #include "susamune/addresses.hxx"
 #include "susamune/menu.hxx"
+#include "susamune/packed_text.hxx"
 #include "susamune/qft_timer.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/susamune_cfg.h"
@@ -113,17 +114,147 @@ const Entry kEntries[] = {
 #undef RAW
 #undef ENTRY_STATE
 
-#define SHINE(label, area, episode, parent, id, group) label "\0"
-#define SHINE_SET(label, area, episode, parent, id, group, required) label "\0"
-#define SHINE_SET_ALIAS(label, area, episode, parent, id, group, required) label "\0"
-#define SHINE_CLEAR(label, area, episode, parent, id, group) label "\0"
-#define SHINE_CLEAR_SET(label, area, episode, parent, id, group, required) label "\0"
-#define SHINE_FULL(label, area, episode, parent, id, group) label "\0"
-#define SHINE_SECRET(label, area, episode, parent, id, group, slot) label "\0"
-#define PLAZA(label, source, scenario, finish, result, slot) label "\0"
-#define RAW(label, area, episode, parent, finish, result, group, flags, prerequisite) label "\0"
+const int kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);
+constexpr u8 kGroupFirst[GROUP_COUNT] = {0, 13, 25, 37, 50, 63, 75, 87, 89, 90, 106};
+const int kGeneratedLabelCount = 87;
+const int kRegularLabelSize = 18;
+// Fixed-width names and computed suffix offsets cost less than lookup tables.
+constexpr char kRegularGroupNames[] =
+    "Bianco\0Ricco\0\0Gelato\0Pinna\0\0Sirena\0Noki\0\0\0Pianta";
+constexpr char kRegularSuffixes[] =
+    "\0\0\0\0 Reds\0 (Full)\0 (Secret)\0 (Race)";
+constexpr char kRegularLabelFormats[] =
+    "%s %d%s\0%s 100 (E%d)\0%s Hidden";
+enum LabelFormatOffset {
+    LABEL_FORMAT_NORMAL = 0,
+    LABEL_FORMAT_HUNDRED = 8,
+    LABEL_FORMAT_HIDDEN = 21,
+};
 
-const char kEntryLabels[] =
+constexpr char *appendLabel(char *out, const char *text) {
+    while (*text) {
+        *out++ = *text++;
+    }
+    return out;
+}
+
+constexpr const char *regularGroupName(int group) {
+    return kRegularGroupNames + group * 7;
+}
+
+constexpr int regularSuffixType(int flags) {
+    return ((flags >> 3) & 1) + (flags & 1) + ((flags >> 2) & 1) +
+           3 * ((flags >> 4) & 1);
+}
+
+constexpr const char *regularSuffix(int flags) {
+    const int type = regularSuffixType(flags);
+    return kRegularSuffixes + type * (type + 3);
+}
+
+constexpr void makeRegularLabel(int group, int episode, int result, int flags,
+                                char *label) {
+    char *out = appendLabel(label, regularGroupName(group));
+    *out++ = ' ';
+    if (result >= 100) {
+        out = appendLabel(out, "100 (E");
+        *out++ = '1' + episode;
+        *out++ = ')';
+    } else if (flags == ENTRY_NONE && result % 10 == 9) {
+        out = appendLabel(out, "Hidden");
+    } else {
+        *out++ = '1' + episode;
+        out = appendLabel(out, regularSuffix(flags));
+    }
+    *out = '\0';
+}
+
+constexpr bool sameLabel(const char *a, const char *b) {
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+constexpr bool verifyRegularLabel(const char *expected, int parent, int result,
+                                  int group, int flags) {
+    if (group >= GROUP_AIRSTRIP) {
+        return true;
+    }
+    const int derivedGroup = result >= 100 ? result - 100 : result / 10;
+    if (derivedGroup != group) {
+        return false;
+    }
+    char generated[kRegularLabelSize] = {};
+    makeRegularLabel(derivedGroup, parent, result, flags, generated);
+    return sameLabel(expected, generated);
+}
+
+#define RAW(label, area, episode, parent, finish, result, group, flags, prerequisite) \
+    static_assert(verifyRegularLabel(label, parent, result, group, flags), \
+                  "IL label does not match its generated form");
+#define SHINE(label, area, episode, parent, id, group) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, ENTRY_NONE, kNoShine)
+#define SHINE_SET(label, area, episode, parent, id, group, required) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CARRY_OVERLAY, required)
+#define SHINE_SET_ALIAS(label, area, episode, parent, id, group, required) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CARRY_OVERLAY | ENTRY_ACCEPT_PREREQ, required)
+#define SHINE_CLEAR(label, area, episode, parent, id, group) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT, kNoShine)
+#define SHINE_CLEAR_SET(label, area, episode, parent, id, group, required) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT, required)
+#define SHINE_FULL(label, area, episode, parent, id, group) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT | ENTRY_CARRY_OVERLAY, kNoShine)
+#define SHINE_SECRET(label, area, episode, parent, id, group, slot) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE | ENTRY_CARRY_OVERLAY, slot)
+#define PLAZA(label, source, scenario, finish, result, slot) \
+    RAW(label, TGameSequence::AREA_DOLPIC, scenario, source, finish, result, \
+        GROUP_ANY_PERCENT, ENTRY_PLAZA | ENTRY_PB_OVERRIDE, slot)
+
+#include "iling_entries.inc"
+
+#undef SHINE
+#undef SHINE_SET
+#undef SHINE_SET_ALIAS
+#undef SHINE_CLEAR
+#undef SHINE_CLEAR_SET
+#undef SHINE_FULL
+#undef SHINE_SECRET
+#undef PLAZA
+#undef RAW
+
+#define ENTRY_LABEL(group, label) ENTRY_LABEL_I(group, label)
+#define ENTRY_LABEL_I(group, label) ENTRY_LABEL_##group(label)
+#define ENTRY_LABEL_GROUP_BIANCO(label)
+#define ENTRY_LABEL_GROUP_RICCO(label)
+#define ENTRY_LABEL_GROUP_GELATO(label)
+#define ENTRY_LABEL_GROUP_PINNA(label)
+#define ENTRY_LABEL_GROUP_SIRENA(label)
+#define ENTRY_LABEL_GROUP_NOKI(label)
+#define ENTRY_LABEL_GROUP_PIANTA(label)
+#define ENTRY_LABEL_GROUP_AIRSTRIP(label) label "\0"
+#define ENTRY_LABEL_GROUP_CORONA(label) label "\0"
+#define ENTRY_LABEL_GROUP_DELFINO(label) label "\0"
+#define ENTRY_LABEL_GROUP_ANY_PERCENT(label) label "\0"
+#define SHINE(label, area, episode, parent, id, group) ENTRY_LABEL(group, label)
+#define SHINE_SET(label, area, episode, parent, id, group, required) ENTRY_LABEL(group, label)
+#define SHINE_SET_ALIAS(label, area, episode, parent, id, group, required) ENTRY_LABEL(group, label)
+#define SHINE_CLEAR(label, area, episode, parent, id, group) ENTRY_LABEL(group, label)
+#define SHINE_CLEAR_SET(label, area, episode, parent, id, group, required) ENTRY_LABEL(group, label)
+#define SHINE_FULL(label, area, episode, parent, id, group) ENTRY_LABEL(group, label)
+#define SHINE_SECRET(label, area, episode, parent, id, group, slot) ENTRY_LABEL(group, label)
+#define PLAZA(label, source, scenario, finish, result, slot) label "\0"
+#define RAW(label, area, episode, parent, finish, result, group, flags, prerequisite) \
+    ENTRY_LABEL(group, label)
+
+const char kLiteralEntryLabels[] =
 #include "iling_entries.inc"
     ;
 
@@ -136,9 +267,20 @@ const char kEntryLabels[] =
 #undef SHINE_SECRET
 #undef PLAZA
 #undef RAW
+#undef ENTRY_LABEL_GROUP_BIANCO
+#undef ENTRY_LABEL_GROUP_RICCO
+#undef ENTRY_LABEL_GROUP_GELATO
+#undef ENTRY_LABEL_GROUP_PINNA
+#undef ENTRY_LABEL_GROUP_SIRENA
+#undef ENTRY_LABEL_GROUP_NOKI
+#undef ENTRY_LABEL_GROUP_PIANTA
+#undef ENTRY_LABEL_GROUP_AIRSTRIP
+#undef ENTRY_LABEL_GROUP_CORONA
+#undef ENTRY_LABEL_GROUP_DELFINO
+#undef ENTRY_LABEL_GROUP_ANY_PERCENT
+#undef ENTRY_LABEL_I
+#undef ENTRY_LABEL
 
-const int kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);
-const u8 kGroupFirst[GROUP_COUNT] = {0, 13, 25, 37, 50, 63, 75, 87, 89, 90, 106};
 const u8 kPlazaStoryHigh[10] = {0x00, 0x10, 0xF0, 0xF0, 0xF0,
                                 0x30, 0xF0, 0xF0, 0xF0, 0xF0};
 const int kPbSlotCount = 121;
@@ -154,6 +296,8 @@ const u32 kPbRetryDelayFrames = 300;
 
 static_assert(sizeof(Entry) == 6, "ILing entry layout changed");
 static_assert(kEntryCount == 117, "ILing entry count changed");
+static_assert(kGroupFirst[GROUP_AIRSTRIP] == kGeneratedLabelCount,
+              "generated IL label range changed");
 
 struct AttemptState {
     bool running;
@@ -356,25 +500,12 @@ bool sceneMatches(const TGameSequence &scene, const LevelWarp::Dest &dest) {
     return scene.mAreaID == dest.area && scene.mEpisodeID == dest.episode;
 }
 
-u8 parentArea(u8 area) {
-    switch (area) {
-    case 0x37: case 0x2F: case 0x2E: return 2;
-    case 0x3B: case 0x1E: case 0x30: return 3;
-    case 0x20: case 0x21: return 4;
-    case 0x3A: case 0x32: case 0x29: case 0x0D: return 5;
-    case 0x33: case 0x28: case 0x38: case 0x07: case 0x0E: return 6;
-    case 0x2A: return 8;
-    case 0x2C: case 0x39: case 0x1F: case 0x10: return 9;
-    default: return 0xFF;
-    }
-}
-
 bool isInternalScene(const LevelWarp::Dest &start,
                      const TGameSequence &scene) {
     if (start.area == 0x34 && scene.mAreaID == TGameSequence::AREA_CORONABOSS) {
         return true;
     }
-    return parentArea(scene.mAreaID) == start.area;
+    return LevelWarp::parentArea(scene.mAreaID) == start.area;
 }
 
 int entryForStartScene(const TGameSequence &scene) {
@@ -720,11 +851,26 @@ void init() {
 int count() { return kEntryCount; }
 
 const char *label(int entry) {
-    const char *text = kEntryLabels;
-    for (int i = 0; i < entry; i++) {
-        while (*text++) {}
+    if (entry < kGeneratedLabelCount) {
+        const Entry &item = kEntries[entry];
+        const bool hundred = item.result >= 100;
+        const int group = hundred ? item.result - 100 : item.result / 10;
+        const u8 flags = item.flags & ENTRY_FLAG_MASK;
+        int formatOffset = LABEL_FORMAT_NORMAL;
+        const char *suffix = regularSuffix(flags);
+        if (hundred) {
+            formatOffset = LABEL_FORMAT_HUNDRED;
+        } else if (flags == ENTRY_NONE && item.result - group * 10 == 9) {
+            formatOffset = LABEL_FORMAT_HIDDEN;
+        }
+        static char generated[kRegularLabelSize];
+        sprintf(generated, kRegularLabelFormats + formatOffset,
+                regularGroupName(group),
+                item.start.gameInt3 + 1, suffix);
+        return generated;
     }
-    return text;
+
+    return PackedText::at(kLiteralEntryLabels, entry - kGeneratedLabelCount);
 }
 
 s32 pbQf(int entry) {

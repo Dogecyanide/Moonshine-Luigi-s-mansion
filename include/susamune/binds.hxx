@@ -12,7 +12,7 @@
 // codes that do something when pressed rather than toggling a setting
 // (see doc/gecko_codes.md, "Simple Actions/Binds"). Deliberately parallel
 // to settings.*: one row in SUSAMUNE_BIND_LIST (binds_list.h) plus one row
-// in kBindDescs (binds.cpp) gives a bind an id, an ini key, a menu label
+// in binds_descs.inc gives a bind an id, an ini key, a menu label
 // and a default combo; the menu renders and records them generically and
 // actions.cpp reads them.
 //
@@ -42,12 +42,7 @@ enum BindId {
     BIND_COUNT
 };
 #undef SUSAMUNE_BIND_ENUM
-
-// Static description of one bind. Lives in .rodata.
-struct BindDesc {
-    const char *name;         // label shown in the menu
-    u16         defaultMask;  // combo the mod ships with
-};
+static_assert(BIND_COUNT <= 0x100, "bind ids no longer fit in recorder state");
 
 // Buffer size for format(). Sized for *every* bindable button at once, not
 // just the four a bind may hold, so a hand-edited susamune.ini with an
@@ -100,7 +95,7 @@ public:
     void   beginRecord(BindId id);
     void   cancelRecord();
     bool   recording() const { return mRecState != REC_OFF; }
-    BindId recordTarget() const { return mRecTarget; }
+    BindId recordTarget() const { return (BindId)mRecTarget; }
     // Buttons accumulated so far, for live feedback in the menu.
     u16    recordPreview() const { return mRecAccum; }
 
@@ -108,7 +103,7 @@ public:
     // `out` must hold kBindTextMax bytes.
     static void format(u16 mask, char *out);
 
-    static const BindDesc &desc(BindId id);
+    static const char *name(BindId id);
 
     // --- persistence (see settings.cpp, which owns the MEM2 handoff) ---
     void adopt(u16 mask, BindId id);  // like set(), but not a user edit
@@ -125,18 +120,21 @@ private:
 
     bool live() const { return mRecState == REC_OFF && !mRecSilent; }
 
-    u16      mMask[BIND_COUNT];
-    u16      mHeld;
-    u16      mPrevHeld;
-    u16      mRecAccum;
-    RecState mRecState;
-    BindId   mRecTarget;
+    u16  mMask[BIND_COUNT];
+    u16  mHeld;
+    u16  mPrevHeld;
+    u16  mRecAccum;
+    u8   mRecState;
+    u8   mRecTarget;
     // Binds stay dead from the moment the recorder is armed until the pad is
     // released again. Without it a four-button combo -- which commits while
     // still held -- would fire the very action it was just bound to.
-    bool     mRecSilent;
-    bool     mDirty;
+    bool mRecSilent;
+    bool mDirty;
 };
+
+static_assert(sizeof(Binds) == BIND_COUNT * sizeof(u16) + 10,
+              "Binds live state layout changed");
 
 // Single global instance. POD (no virtuals / no ctor), so it lives in BSS
 // zero-initialised; resetDefaults() installs the real defaults at boot.

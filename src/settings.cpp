@@ -14,123 +14,73 @@
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/metadata_display.hxx"
+#include "susamune/packed_text.hxx"
 #include "susamune/susamune_cfg.h"
 
 namespace {
 
-// CHOICE labels. Index 0 is the default / "restore original" state (see the
-// choice-feature apply in features.cpp), so it must be the game's normal
-// behaviour for the corresponding gecko code.
-const char *const kFluddLabels[3]  = { "Completed", "No FLUDD", "All secrets" };
-const char *const kNozzleLabels[4] = { "Unlocked", "Rocket", "Turbo", "Hover" };
-const char *const kSunshineTimerLabels[3] = { "Always", "Shine only", "Hidden" };
-const char *const kQftVisibilityLabels[3]  = { "Always", "On freeze", "Hidden" };
-const char *const kFreezeDurationLabels[6] = {
-    "Off", "0.5 s", "1 s", "2 s", "3 s", "5 s"
+enum ChoiceSet {
+    CHOICES_BOOL,
+    CHOICES_FLUDD,
+    CHOICES_NOZZLE,
+    CHOICES_SUNSHINE_TIMER,
+    CHOICES_QFT_VISIBILITY,
+    CHOICES_FREEZE_DURATION,
+    CHOICES_COUNT,
 };
 
-#define SBOOL(name, def, cat) { name, nullptr, 2, def, cat }
-#define SCHOICE(name, def, labels, cat) \
-    { name, labels, (u8)(sizeof(labels) / sizeof((labels)[0])), def, cat }
+struct SettingDesc {
+    u8 choices;
+    u8 config;
+};
+
+const u8 kCategoryMask = 7;
+const u8 kDefaultShift = 3;
+
+#define SBOOL(name, def, cat) name "\0"
+#define SCHOICE(name, def, choices, cat) name "\0"
+const char kSettingNames[] =
+#include "settings_descs.inc"
+    ;
+#undef SBOOL
+#undef SCHOICE
+
+const char kChoiceLabels[] =
+    "Off\0On\0Completed\0No FLUDD\0All secrets\0Unlocked\0Rocket\0Turbo\0Hover\0"
+    "Always\0Shine only\0Hidden\0On freeze\0"
+    "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0";
+
+const u8 kChoiceMap[] = {
+    0, 1,              // bool
+    2, 3, 4,           // FLUDD
+    5, 6, 7, 8,        // nozzle
+    9, 10, 11,         // Sunshine timer
+    9, 12, 11,         // QFT visibility
+    0, 13, 14, 15, 16, 17,  // freeze duration
+};
+const u8 kChoiceFirst[CHOICES_COUNT + 1] = {0, 2, 5, 9, 12, 15, 21};
+
+u8 choiceCount(const SettingDesc &desc) {
+    return kChoiceFirst[desc.choices + 1] - kChoiceFirst[desc.choices];
+}
+
+u8 defaultValue(const SettingDesc &desc) { return desc.config >> kDefaultShift; }
+
+SettingCategory settingCategory(const SettingDesc &desc) {
+    return (SettingCategory)(desc.config & kCategoryMask);
+}
+
+#define SETTING_CONFIG(def, cat) (u8)(((def) << kDefaultShift) | (cat))
+#define SBOOL(name, def, cat) { CHOICES_BOOL, SETTING_CONFIG(def, cat) },
+#define SCHOICE(name, def, choices, cat) { choices, SETTING_CONFIG(def, cat) },
 
 // Descriptor table, indexed by SettingId. One row per setting.
-const SettingDesc kSettingDescs[SETTING_COUNT] = {
-    // Quality-of-life toggles. Defaults mirror the GCT generator's Standard
-    // preset where it has an equivalent code.
-    SBOOL("Fast text", 0, SETTING_CAT_QOL),
-    SCHOICE("FLUDD in secrets", 0, kFluddLabels, SETTING_CAT_QOL),
-    // Area lock: every departure restarts the area being left instead.
-    SBOOL("Area lock", 0, SETTING_CAT_QOL),
-    SBOOL("Infinite lives", 1, SETTING_CAT_QOL),
-    SBOOL("Disable blue coin flag", 1, SETTING_CAT_QOL),
-    SBOOL("FMV skips", 1, SETTING_CAT_QOL),
-    SBOOL("Unlock Yoshi", 0, SETTING_CAT_QOL),
-    SBOOL("Unlock nozzles", 0, SETTING_CAT_QOL),
-    SBOOL("Free pause", 1, SETTING_CAT_QOL),
-    SBOOL("Exit area everywhere", 1, SETTING_CAT_QOL),
-    SBOOL("Any fruit opens Yoshi eggs", 0, SETTING_CAT_QOL),
-    // Intro skip: On, as in the generator's Standard preset. It also removes
-    // the boot prompt that picks progressive / 50-60Hz mode, so that has to be
-    // set with this off.
-    SBOOL("Infinite juice", 0, SETTING_CAT_QOL),
-    SBOOL("Intro skip", 1, SETTING_CAT_QOL),
-    SBOOL("Respawn one-time shines", 1, SETTING_CAT_QOL),
-    SBOOL("Fast Piantissimo", 0, SETTING_CAT_QOL),
-
-    // SETTING_SAVE_RNG_STATE: when On (default), a savestate load restores the
-    // libc RNG seed so the RNG stream rewinds with the state -- the game's
-    // historical behaviour. Off leaves the seed advancing across a load, so a
-    // runner can practise varied RNG outcomes from the same snapshot.
-    SBOOL("Save RNG state", 1, SETTING_CAT_SAVESTATE),
-
-    // Misc toggles.
-    SCHOICE("Nozzle lock", 0, kNozzleLabels, SETTING_CAT_MISC),
-    SBOOL("Force plaza events", 1, SETTING_CAT_MISC),
-    SBOOL("Never pause IGT", 1, SETTING_CAT_MISC),
-    SBOOL("Shadow Mario HP meter", 0, SETTING_CAT_MISC),
-    // Stage Intro Skip is an asm-hook feature (features.cpp) rather than a
-    // plain patch; No Shine Get Animation is a one-word patch in the same file.
-    SBOOL("Stage intro skip", 0, SETTING_CAT_MISC),
-    SBOOL("Deathless blooper surfing", 0, SETTING_CAT_MISC),
-    SBOOL("No shine get animation", 0, SETTING_CAT_MISC),
-    SBOOL("Fruit never times out", 0, SETTING_CAT_MISC),
-    // Disable Z Menu defaults on: Z is the warp wheel's bind.
-    SBOOL("Disable Z Menu", 1, SETTING_CAT_MISC),
-    SBOOL("Disable Susamune Warps", 0, SETTING_CAT_MISC),
-
-    // Cosmetic toggles.
-    SBOOL("Mute background music", 0, SETTING_CAT_COSMETIC),
-    SBOOL("Episode names as IDs", 0, SETTING_CAT_COSMETIC),
-    SBOOL("Shine outfit", 0, SETTING_CAT_COSMETIC),
-    SBOOL("Shiny shines", 0, SETTING_CAT_COSMETIC),
-
-    // UI settings.
-    SBOOL("Show BGM slot counter", 0, SETTING_CAT_UI),
-
-    // Appended settings keep their persisted indices stable.
-    SBOOL("Disable 3rd Chomplet aggro", 0, SETTING_CAT_QOL),
-
-    // Timer presentation and QFT's established freeze-event configuration.
-    // Configured event freezes affect the compact display only. Loading zones
-    // also hold the Sunshine HUD visually while the accurate clock carries on.
-    SCHOICE("Sunshine timer", 0, kSunshineTimerLabels, SETTING_CAT_TIMER),
-    SCHOICE("Bottom-left QFT", 1, kQftVisibilityLabels, SETTING_CAT_TIMER),
-    SCHOICE("Freeze duration", 2, kFreezeDurationLabels, SETTING_CAT_TIMER),
-    SBOOL("Freeze: yellow coin", 0, SETTING_CAT_TIMER),
-    SBOOL("Freeze: red coin", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: blue coin", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: item", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: talk", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: demo", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: clean event", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: Bowser event", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: mount Yoshi", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: take object", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: drop object", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: put object", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: triple jump", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: spin jump", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: ledge grab", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: wall kick", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: rope jump", 1, SETTING_CAT_TIMER),
-    SBOOL("Freeze: bounce", 1, SETTING_CAT_TIMER),
-
-    // Kept off by default like the generator's optional counter. The bare
-    // D-pad shortcuts are a separate opt-in because they share Susamune's
-    // default save/load buttons.
-    SBOOL("Attempt counter", 0, SETTING_CAT_MISC),
-    SBOOL("In-stage counter controls", 0, SETTING_CAT_MISC),
-
-    // Native version of sup39's Pianta 1 / Pianta 4 Pattern Selector.
-    SBOOL("Pattern selector", 0, SETTING_CAT_MISC),
-
-    SBOOL("PB fanfare", 1, SETTING_CAT_CUSTOM)
+const SettingDesc kSettingDescs[] = {
+#include "settings_descs.inc"
 };
-
-const u32 kSettingsMagic   = 0x53535454u;  // 'SSTT'
-const u16 kSettingsVersion = 1u;
-
-const char *const kBoolLabels[2] = { "Off", "On" };
+#undef SBOOL
+#undef SCHOICE
+#undef SETTING_CONFIG
 
 // How long to wait for the kernel to acknowledge a save before giving up.
 // Generous: the kernel only services the doorbell between disc reads, and a
@@ -149,11 +99,8 @@ void Settings::resetDefaults() {
     gInputDisplay.resetDefaults();
     gMetadataDisplay.resetDefaults();
 
-    mData.magic   = kSettingsMagic;
-    mData.version = kSettingsVersion;
-    mData.count   = SETTING_COUNT;
     for (int i = 0; i < SETTING_COUNT; i++) {
-        mData.values[i] = kSettingDescs[i].defaultValue;
+        mValues[i] = defaultValue(kSettingDescs[i]);
     }
     mDirty          = false;
     mSaveState      = SETTINGS_SAVE_IDLE;
@@ -183,7 +130,7 @@ void Settings::save() {
     gMetadataDisplay.clearDirty();
 }
 
-SettingsSaveState Settings::pollSave() { return mSaveState; }
+SettingsSaveState Settings::pollSave() { return (SettingsSaveState)mSaveState; }
 
 #else
 
@@ -269,7 +216,7 @@ void Settings::save() {
     }
 
     for (int i = 0; i < SETTING_COUNT; i++) {
-        cfg->values[i] = mData.values[i];
+        cfg->values[i] = mValues[i];
     }
     cfg->count = SETTING_COUNT;
 
@@ -305,7 +252,7 @@ void Settings::save() {
 
 SettingsSaveState Settings::pollSave() {
     if (mSaveState != SETTINGS_SAVE_PENDING) {
-        return mSaveState;
+        return (SettingsSaveState)mSaveState;
     }
 
     volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
@@ -320,50 +267,55 @@ SettingsSaveState Settings::pollSave() {
     } else if (++mSaveWaitFrames > kSaveTimeoutFrames) {
         mSaveState = SETTINGS_SAVE_TIMEOUT;
     }
-    return mSaveState;
+    return (SettingsSaveState)mSaveState;
 }
 
 #endif  // IS_EMULATOR
 
 void Settings::set(SettingId id, u8 value) {
-    value = value % kSettingDescs[id].numChoices;
-    if (mData.values[id] != value) {
+    value = value % choiceCount(kSettingDescs[id]);
+    if (mValues[id] != value) {
         mDirty = true;
     }
-    mData.values[id] = value;
+    mValues[id] = value;
 }
 
 void Settings::cycle(SettingId id, int dir) {
-    int n = kSettingDescs[id].numChoices;
-    int v = (int)mData.values[id] + dir;
+    int n = choiceCount(kSettingDescs[id]);
+    int v = (int)mValues[id] + dir;
     // Wrap into [0, n). dir is +/-1, so one add/sub suffices.
     if (v < 0) {
         v += n;
     } else if (v >= n) {
         v -= n;
     }
-    if (mData.values[id] != (u8)v) {
+    if (mValues[id] != (u8)v) {
         mDirty = true;
     }
-    mData.values[id] = (u8)v;
+    mValues[id] = (u8)v;
 }
 
 const char *Settings::valueLabel(SettingId id) const {
     const SettingDesc &d = kSettingDescs[id];
-    u8 v = mData.values[id];
-    if (d.choices) {
-        return d.choices[v % d.numChoices];
-    }
-    return kBoolLabels[v ? 1 : 0];
+    u8 index = kChoiceFirst[d.choices] + mValues[id] % choiceCount(d);
+    return PackedText::at(kChoiceLabels, kChoiceMap[index]);
 }
 
-const SettingDesc &Settings::desc(SettingId id) { return kSettingDescs[id]; }
+const char *Settings::name(SettingId id) {
+    return PackedText::at(kSettingNames, (int)id);
+}
+
+SettingCategory Settings::category(SettingId id) {
+    return settingCategory(kSettingDescs[id]);
+}
 
 // kSettingDescs is indexed by SettingId and must stay row-for-row aligned with
 // SUSAMUNE_SETTING_LIST. Adding a list row without a descriptor row (or vice
 // versa) fails here rather than silently shifting every setting's meaning.
 static_assert(sizeof(kSettingDescs) / sizeof(kSettingDescs[0]) == SETTING_COUNT,
               "kSettingDescs must have one row per SUSAMUNE_SETTING_LIST entry");
+static_assert(SETTING_CAT_COUNT <= kCategoryMask + 1,
+              "SettingCategory no longer fits packed descriptor");
 static_assert(SETTING_COUNT <= SUSAMUNE_CFG_MAX_SETTINGS,
               "SETTING_COUNT exceeds the MEM2 handoff block's values[] capacity");
 static_assert(BIND_COUNT <= SUSAMUNE_CFG_MAX_BINDS,

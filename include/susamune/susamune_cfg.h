@@ -135,8 +135,8 @@ struct SusamuneMetadataDisplayCfg {
 
 // susamune.ini had nothing for the running game version -- either the file is
 // absent entirely, or it has no [settings_<region>] section for this disc. The
-// kernel cannot author defaults itself -- they live in kSettingDescs on the mod
-// side, and duplicating them in the launcher would be a second source of truth
+// kernel cannot author defaults itself -- they live in the mod's descriptor
+// pools, and duplicating them in the launcher would be a second source of truth
 // -- so it raises this flag and the mod answers by issuing a save() during
 // init, which fills in this version's sections without disturbing the others.
 #define SUSAMUNE_CFG_FLAG_NO_CONFIG 0x1u

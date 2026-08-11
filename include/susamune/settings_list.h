@@ -11,8 +11,8 @@
 // Each row is (enumerator, ini_key):
 //   - the enumerator defines SettingId and therefore the values[] layout
 //     of the MEM2 handoff blob, which carries no per-key names -- only a
-//     count. So ROWS MUST NOT BE REORDERED: append new settings at the end
-//     of their category instead. Appending is always safe -- an older
+//     count. So ROWS MUST NOT BE REORDERED: append new settings only at the
+//     global tail. Appending is always safe -- an older
 //     kernel reports a smaller count and the rest keep their defaults.
 //
 //     REMOVING a row shifts every later index, and the launcher and the
@@ -23,13 +23,13 @@
 //     susamune.ini itself is keyed by name, so a user only loses the
 //     removed key, not the rest of their file.
 //   - the ini_key is what appears in susamune.ini. It is deliberately
-//     separate from the menu display name in kSettingDescs so that
+//     separate from the menu display name in src/settings_descs.inc so that
 //     relabelling a menu entry never invalidates a user's saved file.
 //     Only the launcher expands the keys into strings -- the mod reads
 //     values by index and would otherwise carry the table for nothing.
 //
-// The menu display name, type, choice labels, default and category stay
-// in kSettingDescs (settings.cpp) -- the launcher has no use for them and
+// The menu display name, choice set, default and category stay in
+// src/settings_descs.inc -- the launcher has no use for them and
 // they cannot be expressed in a C-compatible header.
 // =====================================================================
 

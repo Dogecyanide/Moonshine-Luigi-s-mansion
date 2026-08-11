@@ -31,6 +31,9 @@ struct Dest {
     u8 gameInt3;
 };
 
+// Parent main-stage area for an internal scene, or 0xFF when none exists.
+u8 parentArea(u8 area);
+
 // Arm a warp. warpTo() also records the destination for warpToLast().
 void warpTo(const Dest &dest);
 // Warp to `dest`, but make the next director see `source` as the stage Mario

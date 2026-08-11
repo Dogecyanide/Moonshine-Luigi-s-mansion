@@ -14,7 +14,9 @@
 #include "JSystem/JUtility/JUTGamePad.hxx"
 #include "SMS/System/Application.hxx"
 #include "susamune/binds.hxx"
+#include "susamune/layout_editor.hxx"
 #include "susamune/menu.hxx"
+#include "susamune/packed_text.hxx"
 
 namespace {
 
@@ -24,7 +26,6 @@ const int kDesignW = 182;
 const int kDesignH = 120;
 const int kValueLineH = 14;
 const int kSafeBottom = 456;
-const u8  kOriginalLineWidth = 20;
 
 inline int clampi(int v, int lo, int hi) {
     if (v < lo) return lo;
@@ -35,8 +36,8 @@ inline int clampi(int v, int lo, int hi) {
 inline Color color(u8 r, u8 g, u8 b, u8 a) { return Color(r, g, b, a); }
 
 struct Painter {
-    Menu                          *menu;
-    const SusamuneInputDisplayCfg *cfg;
+    Menu                      *menu;
+    const InputDisplayLiveCfg *cfg;
 
     int scale(int v) const { return v * (int)cfg->scale / 100; }
     int x(int v) const { return (int)cfg->x + scale(v); }
@@ -64,19 +65,13 @@ struct Painter {
             -1000, -981, -924, -831, -707, -556, -383, -195,
             0, 195, 383, 556, 707, 831, 924, 981
         };
-        static const s16 uy[32] = {
-            0, 195, 383, 556, 707, 831, 924, 981,
-            1000, 981, 924, 831, 707, 556, 383, 195,
-            0, -195, -383, -556, -707, -831, -924, -981,
-            -1000, -981, -924, -831, -707, -556, -383, -195
-        };
         int cx = x(lx);
         int cy = y(ly);
         int r  = scale(lr);
         for (int i = 0; i < count; i++) {
             const int j = i * step;
             xy[i * 2]     = (s16)(cx + r * ux[j] / 1000);
-            xy[i * 2 + 1] = (s16)(cy + r * uy[j] / 1000);
+            xy[i * 2 + 1] = (s16)(cy + r * ux[(j + 24) & 31] / 1000);
         }
     }
 
@@ -89,13 +84,13 @@ struct Painter {
     void strokeCircle(int lx, int ly, int lr, Color c) const {
         s16 xy[64];
         regularVertices(lx, ly, lr, xy, 32, 1);
-        menu->strokePoly(xy, 32, kOriginalLineWidth, c);
+        menu->strokePoly(xy, 32, c);
     }
 
     void strokeGate(int lx, int ly, int lr, Color c) const {
         s16 xy[16];
         regularVertices(lx, ly, lr, xy, 8, 4);
-        menu->strokePoly(xy, 8, kOriginalLineWidth, c);
+        menu->strokePoly(xy, 8, c);
     }
 
     void button(int lx, int ly, int radius, bool down,
@@ -108,28 +103,38 @@ struct Painter {
     }
 };
 
-int valueLines(const SusamuneInputDisplayCfg &cfg) {
+int valueLines(const InputDisplayLiveCfg &cfg) {
     if (cfg.valueMode == SUSAMUNE_INPUT_VALUES_STICKS) return 2;
     if (cfg.valueMode == SUSAMUNE_INPUT_VALUES_FULL) return 3;
     return 0;
 }
 
-const char *const kOnOff[] = { "Off", "On" };
-const char *const kValueModes[] = { "Off", "Sticks", "Full" };
-const char *const kSources[] = { "Raw", "Processed" };
-const char *const kPlacements[] = { "Below", "Above", "Inside" };
-const char *const kEditChannels[] = {
-    "Background alpha", "Background red", "Background green",
-    "Background blue", "Display brightness"
+const char kInputText[] =
+    "Input display\0Value readout\0Value source\0Value position\0"
+    "Edit layout\0Reset layout\0Off\0On\0Sticks\0Full\0Raw\0Processed\0"
+    "Below\0Above\0Inside\0Background alpha\0Background red\0"
+    "Background green\0Background blue\0Display brightness";
+
+enum InputTextGroup {
+    TEXT_ROWS          = 0,
+    TEXT_ON_OFF        = 6,
+    TEXT_STICKS        = 8,
+    TEXT_SOURCES       = 10,
+    TEXT_PLACEMENTS    = 12,
+    TEXT_EDIT_CHANNELS = 15,
 };
+
+__attribute__((noinline)) const char *inputText(int index) {
+    return PackedText::at(kInputText, index);
+}
+
+static_assert(sizeof(kInputText) == 217, "input text offsets changed");
 
 }  // namespace
 
 InputDisplay gInputDisplay;
 
 void InputDisplay::resetDefaults() {
-    mCfg.magic          = SUSAMUNE_INPUT_CFG_MAGIC;
-    mCfg.version        = SUSAMUNE_INPUT_CFG_VERSION;
     mCfg.x              = 16;
     mCfg.y              = 314;
     mCfg.startVisible   = 1;
@@ -142,7 +147,6 @@ void InputDisplay::resetDefaults() {
     mCfg.valueMode      = SUSAMUNE_INPUT_VALUES_OFF;
     mCfg.valueSource    = SUSAMUNE_INPUT_SOURCE_RAW;
     mCfg.valuePlacement = SUSAMUNE_INPUT_VALUES_BELOW;
-    for (u32 i = 0; i < sizeof(mCfg.reserved); i++) mCfg.reserved[i] = 0;
 
     mVisible          = false;
     mVisibleBeforeEdit = true;
@@ -244,19 +248,17 @@ void InputDisplay::update() {
 }
 
 const char *InputDisplay::menuRowName(int row) {
-    static const char *const names[] = {
-        "Input display", "Value readout", "Value source", "Value position",
-        "Edit layout", "Reset layout"
-    };
-    return (row >= 0 && row < menuRowCount()) ? names[row] : "";
+    return (row >= 0 && row < menuRowCount()) ? inputText(TEXT_ROWS + row) : "";
 }
 
 const char *InputDisplay::menuRowValue(int row) const {
     switch (row) {
-    case 0: return kOnOff[mCfg.startVisible ? 1 : 0];
-    case 1: return kValueModes[mCfg.valueMode];
-    case 2: return kSources[mCfg.valueSource];
-    case 3: return kPlacements[mCfg.valuePlacement];
+    case 0: return inputText(TEXT_ON_OFF + (mCfg.startVisible ? 1 : 0));
+    case 1:
+        return inputText(mCfg.valueMode ? TEXT_STICKS + mCfg.valueMode - 1
+                                        : TEXT_ON_OFF);
+    case 2: return inputText(TEXT_SOURCES + mCfg.valueSource);
+    case 3: return inputText(TEXT_PLACEMENTS + mCfg.valuePlacement);
     case 4: return "Open";
     case 5: return "Default";
     default: return "";
@@ -294,7 +296,8 @@ void InputDisplay::adjustMenuRow(int row, int dir) {
 
 void InputDisplay::beginEditor() {
     if (mEditing) return;
-    mEditBackup       = mCfg;
+    mEditBackup       = {mCfg.x, mCfg.y, mCfg.scale, mCfg.bgR, mCfg.bgG,
+                         mCfg.bgB, mCfg.bgA, mCfg.brightness};
     mDirtyBeforeEdit  = mDirty;
     mVisibleBeforeEdit = mVisible;
     mVisible          = true;
@@ -304,7 +307,14 @@ void InputDisplay::beginEditor() {
 
 void InputDisplay::finishEditor(bool keep) {
     if (!keep) {
-        mCfg   = mEditBackup;
+        mCfg.x          = mEditBackup.x;
+        mCfg.y          = mEditBackup.y;
+        mCfg.scale      = mEditBackup.scale;
+        mCfg.bgR        = mEditBackup.bgR;
+        mCfg.bgG        = mEditBackup.bgG;
+        mCfg.bgB        = mEditBackup.bgB;
+        mCfg.bgA        = mEditBackup.bgA;
+        mCfg.brightness = mEditBackup.brightness;
         mDirty = mDirtyBeforeEdit;
     }
     mVisible = mVisibleBeforeEdit;
@@ -327,28 +337,8 @@ void InputDisplay::updateEditor(TMarioGamePad *pad) {
         return;
     }
 
-    bool changed = false;
-    if (rapid & TMarioGamePad::DPAD_LEFT)  {
-        mCfg.x = (u16)clampi((int)mCfg.x - 2, 0, 640); changed = true;
-    }
-    if (rapid & TMarioGamePad::DPAD_RIGHT) {
-        mCfg.x = (u16)clampi((int)mCfg.x + 2, 0, 640); changed = true;
-    }
-    if (rapid & TMarioGamePad::DPAD_UP)    {
-        mCfg.y = (u16)clampi((int)mCfg.y - 2, 0, 480); changed = true;
-    }
-    if (rapid & TMarioGamePad::DPAD_DOWN)  {
-        mCfg.y = (u16)clampi((int)mCfg.y + 2, 0, 480); changed = true;
-    }
-
-    if (rapid & TMarioGamePad::L) {
-        mCfg.scale = (u8)clampi((int)mCfg.scale - 2, 50, 150);
-        changed = true;
-    }
-    if (rapid & TMarioGamePad::R) {
-        mCfg.scale = (u8)clampi((int)mCfg.scale + 2, 50, 150);
-        changed = true;
-    }
+    bool changed = LayoutEditor::updatePositionScale(
+        rapid, mCfg.x, mCfg.y, mCfg.scale);
     if (rapid & TMarioGamePad::START) {
         mEditChannel = (u8)((mEditChannel + 1) % 5);
     }
@@ -390,27 +380,30 @@ void InputDisplay::draw(Menu *menu, bool force) const {
     // the complete outlined trigger, exactly like the Gecko original.
     const int lFill = (buttons & JUTGamePad::L) ? 64 : 56 * l / 255;
     const int rFill = (buttons & JUTGamePad::R) ? 64 : 56 * r / 255;
-    p.box(12, 10, lFill, 8, p.lit(223, 223, 223, 0xbf));
-    p.box(170 - rFill, 10, rFill, 8, p.lit(223, 223, 223, 0xbf));
+    const Color triggerFill = p.lit(223, 223, 223, 0xbf);
+    p.box(12, 10, lFill, 8, triggerFill);
+    p.box(170 - rFill, 10, rFill, 8, triggerFill);
     const Color triggerStroke = p.lit(238, 238, 238, 0xbf);
     s16 trigger[8] = {
         (s16)p.x(12), (s16)p.y(10), (s16)p.x(76), (s16)p.y(10),
         (s16)p.x(76), (s16)p.y(18), (s16)p.x(12), (s16)p.y(18)
     };
-    menu->strokePoly(trigger, 4, kOriginalLineWidth, triggerStroke);
+    menu->strokePoly(trigger, 4, triggerStroke);
     trigger[0] = trigger[6] = (s16)p.x(106);
     trigger[2] = trigger[4] = (s16)p.x(170);
-    menu->strokePoly(trigger, 4, kOriginalLineWidth, triggerStroke);
+    menu->strokePoly(trigger, 4, triggerStroke);
 
     // The reference uses round knobs inside eight-segment stick gates.
     const int mx = clampi((s8)raw.mStickX, -100, 100) * 14 / 100;
     const int my = clampi((s8)raw.mStickY, -100, 100) * 14 / 100;
     const int cx = clampi((s8)raw.mSubStickX, -100, 100) * 14 / 100;
     const int cy = clampi((s8)raw.mSubStickY, -100, 100) * 14 / 100;
-    p.fillCircle(32 + mx, 52 - my, 12, p.lit(238, 238, 238, 0xef));
-    p.strokeGate(32, 52, 19, p.lit(238, 238, 238, 0xef));
-    p.fillCircle(64 + cx, 92 - cy, 12, p.lit(255, 211, 0, 0xef));
-    p.strokeGate(64, 92, 19, p.lit(255, 211, 0, 0xef));
+    const Color mainStick = p.lit(238, 238, 238, 0xef);
+    p.fillCircle(32 + mx, 52 - my, 12, mainStick);
+    p.strokeGate(32, 52, 19, mainStick);
+    const Color cStick = p.lit(255, 211, 0, 0xef);
+    p.fillCircle(64 + cx, 92 - cy, 12, cStick);
+    p.strokeGate(64, 92, 19, cStick);
 
     p.button(138, 66, 18, buttons & JUTGamePad::A, 46, 229, 184);
     p.button(113, 89, 9, buttons & JUTGamePad::B, 255, 26, 26);
@@ -454,16 +447,17 @@ void InputDisplay::draw(Menu *menu, bool force) const {
     }
 
     char text[48];
+    const Color valueText = p.lit(255, 255, 255, 255);
     snprintf(text, sizeof(text), "M  X:%+04d  Y:%+04d", mainX, mainY);
     menu->drawText(text, mCfg.x + 4, textY + 2, textSize, textSize,
-                   p.lit(255, 255, 255, 255));
+                   valueText);
     snprintf(text, sizeof(text), "C  X:%+04d  Y:%+04d", cX, cY);
     menu->drawText(text, mCfg.x + 4, textY + kValueLineH + 1,
-                   textSize, textSize, p.lit(255, 255, 255, 255));
+                   textSize, textSize, valueText);
     if (lines == 3) {
         snprintf(text, sizeof(text), "L:%03d  R:%03d", triggerL, triggerR);
         menu->drawText(text, mCfg.x + 4, textY + kValueLineH * 2 + 1,
-                       textSize, textSize, p.lit(255, 255, 255, 255));
+                       textSize, textSize, valueText);
     }
 }
 
@@ -473,15 +467,13 @@ void InputDisplay::drawEditor(Menu *menu) const {
     char status[112];
     // Keep every editor instruction in the title-safe upper area. The old
     // footer reached y=472 and was clipped by real PAL output/capture paths.
-    menu->fillBox(8, 8, 624, 88, color(0, 0, 0, 205));
     snprintf(status, sizeof(status),
              "X:%u Y:%u  Size:%u%%  BG:%03u,%03u,%03u  A:%03u  Bright:%u%%",
              mCfg.x, mCfg.y, mCfg.scale, mCfg.bgR, mCfg.bgG, mCfg.bgB,
              mCfg.bgA, mCfg.brightness);
-    menu->drawText("Input Display editor", 18, 15, 16, 16, color(255, 255, 255, 255));
-    menu->drawText(status, 18, 38, 11, 11, color(190, 220, 255, 255));
+    LayoutEditor::drawHeader(menu, 88, "Input Display editor", status);
     snprintf(status, sizeof(status), "START Field: %s   X -   Y +",
-             kEditChannels[mEditChannel]);
+             inputText(TEXT_EDIT_CHANNELS + mEditChannel));
     menu->drawText(status, 18, 57, 11, 11, color(255, 255, 255, 255));
     menu->drawText("D-pad Move   L/R Size   A Save   B Cancel   Z Reset",
                    18, 76, 11, 11, color(255, 255, 255, 255));

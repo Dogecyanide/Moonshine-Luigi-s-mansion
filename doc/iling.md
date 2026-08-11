@@ -13,6 +13,13 @@ Any% Plaza segments:
 
 The 24 blue-coin-shop Shines are deliberately excluded.
 
+`src/iling_entries.inc` remains the reviewable source of all 117 labels.
+`ILing::label()` derives the first 87 regular-course labels (Bianco through
+Pianta) procedurally into an 18-byte static buffer, and compile-time assertions
+compare every derived label with its catalog literal. The remaining 30
+Airstrip, Corona, Delfino and Any% labels live in one ordered NUL pool. A
+generated label is borrowed only until the next `ILing::label()` call.
+
 The Any% group is the final menu group. Its rows are Bianco Plant, Delfino
 Shadow Mario, Travel Skip, Gelato Plant, Pianta Enter, Honey Skip, Ricco Enter,
 Bianco II Enter, Sirena Enter, Noki Enter and Corona Enter. Z toggles the PB

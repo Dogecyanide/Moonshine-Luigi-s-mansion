@@ -78,7 +78,8 @@
 #define SUSAMUNE_ADDR_MOD_BASE \
     SUSAMUNE_MEM1_ADDR(0x80426020u, 0x80429800u, 0x80420d60u)
 #define SUSAMUNE_MOD_REGION_SIZE 0x10000u
-#define SUSAMUNE_SCRATCH 0x40u // idk
+// Final fixed-address scratch reserved from the linked blob.
+#define SUSAMUNE_SCRATCH 0x40u
 #define SUSAMUNE_MOD_BLOB_MAX_SIZE (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
 
 // The mod links at __ArenaLo, but OSInit hands the debug stack back to the
