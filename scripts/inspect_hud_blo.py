@@ -93,7 +93,7 @@ def inspect_blo(data):
     assert data[:8] == b"SCRNblo1"
     targets = {
         b"w_ba", b"w_tx", b"\0w_0", b"w_t0", b"w_t1", b"w_t2", b"w_t3",
-        b"t_ba", b"\0t_0", b"\0t_1", b"\0t_2",
+        b"t_ba", b"t_tx", b"\0t_0", b"\0t_1", b"\0t_2",
         b"b_ba", b"b_sl", b"\0b_0", b"r_ba", b"r_sl", b"\0r_0",
         b"d_ba", b"d_ic", b"\0d_x", b"\0d_0",
         b"c_ba", b"s_ba", b"m_ba",

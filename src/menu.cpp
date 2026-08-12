@@ -691,7 +691,10 @@ private:
         ROW_QFT_HEADER,
         ROW_QFT_EDITOR,
         ROW_QFT_LEADING_ZERO,
-        ROW_SUNSHINE_TIMER,
+        ROW_SUNSHINE_TIMER_CHARACTERS,
+        ROW_SUNSHINE_TIMER_STREAK,
+        ROW_SUNSHINE_TIMER_LABEL,
+        ROW_SUNSHINE_TIMER_LABEL_VISIBLE,
         ROW_INPUT_HEADER,
         ROW_INPUT_FIRST,
         ROW_INPUT_END = ROW_INPUT_FIRST + InputDisplay::MENU_ROW_COUNT,
@@ -720,8 +723,16 @@ private:
             gQftDisplay.beginEditor();
         } else if (mSel == ROW_QFT_LEADING_ZERO) {
             gQftDisplay.toggleLeadingZero();
-        } else if (mSel == ROW_SUNSHINE_TIMER) {
-            gCreationExtras.beginTimerEditor();
+        } else if (mSel == ROW_SUNSHINE_TIMER_CHARACTERS) {
+            gCreationExtras.beginTimerCharacterEditor();
+        } else if (mSel == ROW_SUNSHINE_TIMER_STREAK) {
+            gCreationExtras.beginColorEditor(SUSAMUNE_CREATION_TIMER_BG, 1,
+                                             "Sunshine timer streak");
+        } else if (mSel == ROW_SUNSHINE_TIMER_LABEL) {
+            gCreationExtras.beginColorEditor(SUSAMUNE_CREATION_TIMER_LABEL, 1,
+                                             "TIME/TEMPO label colour");
+        } else if (mSel == ROW_SUNSHINE_TIMER_LABEL_VISIBLE) {
+            gCreationExtras.toggleTimerLabel();
         } else if (mSel >= ROW_INPUT_FIRST && mSel < ROW_INPUT_END) {
             gInputDisplay.adjustMenuRow(inputRow(mSel), dir);
         } else if (mSel >= ROW_METADATA_FIRST && mSel < ROW_METADATA_END) {
@@ -734,7 +745,14 @@ private:
     const char *rowName(int row) const {
         if (row == ROW_QFT_EDITOR) return "QFT timer";
         if (row == ROW_QFT_LEADING_ZERO) return "QFT leading zero";
-        if (row == ROW_SUNSHINE_TIMER) return "Sunshine timer";
+        if (row == ROW_SUNSHINE_TIMER_CHARACTERS)
+            return "Sunshine timer characters";
+        if (row == ROW_SUNSHINE_TIMER_STREAK)
+            return "Sunshine timer streak";
+        if (row == ROW_SUNSHINE_TIMER_LABEL)
+            return "TIME/TEMPO label colour";
+        if (row == ROW_SUNSHINE_TIMER_LABEL_VISIBLE)
+            return "Show TIME/TEMPO label";
         if (row >= ROW_INPUT_FIRST && row < ROW_INPUT_END)
             return InputDisplay::menuRowName(inputRow(row));
         if (row >= ROW_METADATA_FIRST && row < ROW_METADATA_END)
@@ -746,7 +764,11 @@ private:
         if (row == ROW_QFT_EDITOR) return "Edit";
         if (row == ROW_QFT_LEADING_ZERO)
             return gQftDisplay.leadingZero() ? "On" : "Off";
-        if (row == ROW_SUNSHINE_TIMER) return "Edit";
+        if (row >= ROW_SUNSHINE_TIMER_CHARACTERS &&
+            row <= ROW_SUNSHINE_TIMER_LABEL)
+            return "Edit";
+        if (row == ROW_SUNSHINE_TIMER_LABEL_VISIBLE)
+            return gCreationExtras.timerLabelVisible() ? "On" : "Off";
         if (row >= ROW_INPUT_FIRST && row < ROW_INPUT_END)
             return gInputDisplay.menuRowValue(inputRow(row));
         if (row >= ROW_METADATA_FIRST && row < ROW_METADATA_END)

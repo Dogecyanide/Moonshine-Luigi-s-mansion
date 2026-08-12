@@ -13,8 +13,8 @@ class TMarioGamePad;
 class CreationExtras {
 public:
     enum {
-        MENU_ROW_COUNT = 21,
-        HUD_PANE_COUNT = 24,
+        MENU_ROW_COUNT = 20,
+        HUD_PANE_COUNT = 25,
         PREVIEW_PANE_COUNT = 2,
     };
 
@@ -25,7 +25,11 @@ public:
     void onStageSetup();
     void update();
     void draw(Menu *menu) const;
-    void beginTimerEditor();
+    void beginTimerCharacterEditor();
+    void beginColorEditor(int first, int count, const char *title,
+                          const char *names = nullptr);
+    void toggleTimerLabel();
+    bool timerLabelVisible() const { return mTimerLabelVisible != 0; }
 
     static int menuRowCount() { return MENU_ROW_COUNT; }
     static bool menuRowSeparator(int row);
@@ -46,8 +50,6 @@ private:
     enum EditMode { EDIT_NONE, EDIT_COLOR, EDIT_TIMER, EDIT_WORD_STYLE };
 
     static CreationStyle defaultWordStyle(int index);
-    void beginColorEditor(int first, int count, const char *title,
-                          const char *names = nullptr);
     void beginWordEditor(int index);
     void beginKeyboard(int index);
     void updateKeyboard(TMarioGamePad *pad);
@@ -88,6 +90,7 @@ private:
     u32 mColorPresentBeforeEdit;
     u32 mPreviewVisible;
     u8 mWaterFillDefault[2][3];
+    u8 mTimerLabelVisible;
     bool mKeyboard;
     bool mUppercase;
     bool mDirty;

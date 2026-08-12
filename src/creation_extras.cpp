@@ -17,7 +17,7 @@ const u32 kHudPaneTags[] = {
     't_ba', 'c_ba', 'r_ba', 'd_ba', 'm_ba', 's_ba', 'm_tx',
     '\0m_x', 'm_n1', 'm_n2', 'm_n3', 't_n1', 't_n2', 't_n3', 't_n4',
     't_n5', 't_n6', 't_n7', 't_n8', 't_n9', 't_n0', 't_c1', 't_c2',
-    't_c3',
+    't_c3', 't_tx',
 };
 const u8 kHudPaneColors[] = {
     SUSAMUNE_CREATION_TIMER_BG, SUSAMUNE_CREATION_COIN_BG,
@@ -39,6 +39,7 @@ const u8 kHudPaneColors[] = {
     SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 10,
     SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 11,
     SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 12,
+    SUSAMUNE_CREATION_TIMER_LABEL,
 };
 static_assert(sizeof(kHudPaneTags) / sizeof(kHudPaneTags[0]) ==
                   CreationExtras::HUD_PANE_COUNT,
@@ -49,13 +50,12 @@ static_assert(sizeof(kHudPaneColors) / sizeof(kHudPaneColors[0]) ==
 
 constexpr char kTimerNames[] =
     "Normal digit 1\0Normal digit 2\0Normal digit 3\0Normal digit 4\0"
-    "Normal digit 5\0Normal digit 6\0Rush digit 1\0Rush digit 2\0"
-    "Rush digit 3\0Rush digit 4\0Separator 1\0Separator 2\0Separator 3";
+    "Normal digit 5\0Normal digit 6\0Countdown digit 1\0Countdown digit 2\0"
+    "Countdown digit 3\0Countdown digit 4\0Separator 1\0Separator 2\0Separator 3";
 
 constexpr char kMenuText[] =
-    "HUD\0FLUDD water\0Sunshine timer streak\0Coin streak\0"
-    "Red coin streak\0Blue coin streak\0Lives streak\0Shines streak\0"
-    "Life counter\0CUSTOM TEXT\0"
+    "HUD\0FLUDD water\0Coin streak\0Red coin streak\0Blue coin streak\0"
+    "Lives streak\0Shines streak\0Life counter\0CUSTOM TEXT\0"
     "Word 1 text\0Word 1 style\0Word 1 visible\0"
     "Word 2 text\0Word 2 style\0Word 2 visible\0"
     "Word 3 text\0Word 3 style\0Word 3 visible\0"
@@ -77,18 +77,6 @@ static_assert(packedEntries(kMenuText, sizeof(kMenuText)) ==
 static_assert(packedEntries(kTimerNames, sizeof(kTimerNames)) ==
                   SUSAMUNE_CREATION_TIMER_CHAR_COUNT,
               "Sunshine timer colour table changed");
-
-const u8 kDefaultColors[SUSAMUNE_CREATION_COLOR_COUNT][3] = {
-    {255, 255, 255}, {255, 255, 255}, {255, 255, 255},
-    {255, 255, 255}, {255, 255, 255}, {255, 255, 255},
-    {255, 255, 255}, {255, 255, 255}, {255, 255, 255},
-    {255, 255, 255}, {255, 255, 255}, {255, 255, 255},
-    {255, 255, 255}, {255, 255, 255}, {255, 255, 255},
-    {255, 255, 255}, {255, 255, 255}, {255, 255, 255},
-    {255, 255, 255}, {255, 255, 255}, {255, 255, 255},
-    {255, 255, 255}, {255, 255, 255}, {255, 255, 255},
-    { 24,  28,  40},
-};
 
 const char kLettersLower[] = "abcdefghijklmnopqrstuvwxyz.,!?-_";
 const char kLettersUpper[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ.,!?-_";
@@ -120,14 +108,14 @@ CreationStyle CreationExtras::defaultWordStyle(int index) {
 }
 
 void CreationExtras::resetDefaults() {
-    for (int i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++) {
-        copyRgb(mColors[i], kDefaultColors[i]);
-        copyRgb(mDefaultColors[i], kDefaultColors[i]);
-    }
+    Creation::fillWhite(mColors, SUSAMUNE_CREATION_COLOR_COUNT);
+    Creation::fillWhite(mDefaultColors, SUSAMUNE_CREATION_COLOR_COUNT);
+    const u8 menuBg[] = {24, 28, 40};
+    copyRgb(mColors[SUSAMUNE_CREATION_MENU_BG], menuBg);
+    copyRgb(mDefaultColors[SUSAMUNE_CREATION_MENU_BG], menuBg);
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         mWordStyle[word] = defaultWordStyle(word);
-        for (int i = 0; i < SUSAMUNE_CREATION_WORD_CHARS; i++)
-            copyRgb(mWordRgb[word][i], kDefaultColors[0]);
+        Creation::fillWhite(mWordRgb[word], SUSAMUNE_CREATION_WORD_CHARS);
         snprintf(mWords[word], SUSAMUNE_CREATION_WORD_TEXT_SIZE,
                  "Custom Text %d", word + 1);
         mWordLength[word] = (u8)strlen(mWords[word]);
@@ -149,6 +137,7 @@ void CreationExtras::resetDefaults() {
     mKeyboardConfirm = 0;
     mColorPresent = 0;
     mColorPresentBeforeEdit = 0;
+    mTimerLabelVisible = 1;
     mDirty = false;
     mDirtyBeforeEdit = false;
 }
@@ -176,9 +165,10 @@ void CreationExtras::adopt(const volatile SusamuneCreationCfg *src) {
     mColorPresent = src->colorPresent &
                     ((1u << SUSAMUNE_CREATION_COLOR_COUNT) - 1u);
     mColorPresent &=
-        ~SUSAMUNE_CREATION_COLOR(SUSAMUNE_CREATION_FLUDD_CIRCLE) &
-        ~SUSAMUNE_CREATION_COLOR(SUSAMUNE_CREATION_SHINE_OUTFIT) &
-        ~SUSAMUNE_CREATION_COLOR(SUSAMUNE_CREATION_MARIO_HAT);
+        ~SUSAMUNE_CREATION_COLOR(SUSAMUNE_CREATION_LEGACY_WATER_TEXT) &
+        ~SUSAMUNE_CREATION_COLOR(SUSAMUNE_CREATION_LEGACY_MARIO_HAT);
+    if (src->timerLabelVisiblePresent)
+        mTimerLabelVisible = src->timerLabelVisible ? 1 : 0;
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         const volatile SusamuneCreationWordCfg &in = src->words[word];
         CreationStyle &s = mWordStyle[word];
@@ -205,9 +195,11 @@ void CreationExtras::stageInto(volatile SusamuneCreationCfg *dst) const {
     dst->timerX = 0xffff;
     dst->timerY = 0xffff;
     dst->timerPositionPresent = 0;
+    dst->timerLabelVisible = mTimerLabelVisible;
+    dst->timerLabelVisiblePresent = 1;
     for (int i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
         for (int c = 0; c < 3; c++) dst->rgb[i][c] = mColors[i][c];
-    for (u32 i = 0; i < sizeof(dst->reserved1); i++) dst->reserved1[i] = 0;
+    dst->reserved1 = 0;
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         volatile SusamuneCreationWordCfg &out = dst->words[word];
         const CreationStyle &s = mWordStyle[word];
@@ -292,6 +284,9 @@ void CreationExtras::applyHud() {
         }
     }
 
+    if (!mTimerLabelVisible && mHudPictures[HUD_PANE_COUNT - 1])
+        mHudPictures[HUD_PANE_COUNT - 1]->mIsVisible = false;
+
     if (!gpMarDirector || !gpMarDirector->mGCConsole ||
         !(mColorPresent & SUSAMUNE_CREATION_COLOR(
               SUSAMUNE_CREATION_FLUDD_WATER))) return;
@@ -319,10 +314,16 @@ void CreationExtras::addPreviewPane(J2DPane *pane) {
 
 void CreationExtras::beginHudPreview(int color) {
     endHudPreview();
-    if (!mHudScreen || color < SUSAMUNE_CREATION_TIMER_BG ||
-        color > SUSAMUNE_CREATION_SHINES_BG) return;
-    addPreviewPane(mHudScreen->search(
-        kPreviewRootTags[color - SUSAMUNE_CREATION_TIMER_BG]));
+    if (!mHudScreen) return;
+    int root;
+    if (color == SUSAMUNE_CREATION_TIMER_LABEL) {
+        root = 0;
+    } else {
+        if (color < SUSAMUNE_CREATION_TIMER_BG ||
+            color > SUSAMUNE_CREATION_SHINES_BG) return;
+        root = color - SUSAMUNE_CREATION_TIMER_BG;
+    }
+    addPreviewPane(mHudScreen->search(kPreviewRootTags[root]));
     for (u32 i = 0; i < HUD_PANE_COUNT; i++)
         if (kHudPaneColors[i] == color) addPreviewPane(mHudPictures[i]);
 }
@@ -342,9 +343,9 @@ void CreationExtras::update() {
         gpMarDirector->mCurState != TMarDirector::STATE_NORMAL ||
         !gpMarDirector->mGCConsole ||
         gpMarDirector->mGCConsole->mMainScreen != mHudScreen) return;
+    applyHud();
     for (u32 i = 0; i < mPreviewPaneCount; i++)
         if (mPreviewPanes[i]) mPreviewPanes[i]->mIsVisible = true;
-    applyHud();
 }
 
 void CreationExtras::draw(Menu *menu) const {
@@ -357,7 +358,7 @@ void CreationExtras::draw(Menu *menu) const {
 }
 
 bool CreationExtras::menuRowSeparator(int row) {
-    return row == 0 || row == 9 || row == 19;
+    return row == 0 || row == 8 || row == 18;
 }
 
 const char *CreationExtras::menuRowName(int row) {
@@ -366,8 +367,8 @@ const char *CreationExtras::menuRowName(int row) {
 }
 
 const char *CreationExtras::menuRowValue(int row) const {
-    if (row >= 10 && row <= 18) {
-        const int local = row - 10;
+    if (row >= 9 && row <= 17) {
+        const int local = row - 9;
         if (local % 3 == 2)
             return mWordVisible[local / 3] ? "On" : "Off";
     }
@@ -388,17 +389,19 @@ void CreationExtras::beginColorEditor(int first, int count, const char *title,
     beginHudPreview(first);
 }
 
-void CreationExtras::beginTimerEditor() {
+void CreationExtras::beginTimerCharacterEditor() {
     if (editing()) return;
-    mDirtyBeforeEdit = mDirty;
-    mColorPresentBeforeEdit = mColorPresent;
+    beginColorEditor(SUSAMUNE_CREATION_TIMER_CHAR_FIRST,
+                     SUSAMUNE_CREATION_TIMER_CHAR_COUNT,
+                     "Sunshine timer characters", kTimerNames);
     mEditMode = EDIT_TIMER;
-    mEditFirst = SUSAMUNE_CREATION_TIMER_CHAR_FIRST;
-    mEditCount = SUSAMUNE_CREATION_TIMER_CHAR_COUNT;
-    mEditTitle = "Sunshine timer";
-    mEditor.begin(&mColorStyle, mColors + mEditFirst,
-                  mColorBackup + mEditFirst, mEditCount, mEditCount,
-                  kTimerNames, 0);
+}
+
+void CreationExtras::toggleTimerLabel() {
+    mTimerLabelVisible ^= 1;
+    mDirty = true;
+    if (mHudPictures[HUD_PANE_COUNT - 1])
+        mHudPictures[HUD_PANE_COUNT - 1]->mIsVisible = mTimerLabelVisible != 0;
 }
 
 void CreationExtras::beginWordEditor(int index) {
@@ -427,16 +430,12 @@ void CreationExtras::beginKeyboard(int index) {
 
 void CreationExtras::adjustMenuRow(int row, int direction) {
     (void)direction;
-    static const u8 rowToColor[] = {
-        SUSAMUNE_CREATION_FLUDD_WATER, SUSAMUNE_CREATION_TIMER_BG,
-        SUSAMUNE_CREATION_COIN_BG, SUSAMUNE_CREATION_RED_BG,
-        SUSAMUNE_CREATION_BLUE_BG, SUSAMUNE_CREATION_LIVES_BG,
-        SUSAMUNE_CREATION_SHINES_BG, SUSAMUNE_CREATION_LIFE_TEXT,
-    };
-    if (row >= 1 && row <= 8) {
-        beginColorEditor(rowToColor[row - 1], 1, menuRowName(row));
-    } else if (row >= 10 && row <= 18) {
-        const int local = row - 10;
+    if (row >= 1 && row <= 7) {
+        const int color = row == 1 ? SUSAMUNE_CREATION_FLUDD_WATER
+                                   : SUSAMUNE_CREATION_COIN_BG + row - 2;
+        beginColorEditor(color, 1, menuRowName(row));
+    } else if (row >= 9 && row <= 17) {
+        const int local = row - 9;
         const int word = local / 3;
         if (local % 3 == 0) beginKeyboard(word);
         else if (local % 3 == 1) beginWordEditor(word);
@@ -444,7 +443,7 @@ void CreationExtras::adjustMenuRow(int row, int direction) {
             mWordVisible[word] = !mWordVisible[word];
             mDirty = true;
         }
-    } else if (row == 20) {
+    } else if (row == 19) {
         beginColorEditor(SUSAMUNE_CREATION_MENU_BG, 1, menuRowName(row));
     }
 }
@@ -456,14 +455,14 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
     }
     if (!mEditor.editing()) return;
     const u8 (*defaults)[3] = mEditMode == EDIT_WORD_STYLE
-                                  ? kDefaultColors
+                                  ? mDefaultColors
                                   : mDefaultColors + mEditFirst;
     const CreationStyle defaultStyle =
         mEditMode == EDIT_WORD_STYLE ? defaultWordStyle(mEditWord)
                                      : mColorStyle;
     const u8 result = mEditor.update(
         pad, defaultStyle, defaults,
-        mEditMode == EDIT_COLOR || mEditMode == EDIT_TIMER ? mEditCount : 1);
+        mEditMode != EDIT_WORD_STYLE ? mEditCount : 1);
     if (result & CreationEditor::UPDATE_CHANGED) {
         if (mEditMode == EDIT_WORD_STYLE) {
             clampWord(mEditWord);
@@ -478,7 +477,7 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
     }
     if (result & CreationEditor::UPDATE_CANCELLED) {
         mDirty = mDirtyBeforeEdit;
-        if (mEditMode == EDIT_COLOR || mEditMode == EDIT_TIMER) {
+        if (mEditMode != EDIT_WORD_STYLE) {
             mColorPresent = mColorPresentBeforeEdit;
             const u32 savedPresent = mColorPresent;
             for (int i = 0; i < mEditCount; i++)

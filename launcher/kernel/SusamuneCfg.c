@@ -20,7 +20,7 @@ button combination per configurable action, keyed by binds_list.h and written as
 [input_display_<region>] holds its wider position/colour configuration.
 [metadata_display_<region>] holds the native metadata overlay, including its
 optional hand-authored text template. [qft_display_<region>] holds the compact
-QFT readout's Creation style. [creation_<region>] holds native HUD/model
+QFT readout's Creation style. [creation_<region>] holds native HUD
 colours and the three custom text overlays.
 [nintendont] holds
 the launcher's own options -- game version, per-version disc image paths, and
@@ -104,7 +104,7 @@ static const char *const CreationColorKeys[SUSAMUNE_CREATION_COLOR_COUNT] =
 	"timer_normal_4_rgb", "timer_normal_5_rgb", "timer_normal_6_rgb",
 	"timer_rush_1_rgb", "timer_rush_2_rgb", "timer_rush_3_rgb",
 	"timer_rush_4_rgb", "timer_separator_1_rgb", "timer_separator_2_rgb",
-	"timer_separator_3_rgb", "shine_outfit_rgb", "mario_hat_rgb",
+	"timer_separator_3_rgb", "timer_label_rgb", "mario_hat_rgb",
 	"menu_background_rgb"
 };
 
@@ -938,6 +938,12 @@ static void ApplyCreationKey(struct SusamuneCreationCfg *cfg,
 			return;
 		}
 	}
+	if (strcmp(key, "show_timer_label") == 0 && ParseQftU8(text, &v8))
+	{
+		cfg->timerLabelVisible = v8 ? 1 : 0;
+		cfg->timerLabelVisiblePresent = 1;
+		return;
+	}
 	if (!ParseCreationWordKey(key, &word, &field))
 		return;
 	if (strcmp(field, "text") == 0)
@@ -1390,6 +1396,9 @@ static void EmitCreationSection(FIL *f, int *err,
 				line, "%s = %u,%u,%u\r\n", CreationColorKeys[i],
 				d->rgb[i][0], d->rgb[i][1], d->rgb[i][2]));
 	}
+	if (d->timerLabelVisiblePresent)
+		Emit(f, err, line, (u32)_sprintf(line, "show_timer_label = %u\r\n",
+			d->timerLabelVisible));
 	for (word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++)
 	{
 		const struct SusamuneCreationWordCfg *w = &d->words[word];
@@ -1625,6 +1634,9 @@ static void InitCreationDefaults(struct SusamuneCreationCfg *cfg)
 	cfg->timerX = 0xffff;
 	cfg->timerY = 0xffff;
 	cfg->timerPositionPresent = 0;
+	cfg->timerLabelVisible = 1;
+	cfg->timerLabelVisiblePresent = 0;
+	cfg->reserved1 = 0;
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
 		cfg->rgb[i][0] = 255;

@@ -128,7 +128,7 @@ struct SusamuneInputStyleCfg {
     unsigned char  reserved[18];
 };
 
-// Shared Creation payload for native HUD/model colours and three heapless
+// Shared Creation payload for native HUD colours and three heapless
 // custom text overlays. It is appended, so every older mailbox offset stays
 // stable when a launcher and mod from adjacent builds are paired.
 #define SUSAMUNE_CREATION_CFG_MAGIC       0x53435243u  // 'SCRC'
@@ -139,7 +139,7 @@ struct SusamuneInputStyleCfg {
 #define SUSAMUNE_CREATION_WORD_TEXT_SIZE  (SUSAMUNE_CREATION_WORD_CHARS + 1u)
 #define SUSAMUNE_CREATION_COLOR(index)    (1u << (index))
 
-#define SUSAMUNE_CREATION_FLUDD_CIRCLE     0u
+#define SUSAMUNE_CREATION_LEGACY_WATER_TEXT 0u
 #define SUSAMUNE_CREATION_FLUDD_WATER      1u
 #define SUSAMUNE_CREATION_TIMER_BG         2u
 #define SUSAMUNE_CREATION_COIN_BG          3u
@@ -150,8 +150,8 @@ struct SusamuneInputStyleCfg {
 #define SUSAMUNE_CREATION_LIFE_TEXT         8u
 #define SUSAMUNE_CREATION_TIMER_CHAR_FIRST  9u
 #define SUSAMUNE_CREATION_TIMER_CHAR_COUNT 13u
-#define SUSAMUNE_CREATION_SHINE_OUTFIT     22u
-#define SUSAMUNE_CREATION_MARIO_HAT         23u
+#define SUSAMUNE_CREATION_TIMER_LABEL      22u
+#define SUSAMUNE_CREATION_LEGACY_MARIO_HAT  23u
 #define SUSAMUNE_CREATION_MENU_BG           24u
 
 struct SusamuneCreationWordCfg {
@@ -183,7 +183,9 @@ struct SusamuneCreationCfg {
     unsigned short timerX;
     unsigned short timerY;
     unsigned char  timerPositionPresent;
-    unsigned char  reserved1[3];
+    unsigned char  timerLabelVisible;
+    unsigned char  timerLabelVisiblePresent;
+    unsigned char  reserved1;
     struct SusamuneCreationWordCfg words[SUSAMUNE_CREATION_WORD_COUNT];
 };
 
@@ -443,7 +445,7 @@ struct SusamuneCfg {
 #define SUSAMUNE_INI_SECTION_METADATA_DISPLAY "metadata_display"
 // Compact three-decimal QFT readout presentation, edited from Creation.
 #define SUSAMUNE_INI_SECTION_QFT_DISPLAY "qft_display"
-// Native HUD/model colours plus the custom text overlays.
+// Native HUD colours plus the custom text overlays.
 #define SUSAMUNE_INI_SECTION_CREATION "creation"
 // settings_jp / binds_pal / ...
 #define SUSAMUNE_INI_SECTION_SEPARATOR  '_'
