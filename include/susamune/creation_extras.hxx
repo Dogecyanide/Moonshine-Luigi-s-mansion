@@ -9,13 +9,17 @@
 class J2DPicture;
 class J2DPane;
 class J2DScreen;
-class J3DModel;
 class Menu;
 class TMarioGamePad;
 
 class CreationExtras {
 public:
-    enum { MENU_ROW_COUNT = 27, HUD_PANE_COUNT = 25, TIMER_PANE_COUNT = 15 };
+    enum {
+        MENU_ROW_COUNT = 23,
+        HUD_PANE_COUNT = 25,
+        TIMER_PANE_COUNT = 15,
+        PREVIEW_PANE_COUNT = 24,
+    };
 
     void resetDefaults();
     void adopt(const volatile SusamuneCreationCfg *src);
@@ -43,22 +47,26 @@ public:
     }
 
 private:
-    enum EditMode { EDIT_NONE, EDIT_COLOR, EDIT_WORD_STYLE };
+    enum EditMode { EDIT_NONE, EDIT_COLOR, EDIT_TIMER, EDIT_WORD_STYLE };
 
     static CreationStyle defaultWordStyle(int index);
     void beginColorEditor(int first, int count, const char *title,
                           const char *names = nullptr);
+    void beginTimerEditor();
     void beginWordEditor(int index);
     void beginKeyboard(int index);
     void updateKeyboard(TMarioGamePad *pad);
     void drawKeyboard(Menu *menu) const;
     void applyHud();
-    void applyMario();
-    void applyTimerScale();
+    void applyTimerLayout();
+    void beginHudPreview(int color);
+    void endHudPreview();
+    void addPreviewPane(J2DPane *pane);
     void clampWord(int index);
 
     CreationStyle mWordStyle[SUSAMUNE_CREATION_WORD_COUNT];
-    CreationStyle mColorStyle;
+    CreationStyle mTimerStyle;
+    CreationStyle mTimerDefaultStyle;
     u8 mColors[SUSAMUNE_CREATION_COLOR_COUNT][3];
     u8 mDefaultColors[SUSAMUNE_CREATION_COLOR_COUNT][3];
     u8 mColorBackup[SUSAMUNE_CREATION_COLOR_COUNT][3];
@@ -72,8 +80,7 @@ private:
     JUTRect mTimerPaneBase[TIMER_PANE_COUNT];
     J2DPane *mTimerText;
     J2DScreen *mHudScreen;
-    J3DModel *mMarioBody;
-    J3DModel *mMarioCaps[2];
+    J2DPane *mPreviewPanes[PREVIEW_PANE_COUNT];
     CreationEditor mEditor;
     const char *mEditTitle;
     u8 mWordLength[SUSAMUNE_CREATION_WORD_COUNT];
@@ -82,16 +89,15 @@ private:
     u8 mEditFirst;
     u8 mEditCount;
     u8 mEditWord;
-    u8 mTimerAppliedScale;
-    u8 mMarioTouched;
+    u8 mPreviewPaneCount;
     u8 mKeyboardCursor;
     u8 mKeyboardPage;
     u8 mKeyboardConfirm;
     u32 mColorPresent;
     u32 mColorPresentBeforeEdit;
-    u8 mWaterTextOverlay[3];
+    u32 mPreviewVisible;
+    u8 mHudOverlayDefault[2][3];
     u8 mWaterFillDefault[2][3];
-    u8 mMarioDefault[5][4];
     bool mKeyboard;
     bool mUppercase;
     bool mDirty;

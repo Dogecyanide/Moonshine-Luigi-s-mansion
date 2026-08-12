@@ -96,7 +96,7 @@ static const char *const InputColorKeys[SUSAMUNE_INPUT_COLOR_COUNT] =
 
 static const char *const CreationColorKeys[SUSAMUNE_CREATION_COLOR_COUNT] =
 {
-	// Keep the original INI key even though the menu now names the water fill.
+	// Stable keys: the first slot now edits the FLUDD circle.
 	"water_text_rgb", "fludd_tank_rgb", "timer_streak_rgb",
 	"coin_streak_rgb", "red_streak_rgb", "blue_streak_rgb",
 	"lives_streak_rgb", "shines_streak_rgb", "life_counter_rgb",
@@ -933,6 +933,20 @@ static void ApplyCreationKey(struct SusamuneCreationCfg *cfg,
 		cfg->timerScale = v8;
 		return;
 	}
+	if (strcmp(key, "sunshine_timer_x") == 0 && ParseU16(text, &v16) &&
+	    v16 <= 640)
+	{
+		cfg->timerX = v16;
+		cfg->timerPositionPresent = 1;
+		return;
+	}
+	if (strcmp(key, "sunshine_timer_y") == 0 && ParseU16(text, &v16) &&
+	    v16 <= 456)
+	{
+		cfg->timerY = v16;
+		cfg->timerPositionPresent = 1;
+		return;
+	}
 
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
@@ -1392,6 +1406,13 @@ static void EmitCreationSection(FIL *f, int *err,
 	EmitStr(f, err, "]\r\n");
 	Emit(f, err, line, (u32)_sprintf(
 		line, "sunshine_timer_scale = %u\r\n", d->timerScale));
+	if (d->timerPositionPresent)
+	{
+		Emit(f, err, line, (u32)_sprintf(
+			line, "sunshine_timer_x = %u\r\n", d->timerX));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "sunshine_timer_y = %u\r\n", d->timerY));
+	}
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
 		if (d->colorPresent & SUSAMUNE_CREATION_COLOR(i))
@@ -1631,6 +1652,9 @@ static void InitCreationDefaults(struct SusamuneCreationCfg *cfg)
 	cfg->version = SUSAMUNE_CREATION_CFG_VERSION;
 	cfg->colorPresent = 0;
 	cfg->timerScale = 100;
+	cfg->timerX = 0xffff;
+	cfg->timerY = 0xffff;
+	cfg->timerPositionPresent = 0;
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
 		cfg->rgb[i][0] = 255;
