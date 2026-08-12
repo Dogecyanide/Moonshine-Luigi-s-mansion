@@ -70,7 +70,7 @@ struct SusamuneModHeader {
 typedef char susamune_mod_header_size_check
     [(sizeof(struct SusamuneModHeader) == SUSAMUNE_MOD_HEADER_SIZE) ? 1 : -1];
 typedef char susamune_mod_window_size_check
-    [(SUSAMUNE_MEM2_MODBIN_SIZE >= 0x10000u + 0x1000u) ? 1 : -1];
+    [(SUSAMUNE_MEM2_MODBIN_SIZE >= 0x18000u + 0x1000u) ? 1 : -1];
 
 #define SUSAMUNE_MOD_PPC_PTR  ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PPC_BASE)
 #define SUSAMUNE_MOD_PHYS_PTR ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PHYS_BASE)

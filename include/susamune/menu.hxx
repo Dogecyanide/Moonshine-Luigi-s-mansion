@@ -10,7 +10,7 @@
 //
 // The on-screen menu: a tabbed overlay that renders and edits mod state.
 // It ONLY handles presentation and navigation -- debug warping lives in
-// debug_warp.cpp, settings in settings.*. Each tab is a small object
+// settings in settings.*. Each tab is a small object
 // implementing the internal MenuTab interface (defined in menu.cpp); Menu is a thin frame
 // around a list of them, so a new tab is a new class plus one line in the
 // constructor.

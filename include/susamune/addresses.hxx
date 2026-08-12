@@ -88,7 +88,7 @@
 // Arena window reserved for the injected mod.
 #define SUSAMUNE_ADDR_MOD_BASE \
     SUSAMUNE_MEM1_ADDR(0x80426020u, 0x80429800u, 0x80420d60u)
-#define SUSAMUNE_MOD_REGION_SIZE 0x11000u
+#define SUSAMUNE_MOD_REGION_SIZE 0x18000u
 // Final fixed-address scratch reserved from the linked blob.
 #define SUSAMUNE_SCRATCH 0x40u
 #define SUSAMUNE_MOD_BLOB_MAX_SIZE (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)

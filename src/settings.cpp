@@ -26,6 +26,7 @@ enum ChoiceSet {
     CHOICES_SUNSHINE_TIMER,
     CHOICES_QFT_VISIBILITY,
     CHOICES_FREEZE_DURATION,
+    CHOICES_BOX_GAME,
     CHOICES_COUNT,
 };
 
@@ -48,7 +49,7 @@ const char kSettingNames[] =
 const char kChoiceLabels[] =
     "Off\0On\0Completed\0No FLUDD\0All secrets\0Unlocked\0Rocket\0Turbo\0Hover\0"
     "Always\0Shine only\0Hidden\0On freeze\0"
-    "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0";
+    "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0" "1\0" "2\0";
 
 const u8 kChoiceMap[] = {
     0, 1,              // bool
@@ -57,8 +58,9 @@ const u8 kChoiceMap[] = {
     9, 10, 11,         // Sunshine timer
     9, 12, 11,         // QFT visibility
     0, 13, 14, 15, 16, 17,  // freeze duration
+    0, 18, 19,          // box game
 };
-const u8 kChoiceFirst[CHOICES_COUNT + 1] = {0, 2, 5, 9, 12, 15, 21};
+const u8 kChoiceFirst[CHOICES_COUNT + 1] = {0, 2, 5, 9, 12, 15, 21, 24};
 
 u8 choiceCount(const SettingDesc &desc) {
     return kChoiceFirst[desc.choices + 1] - kChoiceFirst[desc.choices];

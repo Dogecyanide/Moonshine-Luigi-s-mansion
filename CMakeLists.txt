@@ -74,7 +74,6 @@ set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
 
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
 option(ENABLE_SAVESTATE_DBG "Enable savestate debug output" OFF)
-option(ENABLE_DEBUG_WARPS "Enable debug warp menu tabs and stage warping" OFF)
 option(UPDATE_ISO_METADATA "Update ISO metadata (game code 01 -> 02, change picture, name, etc.)" OFF)
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
 
@@ -101,9 +100,6 @@ set(MAP_FILE "${CMAKE_SOURCE_DIR}/maps/${VERS_PRIMARY}.map")
 # build directory.
 
 file(GLOB MOD_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
-if(NOT ENABLE_DEBUG_WARPS)
-    list(REMOVE_ITEM MOD_SOURCES "${CMAKE_SOURCE_DIR}/src/debug_warp.cpp")
-endif()
 
 set(SHARED_FLAGS
     --target=powerpc-gecko-ibm-kuribo-eabi
@@ -150,7 +146,6 @@ function(susamune_add_mod_object vers)
     target_compile_definitions(susamune_obj_${vers} PRIVATE
         IS_EMULATOR=$<BOOL:${IS_EMULATOR}>
         ENABLE_SAVESTATE_DBG=$<BOOL:${ENABLE_SAVESTATE_DBG}>
-        ENABLE_DEBUG_WARPS=$<BOOL:${ENABLE_DEBUG_WARPS}>
         SUSAMUNE_VERSION_${_upper}=1)
 
     target_link_options(susamune_obj_${vers} PRIVATE ${SHARED_FLAGS} -fuse-ld=lld -Werror -r)

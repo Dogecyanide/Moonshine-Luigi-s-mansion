@@ -24,9 +24,6 @@
 #include "susamune/pattern_selector.hxx"
 #include "susamune/warp_wheel.hxx"
 #include "susamune/visible_goop.hxx"
-#if ENABLE_DEBUG_WARPS
-#include "susamune/debug_warp.hxx"
-#endif
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
@@ -94,15 +91,6 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 
     if (!gSettings.getBool(SETTING_DISABLE_WARPS))
         state = LevelWarp::kick(director, state);
-
-#if ENABLE_DEBUG_WARPS
-    if (Warp::pending()) {
-        Warp::execute();
-        gQFTTimer.requestReset();
-        director->moveStage();
-        state = 9;
-    }
-#endif
 
     return state;
 }

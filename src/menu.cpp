@@ -20,9 +20,6 @@
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
 #include "susamune/settings.hxx"
-#if ENABLE_DEBUG_WARPS
-#include "susamune/debug_warp.hxx"
-#endif
 
 #include "Dolphin/string.h"
 #include "Dolphin/printf.h"
@@ -356,118 +353,6 @@ private:
 };
 
 // ---------------------------------------------------------------------
-// Warp presets tab
-// ---------------------------------------------------------------------
-#if ENABLE_DEBUG_WARPS
-class WarpPresetsTab : public MenuTab {
-public:
-    WarpPresetsTab() : mSel(0) {}
-
-    const char *title() const override { return "Warps"; }
-
-    void update(Menu *menu, TMarioGamePad *pad) override {
-        u32 rapid = menu->navigationInput(pad);
-        if (rapid & TMarioGamePad::CSTICK_UP) {
-            mSel = wrap(mSel - 1, Warp::kNumPresets);
-        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
-            mSel = wrap(mSel + 1, Warp::kNumPresets);
-        }
-        if (rapid & TMarioGamePad::A) {
-            const WarpDescriptor &d = Warp::kPresets[mSel];
-            Warp::request(d.area, d.episode, d.overrideArea, d.extraFlag);
-            menu->hide();
-        }
-    }
-
-    void draw(Menu *menu, int x, int y, int w, int h) override {
-        int maxRows = h / ROW_H;
-        int start   = listScrollStart(mSel, Warp::kNumPresets, maxRows);
-        int end     = start + maxRows;
-        if (end > Warp::kNumPresets) {
-            end = Warp::kNumPresets;
-        }
-        int ry = y;
-        for (int i = start; i < end; i++) {
-            bool selected = (i == mSel);
-            if (selected) {
-                drawRowHighlight(menu, x, ry, w, ROW_H);
-                menu->drawText(">", x - 2, ry, ROW_SZ, ROW_SZ, cAccent());
-            }
-            menu->drawText(Warp::kPresets[i].name, x + 22, ry, ROW_SZ, ROW_SZ,
-                           selected ? cRowSel() : cRow());
-            ry += ROW_H;
-        }
-        drawScrollHints(menu, x, y, w, h, start, end, Warp::kNumPresets);
-    }
-
-private:
-    int mSel;
-};
-
-// ---------------------------------------------------------------------
-// Stage / episode picker tab
-// ---------------------------------------------------------------------
-class WarpStagesTab : public MenuTab {
-public:
-    WarpStagesTab() : mArea(0), mEpisode(0) {}
-
-    const char *title() const override { return "Stages"; }
-
-    void update(Menu *menu, TMarioGamePad *pad) override {
-        u32 rapid = menu->navigationInput(pad);
-        if (rapid & TMarioGamePad::CSTICK_UP) {
-            mArea = wrap(mArea - 1, WARP_NUM_STAGES);
-        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
-            mArea = wrap(mArea + 1, WARP_NUM_STAGES);
-        }
-        if (rapid & TMarioGamePad::CSTICK_LEFT) {
-            mEpisode = wrap(mEpisode - 1, WARP_NUM_EPISODES);
-        } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
-            mEpisode = wrap(mEpisode + 1, WARP_NUM_EPISODES);
-        }
-        if (rapid & TMarioGamePad::A) {
-            Warp::request(mArea, mEpisode, -1, -1);
-            menu->hide();
-        }
-    }
-
-    void draw(Menu *menu, int x, int y, int w, int h) override {
-        int maxRows = h / ROW_H;
-        int start   = listScrollStart(mArea, WARP_NUM_STAGES, maxRows);
-        int end     = start + maxRows;
-        if (end > WARP_NUM_STAGES) {
-            end = WARP_NUM_STAGES;
-        }
-        const int epX    = x + 230;
-        const int epStep = 26;
-        char      digit[2];
-        digit[1] = '\0';
-
-        int ry = y;
-        for (int i = start; i < end; i++) {
-            bool selArea = (i == mArea);
-            if (selArea) {
-                drawRowHighlight(menu, x, ry, w, ROW_H);
-            }
-            menu->drawText(Warp::kStageNames[i], x + 4, ry, ROW_SZ, ROW_SZ,
-                           selArea ? cRowSel() : cRow());
-            for (int e = 0; e < WARP_NUM_EPISODES; e++) {
-                bool here = selArea && (e == mEpisode);
-                digit[0]  = (char)('1' + e);
-                menu->drawText(digit, epX + e * epStep, ry, ROW_SZ, ROW_SZ,
-                               here ? cAccent() : (selArea ? cRow() : cRowDim()));
-            }
-            ry += ROW_H;
-        }
-    }
-
-private:
-    int mArea;
-    int mEpisode;
-};
-#endif
-
-// ---------------------------------------------------------------------
 // Category settings tab (generic settings renderer)
 //
 // Renders every setting tagged with `mCat` -- one tab per SettingCategory.
@@ -784,10 +669,6 @@ private:
 // vtables are set without relying on C++ static-init, which the injected mod
 // does not run).
 namespace {
-#if ENABLE_DEBUG_WARPS
-u8 sPresetsBuf[sizeof(WarpPresetsTab)]         __attribute__((aligned(8)));
-u8 sStagesBuf[sizeof(WarpStagesTab)]           __attribute__((aligned(8)));
-#endif
 u8 sQolBuf[sizeof(CategorySettingsTab)]        __attribute__((aligned(8)));
 u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
 u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
@@ -841,10 +722,6 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
         mText.mStrPtr = nullptr;
     }
 
-#if ENABLE_DEBUG_WARPS
-    mTabs[mNumTabs++] = new (sPresetsBuf) WarpPresetsTab();
-    mTabs[mNumTabs++] = new (sStagesBuf) WarpStagesTab();
-#endif
     mTabs[mNumTabs++] = new (sQolBuf) CategorySettingsTab(TITLE_QOL, SETTING_CAT_QOL);
     mTabs[mNumTabs++] =
         new (sCosmeticBuf) CategorySettingsTab(TITLE_COSMETIC, SETTING_CAT_COSMETIC);

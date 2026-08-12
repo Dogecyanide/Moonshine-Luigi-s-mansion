@@ -112,7 +112,9 @@
     X(SETTING_TIMER_FREEZE_EEL_TOOTH,    "timer_freeze_eel_tooth")          \
     X(SETTING_ILING_RECENT,              "iling_recent")                    \
     X(SETTING_TIMER_FREEZE_DIVE_ROLLOUT, "timer_freeze_dive_rollout")       \
-    X(SETTING_TIMER_FREEZE_DIVE_GETUP,   "timer_freeze_dive_getup")
+    X(SETTING_TIMER_FREEZE_DIVE_GETUP,   "timer_freeze_dive_getup")          \
+    /* -- Box game override (append-only persisted id) -- */                  \
+    X(SETTING_FORCE_BOX_GAME,            "force_box_game")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H
