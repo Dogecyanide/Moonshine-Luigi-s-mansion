@@ -80,6 +80,20 @@ cmake --preset release_emu -DUPDATE_ISO_METADATA=ON
 
 and build as before. This will produce an iso with game code GMSJ02 instead of GMSJ01, which will have a different settings file in Dolphin that can have its own cheats and etc.
 
+## Features
+
+- An emulator like savestate on Wii.
+- Virtually all gecko codes integrated into the main launcher.
+    - Integrated Timer, Metadata, Input display, Level select, Warp wheel and much more.
+    - Automatic memory card encoding based on version launched.
+- A brand new integrated IL system.
+    - Saves your PB per level.
+    - Plays you a little victory fanfare when you PB.
+    - Has Any% plaza segments built in Faithfully to how they appear in the run.
+    - In the future you will be able to toggle between profiles for categories. I.e 'Any%', '120', '96', ETC.
+    - IL menu functions as built in warp list.
+- And much more.
+
 ## Credits
 
 - https://github.com/DotKuribo/BetterSunshineEngine/
