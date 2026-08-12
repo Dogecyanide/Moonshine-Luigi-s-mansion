@@ -26,7 +26,20 @@ To launch your game, simply go to the homebrew channel and run the susamune laun
 
 ### Emulator
 
-Unfortunately, for emulator you currently have to build the patched ISO yourself. Only windows is supported for building. You will need CMake and Python in PATH. Place the source ISO at the repo root as `GMSJ01.iso`, `GMSE01.iso`, or `GMSP01.iso` (or pass its path with `-DSMS_ISO`).
+Download the BPS for your region from the Releases page and apply it to a clean
+ISO with a BPS patcher such as
+[Floating IPS](https://github.com/Alcaro/Flips/releases). The patch verifies
+the source image before writing the Susamune ISO.
+
+| Region | Patch | Clean CRC32 | Clean MD5 |
+| --- | --- | --- | --- |
+| JP 1.0 (`GMSJ01`) | `susamune_jp.bps` | `C3B17583` | `3B07A4BB22DB926B177E207F9D7F0D87` |
+| US (`GMSE01`) | `susamune_us.bps` | `771AD977` | `0C6D2EDAE9FDF40DFC410FF1623E4119` |
+| PAL (`GMSP01`) | `susamune_pal.bps` | `4C1D3641` | `72C4860D8555D5E790628E348ABC244D` |
+
+To build an ISO directly from source, Windows, CMake and Python in PATH are
+required. Place the source ISO at the repo root as `GMSJ01.iso`, `GMSE01.iso`,
+or `GMSP01.iso` (or pass its path with `-DSMS_ISO`).
 
 In the root of the repo, first install the virtualenv with:
 
@@ -37,13 +50,13 @@ python setup_venv.py
 Then configure with:
 
 ```
-cmake --preset savestates_emu
+cmake --preset release_emu
 ```
 
 Then build with:
 
 ```
-cmake --build preset emu_iso
+cmake --build --preset emu_iso
 ```
 
 The ISO appears as `build/susamune_<version>.iso`. To build US or PAL, add
@@ -60,7 +73,7 @@ they follow its first entry.
 In case you would like to maintain a different set of gecko codes for this practice rom and the standard ROM, or different in-game settings (for example if you would like to keep texture cache accuracy on fast for the standard ROM), you can instead configure with:
 
 ```
-cmake --preset savestates_emu -DUPDATE_ISO_METADATA=ON
+cmake --preset release_emu -DUPDATE_ISO_METADATA=ON
 ```
 
 and build as before. This will produce an iso with game code GMSJ02 instead of GMSJ01, which will have a different settings file in Dolphin that can have its own cheats and etc.

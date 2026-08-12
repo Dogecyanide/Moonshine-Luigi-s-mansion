@@ -224,6 +224,38 @@ foreach(_v IN LISTS VERS)
 endforeach()
 add_custom_target(mod_bins ALL DEPENDS ${MOD_BINS})
 
+# Release builds can emit standard BPS patches without possessing retail ISOs.
+# The checked-in layouts contain only offsets and CRCs; each mod manifest
+# supplies the newly linked code and concrete hook words.
+if(IS_EMULATOR AND UPDATE_ISO_METADATA)
+    message(STATUS "The source-free BPS keeps retail ISO metadata; use the ISO target for UPDATE_ISO_METADATA")
+elseif(IS_EMULATOR)
+    set(EMULATOR_BPS_FILES "")
+    foreach(_v IN LISTS VERS)
+        set(_layout "${CMAKE_SOURCE_DIR}/data/iso_layout_${_v}.json")
+        set(_bps "${CMAKE_BINARY_DIR}/susamune_${_v}.bps")
+        if(EXISTS "${_layout}")
+            add_custom_command(
+                OUTPUT "${_bps}"
+                COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/gen_iso_bps.py" build
+                    --layout "${_layout}"
+                    --mod-manifest "${CMAKE_BINARY_DIR}/susamune_manifest_${_v}.json"
+                    --output "${_bps}"
+                DEPENDS "${CMAKE_BINARY_DIR}/susamune_manifest_${_v}.json"
+                        "${_layout}"
+                        "${CMAKE_SOURCE_DIR}/scripts/gen_iso_bps.py"
+                COMMENT "Building source-free ${_v} emulator BPS"
+                VERBATIM)
+            list(APPEND EMULATOR_BPS_FILES "${_bps}")
+        else()
+            message(STATUS "No source-free BPS layout for ${_v}; skipping its emulator patch")
+        endif()
+    endforeach()
+    if(EMULATOR_BPS_FILES)
+        add_custom_target(emulator_patches DEPENDS ${EMULATOR_BPS_FILES})
+    endif()
+endif()
+
 # Patches main.dol and installs it into out_iso so Dolphin folder-boot (and the
 # .vscode tasks) always run the current build without needing the `iso` target.
 add_custom_command(

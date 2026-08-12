@@ -65,6 +65,14 @@
             "targets": [
                 "iso"
             ]
+        },
+        {
+            "name": "emu_patches",
+            "hidden": false,
+            "configurePreset": "release_emu",
+            "targets": [
+                "emulator_patches"
+            ]
         }
     ]
 }

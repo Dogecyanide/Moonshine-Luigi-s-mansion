@@ -28,6 +28,7 @@ The mod sources live at the repo root (there is no longer a `susamune/` subdirec
   - `settings.cpp` / `settings.hxx` — persistent mod settings, independent of the menu that edits them and the features that read them. A setting is one row in `include/susamune/settings_list.h`'s `SUSAMUNE_SETTING_LIST` X-macro (enumerator + stable ini key), one matching row in `src/settings_descs.inc` (name, choice set, default, `SettingCategory`), and one byte in `Settings::mValues`. The description include generates an ordered NUL name pool and compact two-byte descriptors; choice labels share one pool and mapping table. The menu renders/edits them generically, while `savestate.cpp` and `features.cpp` read them. Persisted to `susamune.ini` on the SD card — see "Settings persistence" below.
 - `scripts/patches.py` — the hook table + memory-reservation config (addresses, mod region size, game id, region/disc metadata).
 - `scripts/gen_mod_bin.py` — packs a manifest into the `mod_<vers>.bin` the launcher loads (format: `include/susamune/mod_bin.h`).
+- `scripts/gen_iso_bps.py` — builds the JP/US/PAL Dolphin release patches without retail ISOs. Each `data/iso_layout_<vers>.json` contains only the few offsets, sizes and CRCs needed to grow the DOL: the FST and the one file it overlaps are relocated into existing unused disc space, while every other byte stays at its retail offset. No file names or directory listing are stored. The `layout` subcommand is the maintainer-only path for regenerating this metadata from a verified clean ISO after hook addresses change.
 - `maps/<vers>.map` / `maps/<vers>.ld` — the CodeWarrior map and the linker script regenerated from it (`scripts/map_to_ld.py`).
 - `include/` — reverse-engineered game headers (`include/JSystem` too).
 - `scripts/` — the build pipeline (see "Build & test loop").
@@ -227,12 +228,13 @@ First-time setup: `python setup_venv.py` (creates `venv/` with the Python packag
 cmake --preset dev_console              # configure (see CMakePresets.json for the rest)
 cmake --build build                     # build build/mod_<vers>.bin for every VERS entry (default `mod_bins` target)
 cmake --build build --target dol        # patch a main.dol from the source ISO (Dolphin dev)
+cmake --build build --target emulator_patches # source-free BPS files for every VERS entry (IS_EMULATOR=ON)
 cmake --build build --target iso        # rebuild build/susamune_<vers>.iso
 cmake --build build --target launcher   # build the Nintendont HBC app zip (build/susamune_launcher.zip)
 cmake --build build --target gecko      # emit build/susamune.txt (Dolphin cheat form; currently broken in-game)
 ```
 
-**`VERS` is a list.** `-DVERS="jp;us;pal"` builds one mod object, manifest and `mod_<vers>.bin` per entry and bundles all of them into the single launcher; that is what CI does for a release. The ISO/DOL pipeline can only target one disc at a time (one `SMS_ISO`, one `out_iso`), so `dol`/`iso`/`gecko` follow the **first** entry, `VERS_PRIMARY`. Each version gets its own `susamune_obj_<vers>` target because `SUSAMUNE_VERSION_*` selects a whole MEM1 layout.
+**`VERS` is a list.** `-DVERS="jp;us;pal"` builds one mod object, manifest, `mod_<vers>.bin`, and source-free BPS per entry; that is what CI does for a release. The ISO/DOL pipeline can only target one disc at a time (one `SMS_ISO`, one `out_iso`), so `dol`/`iso`/`gecko` follow the **first** entry, `VERS_PRIMARY`. Each version gets its own `susamune_obj_<vers>` target because `SUSAMUNE_VERSION_*` selects a whole MEM1 layout.
 
 `cmake -B build -G Ninja` works too; the presets just bake in Ninja, the build dir and the option set (`release_console`/`release_emu`/`dev_console`/`dev_emu`). The Visual Studio generator is rejected.
 
@@ -249,7 +251,7 @@ Build options (toggle in `ccmake`/`cmake-gui`, or with `-D<name>=<value>`):
 - `IS_EMULATOR` (default OFF) — ON targets Dolphin (`kSnapshotBase = 0x70000000`), OFF targets Wii/Nintendont (the dedicated `0x91F00000–0x92F00000` window). Sets the `IS_EMULATOR` compile define. **Test on Dolphin first** (`-DIS_EMULATOR=ON` + the `dol`/`iso` targets); for console builds, leave it OFF and keep all launcher MEM2 changes in `include/susamune/mem2_map.h`.
 - `ENABLE_SAVESTATE_DBG` (default OFF) — compile the savestate status overlay and its debug strings/state.
 - `UPDATE_ISO_METADATA` (default OFF) — for the `iso` target, bump the game code (01→02), swap banner/name, etc.
-- `VERS` (list of jp/us/pal, default `jp`) — game versions to build mod binaries for. Each selects a map/linker script, patch addresses, game ID, and the C++ MEM1 layout definitions. The first entry is `VERS_PRIMARY` and drives the ISO/DOL targets; the launcher is version-agnostic.
+- `VERS` (list of jp/us/pal, default `jp`) — game versions to build mod binaries and source-free BPS patches for. Each selects a map/linker script, patch addresses, game ID, and the C++ MEM1 layout definitions. The first entry is `VERS_PRIMARY` and drives the ISO/DOL targets; the launcher is version-agnostic.
 
 ## Decomp cross-reference
 
