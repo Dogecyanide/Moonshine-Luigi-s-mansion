@@ -118,10 +118,9 @@ void adjustTextChannel(u8 (*textRgb)[3], u16 slots, u16 target,
                        int channel, int delta) {
     const int first = target ? target - 1 : 0;
     const int end   = target ? first + 1 : slots;
-    for (int i = first; i < end; i++) {
-        textRgb[i][channel] =
-            (u8)clampi((int)textRgb[i][channel] + delta, 0, 255);
-    }
+    const u8 value =
+        (u8)clampi((int)textRgb[first][channel] + delta, 0, 255);
+    for (int i = first; i < end; i++) textRgb[i][channel] = value;
 }
 
 void resetOption(CreationStyle &style, const CreationStyle &defaults,

@@ -194,6 +194,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     const bool freeze = gpMarDirector &&
                         gpMarDirector->mCurState == TMarDirector::STATE_NORMAL &&
                         ((gMenu && gMenu->shown()) || WarpWheel::shown());
+    gCreationExtras.prepareUpdate();
     if (freeze) {
         gpMarDirector->mCurState = TMarDirector::STATE_STAGE_EXIT_2;
     }

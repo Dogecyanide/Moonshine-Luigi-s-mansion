@@ -140,7 +140,7 @@ struct SusamuneInputStyleCfg {
 #define SUSAMUNE_CREATION_COLOR(index)    (1u << (index))
 
 #define SUSAMUNE_CREATION_WATER_TEXT       0u
-#define SUSAMUNE_CREATION_FLUDD_TANK       1u
+#define SUSAMUNE_CREATION_FLUDD_WATER      1u
 #define SUSAMUNE_CREATION_TIMER_BG         2u
 #define SUSAMUNE_CREATION_COIN_BG          3u
 #define SUSAMUNE_CREATION_RED_BG           4u
@@ -178,7 +178,8 @@ struct SusamuneCreationCfg {
     unsigned short reserved0;
     unsigned int   colorPresent;
     unsigned char  rgb[SUSAMUNE_CREATION_COLOR_COUNT][3];
-    unsigned char  reserved1[9];
+    unsigned char  timerScale;
+    unsigned char  reserved1[8];
     struct SusamuneCreationWordCfg words[SUSAMUNE_CREATION_WORD_COUNT];
 };
 

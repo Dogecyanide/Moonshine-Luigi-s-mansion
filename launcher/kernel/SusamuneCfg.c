@@ -96,6 +96,7 @@ static const char *const InputColorKeys[SUSAMUNE_INPUT_COLOR_COUNT] =
 
 static const char *const CreationColorKeys[SUSAMUNE_CREATION_COLOR_COUNT] =
 {
+	// Keep the original INI key even though the menu now names the water fill.
 	"water_text_rgb", "fludd_tank_rgb", "timer_streak_rgb",
 	"coin_streak_rgb", "red_streak_rgb", "blue_streak_rgb",
 	"lives_streak_rgb", "shines_streak_rgb", "life_counter_rgb",
@@ -926,6 +927,13 @@ static void ApplyCreationKey(struct SusamuneCreationCfg *cfg,
 	u32 slot;
 	const char *field;
 
+	if (strcmp(key, "sunshine_timer_scale") == 0 && ParseQftU8(text, &v8) &&
+	    v8 >= 50 && v8 <= 200)
+	{
+		cfg->timerScale = v8;
+		return;
+	}
+
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
 		if (strcmp(key, CreationColorKeys[i]) == 0 && ParseQftRgb(text, rgb))
@@ -1382,6 +1390,8 @@ static void EmitCreationSection(FIL *f, int *err,
 	EmitStr(f, err, "[");
 	EmitStr(f, err, CreationSection);
 	EmitStr(f, err, "]\r\n");
+	Emit(f, err, line, (u32)_sprintf(
+		line, "sunshine_timer_scale = %u\r\n", d->timerScale));
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
 		if (d->colorPresent & SUSAMUNE_CREATION_COLOR(i))
@@ -1620,6 +1630,7 @@ static void InitCreationDefaults(struct SusamuneCreationCfg *cfg)
 	cfg->magic = SUSAMUNE_CREATION_CFG_MAGIC;
 	cfg->version = SUSAMUNE_CREATION_CFG_VERSION;
 	cfg->colorPresent = 0;
+	cfg->timerScale = 100;
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
 		cfg->rgb[i][0] = 255;

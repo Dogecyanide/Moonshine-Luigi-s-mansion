@@ -4,20 +4,25 @@
 #include "susamune/creation.hxx"
 #include "susamune/susamune_cfg.h"
 
+#include "JSystem/JUtility/JUTRect.hxx"
+
 class J2DPicture;
+class J2DPane;
 class J2DScreen;
+class J3DModel;
 class Menu;
 class TMarioGamePad;
 
 class CreationExtras {
 public:
-    enum { MENU_ROW_COUNT = 26 };
+    enum { MENU_ROW_COUNT = 27, HUD_PANE_COUNT = 25, TIMER_PANE_COUNT = 15 };
 
     void resetDefaults();
     void adopt(const volatile SusamuneCreationCfg *src);
     void stageInto(volatile SusamuneCreationCfg *dst) const;
 
     void onStageSetup();
+    void prepareUpdate();
     void update();
     void draw(Menu *menu) const;
 
@@ -49,6 +54,7 @@ private:
     void drawKeyboard(Menu *menu) const;
     void applyHud();
     void applyMario();
+    void applyTimerScale();
     void clampWord(int index);
 
     CreationStyle mWordStyle[SUSAMUNE_CREATION_WORD_COUNT];
@@ -62,8 +68,12 @@ private:
     char mWords[SUSAMUNE_CREATION_WORD_COUNT]
                [SUSAMUNE_CREATION_WORD_TEXT_SIZE];
     char mTextBackup[SUSAMUNE_CREATION_WORD_TEXT_SIZE];
-    J2DPicture *mHudPictures[28];
+    J2DPicture *mHudPictures[HUD_PANE_COUNT];
+    JUTRect mTimerPaneBase[TIMER_PANE_COUNT];
+    J2DPane *mTimerText;
     J2DScreen *mHudScreen;
+    J3DModel *mMarioBody;
+    J3DModel *mMarioCaps[2];
     CreationEditor mEditor;
     const char *mEditTitle;
     u8 mWordLength[SUSAMUNE_CREATION_WORD_COUNT];
@@ -72,11 +82,16 @@ private:
     u8 mEditFirst;
     u8 mEditCount;
     u8 mEditWord;
+    u8 mTimerAppliedScale;
+    u8 mMarioTouched;
     u8 mKeyboardCursor;
     u8 mKeyboardPage;
     u8 mKeyboardConfirm;
     u32 mColorPresent;
     u32 mColorPresentBeforeEdit;
+    u8 mWaterTextOverlay[3];
+    u8 mWaterFillDefault[2][3];
+    u8 mMarioDefault[5][4];
     bool mKeyboard;
     bool mUppercase;
     bool mDirty;

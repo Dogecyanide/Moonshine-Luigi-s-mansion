@@ -18,43 +18,39 @@ namespace {
 
 typedef JUtility::TColor Color;
 
-struct HudPaneDef {
-    u32 tag;
-    u8 color;
+const u32 kHudPaneTags[] = {
+    'w_tx', 't_ba', 'c_ba', 'r_ba', 'b_ba', 'm_ba', 's_ba', 'm_tx',
+    '\0m_x', 'm_n1', 'm_n2', 'm_n3', 't_n1', 't_n2', 't_n3', 't_n4',
+    't_n5', 't_n6', 't_n7', 't_n8', 't_n9', 't_n0', 't_c1', 't_c2',
+    't_c3',
 };
-
-const HudPaneDef kHudPanes[] = {
-    {'w_tx', SUSAMUNE_CREATION_WATER_TEXT},
-    {'w_t1', SUSAMUNE_CREATION_FLUDD_TANK},
-    {'w_t2', SUSAMUNE_CREATION_FLUDD_TANK},
-    {'w_t3', SUSAMUNE_CREATION_FLUDD_TANK},
-    {'t_ba', SUSAMUNE_CREATION_TIMER_BG},
-    {'c_ba', SUSAMUNE_CREATION_COIN_BG},
-    {'r_ba', SUSAMUNE_CREATION_RED_BG},
-    {'b_ba', SUSAMUNE_CREATION_BLUE_BG},
-    {'m_ba', SUSAMUNE_CREATION_LIVES_BG},
-    {'s_ba', SUSAMUNE_CREATION_SHINES_BG},
-    {'m_tx', SUSAMUNE_CREATION_LIFE_TEXT},
-    {'\0m_x', SUSAMUNE_CREATION_LIFE_TEXT},
-    {'m_n1', SUSAMUNE_CREATION_LIFE_TEXT},
-    {'m_n2', SUSAMUNE_CREATION_LIFE_TEXT},
-    {'m_n3', SUSAMUNE_CREATION_LIFE_TEXT},
-    {'t_n1', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 0},
-    {'t_n2', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 1},
-    {'t_n3', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 2},
-    {'t_n4', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 3},
-    {'t_n5', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 4},
-    {'t_n6', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 5},
-    {'t_n7', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 6},
-    {'t_n8', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 7},
-    {'t_n9', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 8},
-    {'t_n0', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 9},
-    {'t_c1', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 10},
-    {'t_c2', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 11},
-    {'t_c3', SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 12},
+const u8 kHudPaneColors[] = {
+    SUSAMUNE_CREATION_WATER_TEXT, SUSAMUNE_CREATION_TIMER_BG,
+    SUSAMUNE_CREATION_COIN_BG, SUSAMUNE_CREATION_RED_BG,
+    SUSAMUNE_CREATION_BLUE_BG, SUSAMUNE_CREATION_LIVES_BG,
+    SUSAMUNE_CREATION_SHINES_BG, SUSAMUNE_CREATION_LIFE_TEXT,
+    SUSAMUNE_CREATION_LIFE_TEXT, SUSAMUNE_CREATION_LIFE_TEXT,
+    SUSAMUNE_CREATION_LIFE_TEXT, SUSAMUNE_CREATION_LIFE_TEXT,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 0,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 1,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 2,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 3,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 4,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 5,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 6,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 7,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 8,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 9,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 10,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 11,
+    SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 12,
 };
-static_assert(sizeof(kHudPanes) / sizeof(kHudPanes[0]) == 28,
+static_assert(sizeof(kHudPaneTags) / sizeof(kHudPaneTags[0]) ==
+                  CreationExtras::HUD_PANE_COUNT,
               "HUD pane cache changed");
+static_assert(sizeof(kHudPaneColors) / sizeof(kHudPaneColors[0]) ==
+                  CreationExtras::HUD_PANE_COUNT,
+              "HUD colour table changed");
 
 constexpr char kTimerNames[] =
     "Normal digit 1\0Normal digit 2\0Normal digit 3\0Normal digit 4\0"
@@ -62,8 +58,8 @@ constexpr char kTimerNames[] =
     "Rush digit 3\0Rush digit 4\0Separator 1\0Separator 2\0Separator 3";
 
 constexpr char kMenuText[] =
-    "HUD\0WATER / ACQUA text\0FLUDD tank\0Sunshine timer streak\0"
-    "Sunshine timer characters\0Coin streak\0Red coin streak\0"
+    "HUD\0WATER / ACQUA text\0FLUDD water\0Sunshine timer streak\0"
+    "Sunshine timer characters\0Sunshine timer size\0Coin streak\0Red coin streak\0"
     "Blue coin streak\0Lives streak\0Shines streak\0Life counter\0"
     "MARIO\0Shine outfit\0Mario hat\0CUSTOM TEXT\0"
     "Word 1 text\0Word 1 style\0Word 1 visible\0"
@@ -113,17 +109,16 @@ void copyRgb(u8 dst[3], const u8 src[3]) {
 J3DGXColor *materialColor(J3DModelData *data, u16 index) {
     if (!data) return nullptr;
     // The local J3D headers misname these retail slots: they are the material
-    // count/table, followed by the material's TEV block at +0x28.
+    // count/table. The colour block pointer is at material + 0x20.
     const u16 count = *reinterpret_cast<u16 *>(
         reinterpret_cast<u8 *>(data) + 0x24);
     if (index >= count) return nullptr;
     J3DMaterial **materials = *reinterpret_cast<J3DMaterial ***>(
         reinterpret_cast<u8 *>(data) + 0x28);
     if (!materials || !materials[index]) return nullptr;
-    J3DTevBlock *tev = *reinterpret_cast<J3DTevBlock **>(
-        reinterpret_cast<u8 *>(materials[index]) + 0x28);
-    if (!tev) return nullptr;
-    return reinterpret_cast<J3DGXColor *>((u32)tev->getTevKColor(0));
+    u8 *block = *reinterpret_cast<u8 **>(
+        reinterpret_cast<u8 *>(materials[index]) + 0x20);
+    return block ? reinterpret_cast<J3DGXColor *>(block + 4) : nullptr;
 }
 
 void tintMaterial(J3DModelData *data, u16 index, const u8 rgb[3]) {
@@ -132,6 +127,46 @@ void tintMaterial(J3DModelData *data, u16 index, const u8 rgb[3]) {
     color->rgba.r = rgb[0];
     color->rgba.g = rgb[1];
     color->rgba.b = rgb[2];
+}
+
+bool sameRgb(const u8 a[3], const u8 b[3]) {
+    return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
+}
+
+bool materialMatches(J3DModelData *data, u16 index, const u8 rgb[3]) {
+    J3DGXColor *color = materialColor(data, index);
+    return color && color->rgba.r == rgb[0] && color->rgba.g == rgb[1] &&
+           color->rgba.b == rgb[2];
+}
+
+void copyColor(u8 dst[4], const J3DGXColor *src) {
+    if (!src) return;
+    dst[0] = src->rgba.r;
+    dst[1] = src->rgba.g;
+    dst[2] = src->rgba.b;
+    dst[3] = src->rgba.a;
+}
+
+void restoreMaterial(J3DModelData *data, u16 index, const u8 rgba[4]) {
+    J3DGXColor *color = materialColor(data, index);
+    if (!color) return;
+    color->rgba.r = rgba[0];
+    color->rgba.g = rgba[1];
+    color->rgba.b = rgba[2];
+    color->rgba.a = rgba[3];
+}
+
+void rebuildModel(J3DModel *model) {
+    if (!model) return;
+    model->unlock();
+    model->makeDL();
+    model->lock();
+}
+
+J2DPane *timerPane(J2DPicture *const pictures[], J2DPane *text, u32 index) {
+    if (index == 0) return pictures[1];
+    if (index == 1) return text;
+    return pictures[index + 10];
 }
 
 }  // namespace
@@ -161,11 +196,16 @@ void CreationExtras::resetDefaults() {
     }
     for (u32 i = 0; i < sizeof(mHudPictures) / sizeof(mHudPictures[0]); i++)
         mHudPictures[i] = nullptr;
+    mTimerText = nullptr;
     mHudScreen = nullptr;
     mColorStyle = CreationStyle{0, 0, 100, 255, 0, 0, 0, 0xff, 100, 0xff};
+    mMarioBody = nullptr;
+    mMarioCaps[0] = mMarioCaps[1] = nullptr;
     mEditor.reset();
     mEditTitle = nullptr;
     mEditMode = EDIT_NONE;
+    mTimerAppliedScale = 100;
+    mMarioTouched = 0;
     mKeyboard = false;
     mUppercase = false;
     mKeyboardConfirm = 0;
@@ -197,6 +237,8 @@ void CreationExtras::adopt(const volatile SusamuneCreationCfg *src) {
     }
     mColorPresent = src->colorPresent &
                     ((1u << SUSAMUNE_CREATION_COLOR_COUNT) - 1u);
+    mColorStyle.scale = src->timerScale >= 50 && src->timerScale <= 200
+                            ? src->timerScale : 100;
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         const volatile SusamuneCreationWordCfg &in = src->words[word];
         CreationStyle &s = mWordStyle[word];
@@ -219,6 +261,7 @@ void CreationExtras::stageInto(volatile SusamuneCreationCfg *dst) const {
     dst->version = SUSAMUNE_CREATION_CFG_VERSION;
     dst->reserved0 = 0;
     dst->colorPresent = mColorPresent;
+    dst->timerScale = mColorStyle.scale;
     for (int i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
         for (int c = 0; c < 3; c++) dst->rgb[i][c] = mColors[i][c];
     for (u32 i = 0; i < sizeof(dst->reserved1); i++) dst->reserved1[i] = 0;
@@ -245,63 +288,248 @@ void CreationExtras::onStageSetup() {
         !gpMarDirector->mGCConsole->mMainScreen) return;
     J2DScreen *screen = gpMarDirector->mGCConsole->mMainScreen;
     mHudScreen = screen;
+    mMarioBody = nullptr;
+    mMarioCaps[0] = mMarioCaps[1] = nullptr;
+    mMarioTouched =
+        (mColorPresent & SUSAMUNE_CREATION_COLOR(
+             SUSAMUNE_CREATION_SHINE_OUTFIT) ? 1 : 0) |
+        (mColorPresent & SUSAMUNE_CREATION_COLOR(
+             SUSAMUNE_CREATION_MARIO_HAT) ? 2 : 0);
     u32 captured = 0;
-    for (u32 i = 0; i < sizeof(kHudPanes) / sizeof(kHudPanes[0]); i++) {
-        J2DPane *pane = screen->search(kHudPanes[i].tag);
+    for (u32 i = 0; i < HUD_PANE_COUNT; i++) {
+        J2DPane *pane = screen->search(kHudPaneTags[i]);
         if (pane && pane->mTypeMagic == 'PIC1') {
             mHudPictures[i] = static_cast<J2DPicture *>(pane);
-            const u32 bit = SUSAMUNE_CREATION_COLOR(kHudPanes[i].color);
+            const u32 bit = SUSAMUNE_CREATION_COLOR(kHudPaneColors[i]);
             if (!(captured & bit)) {
                 const JUtility::TColor &original = mHudPictures[i]->mColorMask;
-                mDefaultColors[kHudPanes[i].color][0] = original.r;
-                mDefaultColors[kHudPanes[i].color][1] = original.g;
-                mDefaultColors[kHudPanes[i].color][2] = original.b;
+                mDefaultColors[kHudPaneColors[i]][0] = original.r;
+                mDefaultColors[kHudPaneColors[i]][1] = original.g;
+                mDefaultColors[kHudPaneColors[i]][2] = original.b;
                 if (!(mColorPresent & bit))
-                    copyRgb(mColors[kHudPanes[i].color],
-                            mDefaultColors[kHudPanes[i].color]);
+                    copyRgb(mColors[kHudPaneColors[i]],
+                            mDefaultColors[kHudPaneColors[i]]);
                 captured |= bit;
             }
         }
     }
+
+    mTimerText = screen->search('t_tx');
+    for (u32 i = 0; i < TIMER_PANE_COUNT; i++) {
+        J2DPane *pane = timerPane(mHudPictures, mTimerText, i);
+        if (pane) mTimerPaneBase[i] = pane->mRect;
+    }
+
+    J2DPicture *waterText = mHudPictures[0];
+    if (waterText) {
+        mWaterTextOverlay[0] = waterText->mColorOverlay.r;
+        mWaterTextOverlay[1] = waterText->mColorOverlay.g;
+        mWaterTextOverlay[2] = waterText->mColorOverlay.b;
+    }
+    const JUtility::TColor water[] = {
+        gpMarDirector->mGCConsole->mWaterLeftPanelColor,
+        gpMarDirector->mGCConsole->mWaterRightPanelColor,
+    };
+    for (int i = 0; i < 2; i++) {
+        mWaterFillDefault[i][0] = water[i].r;
+        mWaterFillDefault[i][1] = water[i].g;
+        mWaterFillDefault[i][2] = water[i].b;
+    }
+    if (!(mColorPresent & SUSAMUNE_CREATION_COLOR(
+              SUSAMUNE_CREATION_FLUDD_WATER))) {
+        copyRgb(mDefaultColors[SUSAMUNE_CREATION_FLUDD_WATER],
+                mWaterFillDefault[0]);
+        copyRgb(mColors[SUSAMUNE_CREATION_FLUDD_WATER],
+                mWaterFillDefault[0]);
+    }
+
+    if (gpMarioOriginal && gpMarioOriginal->mModelData &&
+        gpMarioOriginal->mModelData->mModel) {
+        mMarioBody = gpMarioOriginal->mModelData->mModel;
+        copyColor(mMarioDefault[0], materialColor(mMarioBody->mModelData, 2));
+        copyColor(mMarioDefault[1], materialColor(mMarioBody->mModelData, 4));
+        copyColor(mMarioDefault[2], materialColor(mMarioBody->mModelData, 9));
+        if (!(mColorPresent & SUSAMUNE_CREATION_COLOR(
+                  SUSAMUNE_CREATION_SHINE_OUTFIT))) {
+            copyRgb(mDefaultColors[SUSAMUNE_CREATION_SHINE_OUTFIT],
+                    mMarioDefault[0]);
+            copyRgb(mColors[SUSAMUNE_CREATION_SHINE_OUTFIT],
+                    mMarioDefault[0]);
+        }
+        if (!(mColorPresent & SUSAMUNE_CREATION_COLOR(
+                  SUSAMUNE_CREATION_MARIO_HAT))) {
+            copyRgb(mDefaultColors[SUSAMUNE_CREATION_MARIO_HAT],
+                    mMarioDefault[2]);
+            copyRgb(mColors[SUSAMUNE_CREATION_MARIO_HAT],
+                    mMarioDefault[2]);
+        }
+    }
+    if (gpMarioOriginal && gpMarioOriginal->mCap) {
+        mMarioCaps[0] = gpMarioOriginal->mCap->mCap1;
+        mMarioCaps[1] = gpMarioOriginal->mCap->mCap3;
+        for (int i = 0; i < 2; i++)
+            copyColor(mMarioDefault[3 + i],
+                      mMarioCaps[i]
+                          ? materialColor(mMarioCaps[i]->mModelData, 0)
+                          : nullptr);
+    }
     applyHud();
+    applyMario();
+    applyTimerScale();
 }
 
 void CreationExtras::applyHud() {
-    for (u32 i = 0; i < sizeof(kHudPanes) / sizeof(kHudPanes[0]); i++) {
+    for (u32 i = 0; i < HUD_PANE_COUNT; i++) {
         J2DPicture *picture = mHudPictures[i];
         if (!picture) continue;
         if (!(mColorPresent &
-              SUSAMUNE_CREATION_COLOR(kHudPanes[i].color))) continue;
-        const u8 *rgb = mColors[kHudPanes[i].color];
+              SUSAMUNE_CREATION_COLOR(kHudPaneColors[i]))) continue;
+        const u8 *rgb = mColors[kHudPaneColors[i]];
         picture->mColorMask.r = rgb[0];
         picture->mColorMask.g = rgb[1];
         picture->mColorMask.b = rgb[2];
     }
+
+    J2DPicture *waterText = mHudPictures[0];
+    if (waterText && (mColorPresent & SUSAMUNE_CREATION_COLOR(
+                         SUSAMUNE_CREATION_WATER_TEXT))) {
+        const u8 *rgb = mColors[SUSAMUNE_CREATION_WATER_TEXT];
+        if (sameRgb(rgb, mDefaultColors[SUSAMUNE_CREATION_WATER_TEXT])) {
+            waterText->mColorOverlay.r = mWaterTextOverlay[0];
+            waterText->mColorOverlay.g = mWaterTextOverlay[1];
+            waterText->mColorOverlay.b = mWaterTextOverlay[2];
+        } else {
+            waterText->mColorOverlay.r = rgb[0];
+            waterText->mColorOverlay.g = rgb[1];
+            waterText->mColorOverlay.b = rgb[2];
+        }
+    }
+
+    if (!gpMarDirector || !gpMarDirector->mGCConsole ||
+        !(mColorPresent & SUSAMUNE_CREATION_COLOR(
+              SUSAMUNE_CREATION_FLUDD_WATER))) return;
+    const u8 *rgb = mColors[SUSAMUNE_CREATION_FLUDD_WATER];
+    JUtility::TColor *fill[] = {
+        &gpMarDirector->mGCConsole->mWaterLeftPanelColor,
+        &gpMarDirector->mGCConsole->mWaterRightPanelColor,
+    };
+    const bool original = sameRgb(
+        rgb, mDefaultColors[SUSAMUNE_CREATION_FLUDD_WATER]);
+    for (int i = 0; i < 2; i++) {
+        fill[i]->r = original ? mWaterFillDefault[i][0] : rgb[0];
+        fill[i]->g = original ? mWaterFillDefault[i][1] : rgb[1];
+        fill[i]->b = original ? mWaterFillDefault[i][2] : rgb[2];
+    }
 }
 
 void CreationExtras::applyMario() {
-    if (!gpMarioOriginal || !gpMarioOriginal->mBodyModelData) return;
-    if (!(mColorPresent & SUSAMUNE_CREATION_COLOR(
-              SUSAMUNE_CREATION_SHINE_OUTFIT)) &&
-        !(mColorPresent & SUSAMUNE_CREATION_COLOR(
-              SUSAMUNE_CREATION_MARIO_HAT))) return;
-    const u8 white[3] = {255, 255, 255};
-    const u8 *outfit = gpMarioOriginal->mAttributes.mIsShineShirt
-                           ? mColors[SUSAMUNE_CREATION_SHINE_OUTFIT] : white;
-    if (mColorPresent & SUSAMUNE_CREATION_COLOR(
-            SUSAMUNE_CREATION_SHINE_OUTFIT)) {
-        tintMaterial(gpMarioOriginal->mBodyModelData, 2, outfit);
-        tintMaterial(gpMarioOriginal->mBodyModelData, 4, outfit);
+    if (!gpMarioOriginal || !mMarioBody) return;
+    const bool shine = gpMarioOriginal->mAttributes.mIsShineShirt;
+    const bool outfitPresent = mColorPresent & SUSAMUNE_CREATION_COLOR(
+        SUSAMUNE_CREATION_SHINE_OUTFIT);
+    const bool hatPresent = mColorPresent & SUSAMUNE_CREATION_COLOR(
+        SUSAMUNE_CREATION_MARIO_HAT);
+    const bool outfitActive = outfitPresent || (mMarioTouched & 1);
+    const bool hatActive = hatPresent || (mMarioTouched & 2);
+    if (!outfitActive && !hatActive) return;
+    const u8 *outfit = mColors[SUSAMUNE_CREATION_SHINE_OUTFIT];
+    const u8 *hat = mColors[SUSAMUNE_CREATION_MARIO_HAT];
+    const bool customOutfit = outfitPresent && shine && !sameRgb(
+        outfit, mDefaultColors[SUSAMUNE_CREATION_SHINE_OUTFIT]);
+    const bool customHat = hatPresent && !sameRgb(
+        hat, mDefaultColors[SUSAMUNE_CREATION_MARIO_HAT]);
+    bool bodyChanged = false;
+    if (outfitActive) {
+        const u8 *first = customOutfit ? outfit : mMarioDefault[0];
+        const u8 *second = customOutfit ? outfit : mMarioDefault[1];
+        if (!materialMatches(mMarioBody->mModelData, 2, first) ||
+            !materialMatches(mMarioBody->mModelData, 4, second)) {
+            if (customOutfit) {
+                tintMaterial(mMarioBody->mModelData, 2, outfit);
+                tintMaterial(mMarioBody->mModelData, 4, outfit);
+            } else {
+                restoreMaterial(mMarioBody->mModelData, 2, mMarioDefault[0]);
+                restoreMaterial(mMarioBody->mModelData, 4, mMarioDefault[1]);
+            }
+            bodyChanged = true;
+        }
     }
-    if (!(mColorPresent & SUSAMUNE_CREATION_COLOR(
-              SUSAMUNE_CREATION_MARIO_HAT))) return;
-    tintMaterial(gpMarioOriginal->mBodyModelData, 9,
-                 mColors[SUSAMUNE_CREATION_MARIO_HAT]);
+    if (hatActive) {
+        const u8 *bodyHat = customHat ? hat : mMarioDefault[2];
+        if (!materialMatches(mMarioBody->mModelData, 9, bodyHat)) {
+            if (customHat)
+                tintMaterial(mMarioBody->mModelData, 9, hat);
+            else
+                restoreMaterial(mMarioBody->mModelData, 9, mMarioDefault[2]);
+            bodyChanged = true;
+        }
+    }
+    if (bodyChanged) rebuildModel(mMarioBody);
 
-    if (!gpMarioOriginal->mCap) return;
-    J3DModel *cap = gpMarioOriginal->mCap->mCap1;
-    if (cap) tintMaterial(cap->mModelData, 0,
-                          mColors[SUSAMUNE_CREATION_MARIO_HAT]);
+    for (int i = 0; i < 2; i++) {
+        if (!mMarioCaps[i] || !hatActive) continue;
+        const u8 *cap = customHat ? hat : mMarioDefault[3 + i];
+        if (materialMatches(mMarioCaps[i]->mModelData, 0, cap)) continue;
+        if (customHat)
+            tintMaterial(mMarioCaps[i]->mModelData, 0, hat);
+        else
+            restoreMaterial(mMarioCaps[i]->mModelData, 0,
+                            mMarioDefault[3 + i]);
+        rebuildModel(mMarioCaps[i]);
+    }
+    if (!outfitPresent) mMarioTouched &= ~1;
+    if (!hatPresent) mMarioTouched &= ~2;
+}
+
+void CreationExtras::prepareUpdate() {
+    if (!gpMarDirector || gpMarDirector->_260 == 0 ||
+        gpMarDirector->mCurState != TMarDirector::STATE_NORMAL ||
+        !gpMarDirector->mGCConsole ||
+        gpMarDirector->mGCConsole->mMainScreen != mHudScreen) return;
+    // Rebuild locked model display lists before this frame can submit them.
+    applyMario();
+    J2DPane *anchorPane = timerPane(mHudPictures, mTimerText, 0);
+    if (!anchorPane) return;
+    const int anchorX = anchorPane->mRect.mX1;
+    const int anchorY = anchorPane->mRect.mY1;
+    for (u32 i = 0; i < TIMER_PANE_COUNT; i++)
+        if (J2DPane *pane = timerPane(mHudPictures, mTimerText, i)) {
+            JUTRect &r = pane->mRect;
+            JUTRect &base = mTimerPaneBase[i];
+            const int scale = mTimerAppliedScale;
+            if (r.mX1 != anchorX + (base.mX1 - anchorX) * scale / 100 ||
+                r.mY1 != anchorY + (base.mY1 - anchorY) * scale / 100 ||
+                r.mX2 != anchorX + (base.mX2 - anchorX) * scale / 100 ||
+                r.mY2 != anchorY + (base.mY2 - anchorY) * scale / 100) {
+                base.mX1 = anchorX + (r.mX1 - anchorX) * 100 / scale;
+                base.mY1 = anchorY + (r.mY1 - anchorY) * 100 / scale;
+                base.mX2 = anchorX + (r.mX2 - anchorX) * 100 / scale;
+                base.mY2 = anchorY + (r.mY2 - anchorY) * 100 / scale;
+            }
+            r = base;
+        }
+}
+
+void CreationExtras::applyTimerScale() {
+    const int scale = mColorStyle.scale;
+    if (!timerPane(mHudPictures, mTimerText, 0)) return;
+    for (u32 i = 0; i < TIMER_PANE_COUNT; i++) {
+        J2DPane *pane = timerPane(mHudPictures, mTimerText, i);
+        if (!pane) continue;
+        mTimerPaneBase[i] = pane->mRect;
+    }
+    const int anchorX = mTimerPaneBase[0].mX1;
+    const int anchorY = mTimerPaneBase[0].mY1;
+    for (u32 i = 0; i < TIMER_PANE_COUNT; i++) {
+        J2DPane *pane = timerPane(mHudPictures, mTimerText, i);
+        if (!pane || scale == 100) continue;
+        JUTRect &r = pane->mRect;
+        r.mX1 = anchorX + (mTimerPaneBase[i].mX1 - anchorX) * scale / 100;
+        r.mY1 = anchorY + (mTimerPaneBase[i].mY1 - anchorY) * scale / 100;
+        r.mX2 = anchorX + (mTimerPaneBase[i].mX2 - anchorX) * scale / 100;
+        r.mY2 = anchorY + (mTimerPaneBase[i].mY2 - anchorY) * scale / 100;
+    }
+    mTimerAppliedScale = (u8)scale;
 }
 
 void CreationExtras::update() {
@@ -312,7 +540,7 @@ void CreationExtras::update() {
         !gpMarDirector->mGCConsole ||
         gpMarDirector->mGCConsole->mMainScreen != mHudScreen) return;
     applyHud();
-    applyMario();
+    applyTimerScale();
 }
 
 void CreationExtras::draw(Menu *menu) const {
@@ -325,7 +553,7 @@ void CreationExtras::draw(Menu *menu) const {
 }
 
 bool CreationExtras::menuRowSeparator(int row) {
-    return row == 0 || row == 11 || row == 14 || row == 24;
+    return row == 0 || row == 12 || row == 15 || row == 25;
 }
 
 const char *CreationExtras::menuRowName(int row) {
@@ -334,8 +562,13 @@ const char *CreationExtras::menuRowName(int row) {
 }
 
 const char *CreationExtras::menuRowValue(int row) const {
-    if (row >= 15 && row <= 23) {
-        const int local = row - 15;
+    static char timerScale[5];
+    if (row == 5) {
+        snprintf(timerScale, sizeof(timerScale), "%u%%", mColorStyle.scale);
+        return timerScale;
+    }
+    if (row >= 16 && row <= 24) {
+        const int local = row - 16;
         if (local % 3 == 2)
             return mWordVisible[local / 3] ? "On" : "Off";
     }
@@ -380,25 +613,30 @@ void CreationExtras::beginKeyboard(int index) {
 }
 
 void CreationExtras::adjustMenuRow(int row, int direction) {
-    (void)direction;
     static const u8 rowToColor[] = {
-        SUSAMUNE_CREATION_WATER_TEXT, SUSAMUNE_CREATION_FLUDD_TANK,
+        SUSAMUNE_CREATION_WATER_TEXT, SUSAMUNE_CREATION_FLUDD_WATER,
         SUSAMUNE_CREATION_TIMER_BG, SUSAMUNE_CREATION_TIMER_CHAR_FIRST,
         SUSAMUNE_CREATION_COIN_BG, SUSAMUNE_CREATION_RED_BG,
         SUSAMUNE_CREATION_BLUE_BG, SUSAMUNE_CREATION_LIVES_BG,
         SUSAMUNE_CREATION_SHINES_BG, SUSAMUNE_CREATION_LIFE_TEXT,
     };
-    if (row >= 1 && row <= 10) {
+    if (row >= 1 && row <= 4) {
         const int local = row - 1;
         const int count = local == 3 ? SUSAMUNE_CREATION_TIMER_CHAR_COUNT : 1;
         beginColorEditor(rowToColor[local], count, menuRowName(row),
                          local == 3 ? kTimerNames : nullptr);
-    } else if (row == 12) {
-        beginColorEditor(SUSAMUNE_CREATION_SHINE_OUTFIT, 1, menuRowName(row));
+    } else if (row == 5) {
+        mColorStyle.scale = (u8)clampi(
+            (int)mColorStyle.scale + direction * 5, 50, 200);
+        mDirty = true;
+    } else if (row >= 6 && row <= 11) {
+        beginColorEditor(rowToColor[row - 2], 1, menuRowName(row));
     } else if (row == 13) {
+        beginColorEditor(SUSAMUNE_CREATION_SHINE_OUTFIT, 1, menuRowName(row));
+    } else if (row == 14) {
         beginColorEditor(SUSAMUNE_CREATION_MARIO_HAT, 1, menuRowName(row));
-    } else if (row >= 15 && row <= 23) {
-        const int local = row - 15;
+    } else if (row >= 16 && row <= 24) {
+        const int local = row - 16;
         const int word = local / 3;
         if (local % 3 == 0) beginKeyboard(word);
         else if (local % 3 == 1) beginWordEditor(word);
@@ -406,7 +644,7 @@ void CreationExtras::adjustMenuRow(int row, int direction) {
             mWordVisible[word] = !mWordVisible[word];
             mDirty = true;
         }
-    } else if (row == 25) {
+    } else if (row == 26) {
         beginColorEditor(SUSAMUNE_CREATION_MENU_BG, 1, menuRowName(row));
     }
 }
@@ -433,11 +671,14 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
             for (int i = 0; i < mEditCount; i++) {
                 const int slot = mEditFirst + i;
                 mColorPresent |= SUSAMUNE_CREATION_COLOR(slot);
+                if (slot == SUSAMUNE_CREATION_SHINE_OUTFIT)
+                    mMarioTouched |= 1;
+                else if (slot == SUSAMUNE_CREATION_MARIO_HAT)
+                    mMarioTouched |= 2;
             }
         }
         mDirty = true;
         applyHud();
-        applyMario();
     }
     if (result & CreationEditor::UPDATE_CANCELLED) {
         mDirty = mDirtyBeforeEdit;
@@ -447,7 +688,6 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
             for (int i = 0; i < mEditCount; i++)
                 mColorPresent |= SUSAMUNE_CREATION_COLOR(mEditFirst + i);
             applyHud();
-            applyMario();
             mColorPresent = savedPresent;
         }
     }
@@ -486,7 +726,7 @@ void CreationExtras::updateKeyboard(TMarioGamePad *pad) {
         mKeyboardConfirm = 3;
         return;
     }
-    const int columns = mKeyboardPage ? 9 : 8;
+    const int columns = 8;
     const int count = mKeyboardPage ? (int)sizeof(kSymbols) - 1 : 32;
     if (pressed & TMarioGamePad::DPAD_LEFT)
         mKeyboardCursor = (u8)((mKeyboardCursor + count - 1) % count);
@@ -533,7 +773,7 @@ void CreationExtras::drawKeyboard(Menu *menu) const {
     const char *page = mKeyboardPage ? kSymbols
                         : (mUppercase ? kLettersUpper : kLettersLower);
     const int count = mKeyboardPage ? (int)sizeof(kSymbols) - 1 : 32;
-    const int columns = mKeyboardPage ? 9 : 8;
+    const int columns = 8;
     const int cellW = 46;
     const int startX = 112;
     const int startY = 246;
@@ -588,6 +828,14 @@ void CreationExtras::drawEditor(Menu *menu) const {
     preview.textBrightness = 100;
     preview.padding = 0xff;
     const u16 selected = mEditor.target() ? mEditor.target() - 1 : 0xffff;
+    if (mEditFirst >= SUSAMUNE_CREATION_TIMER_BG &&
+        mEditFirst <= SUSAMUNE_CREATION_SHINES_BG) {
+        for (u32 i = 0; i < HUD_PANE_COUNT; i++) {
+            if (kHudPaneColors[i] != mEditFirst || !mHudPictures[i]) continue;
+            mHudPictures[i]->draw(140, 78, 360, 58, false, false, false);
+            break;
+        }
+    }
     const char *sample = mEditCount == SUSAMUNE_CREATION_TIMER_CHAR_COUNT
                              ? "0123456789:::" : mEditTitle;
     Creation::drawTextBox(menu, preview, mColors + mEditFirst, mEditCount,
