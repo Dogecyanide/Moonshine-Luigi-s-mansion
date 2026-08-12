@@ -14,7 +14,6 @@
 #include "JSystem/JUtility/JUTGamePad.hxx"
 #include "SMS/System/Application.hxx"
 #include "susamune/binds.hxx"
-#include "susamune/layout_editor.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/packed_text.hxx"
 
@@ -26,6 +25,18 @@ const int kDesignW = 182;
 const int kDesignH = 120;
 const int kValueLineH = 14;
 const int kSafeBottom = 456;
+const int kTriggerClick = 170;
+const int kTriggerAnalogFill = 52;
+
+constexpr u8 kDefaultColors[SUSAMUNE_INPUT_COLOR_COUNT][3] = {
+    {238, 238, 238}, {255, 211,   0}, { 46, 229, 184},
+    {255,  26,  26}, {238, 238, 238}, {238, 238, 238},
+    {223, 223, 223}, {223, 223, 223}, {238, 238, 238},
+    {148, 148, 255}, {255, 255, 255}, {238, 238, 238},
+};
+constexpr char kColorNames[] =
+    "Main stick\0C-stick\0A button\0B button\0X button\0Y button\0"
+    "L trigger\0R trigger\0Start\0Z button\0Value text\0Trigger outlines";
 
 inline int clampi(int v, int lo, int hi) {
     if (v < lo) return lo;
@@ -36,18 +47,20 @@ inline int clampi(int v, int lo, int hi) {
 inline Color color(u8 r, u8 g, u8 b, u8 a) { return Color(r, g, b, a); }
 
 struct Painter {
-    Menu                      *menu;
-    const InputDisplayLiveCfg *cfg;
+    Menu                *menu;
+    const CreationStyle *style;
+    const u8            (*rgb)[3];
 
-    int scale(int v) const { return v * (int)cfg->scale / 100; }
-    int x(int v) const { return (int)cfg->x + scale(v); }
-    int y(int v) const { return (int)cfg->y + scale(v); }
+    int scale(int v) const { return v * (int)style->scale / 100; }
+    int x(int v) const { return (int)style->x + scale(v); }
+    int y(int v) const { return (int)style->y + scale(v); }
 
-    Color lit(u8 r, u8 g, u8 b, u8 a) const {
-        int q = cfg->brightness;
-        return color((u8)clampi((int)r * q / 100, 0, 255),
-                     (u8)clampi((int)g * q / 100, 0, 255),
-                     (u8)clampi((int)b * q / 100, 0, 255), a);
+    Color lit(int slot, u8 alpha) const {
+        const int q = style->textBrightness;
+        return color((u8)clampi((int)rgb[slot][0] * q / 100, 0, 255),
+                     (u8)clampi((int)rgb[slot][1] * q / 100, 0, 255),
+                     (u8)clampi((int)rgb[slot][2] * q / 100, 0, 255),
+                     (u8)((int)alpha * style->textA / 255));
     }
 
     void box(int lx, int ly, int lw, int lh, Color c) const {
@@ -93,9 +106,8 @@ struct Painter {
         menu->strokePoly(xy, 8, c);
     }
 
-    void button(int lx, int ly, int radius, bool down,
-                u8 r, u8 g, u8 b) const {
-        const Color c = lit(r, g, b, 0xbf);
+    void button(int lx, int ly, int radius, bool down, int slot) const {
+        const Color c = lit(slot, 0xbf);
         // The original display is an outline at rest and gains a solid fill
         // only for the frames where the button is held.
         if (down) fillCircle(lx, ly, radius, c);
@@ -111,9 +123,8 @@ int valueLines(const InputDisplayLiveCfg &cfg) {
 
 const char kInputText[] =
     "Input display\0Value readout\0Value source\0Value position\0"
-    "Edit layout\0Reset layout\0Off\0On\0Sticks\0Full\0Raw\0Processed\0"
-    "Below\0Above\0Inside\0Background alpha\0Background red\0"
-    "Background green\0Background blue\0Display brightness";
+    "Input style\0Reset layout\0Off\0On\0Sticks\0Full\0Raw\0Processed\0"
+    "Below\0Above\0Inside";
 
 enum InputTextGroup {
     TEXT_ROWS          = 0,
@@ -121,39 +132,37 @@ enum InputTextGroup {
     TEXT_STICKS        = 8,
     TEXT_SOURCES       = 10,
     TEXT_PLACEMENTS    = 12,
-    TEXT_EDIT_CHANNELS = 15,
 };
 
 __attribute__((noinline)) const char *inputText(int index) {
     return PackedText::at(kInputText, index);
 }
 
-static_assert(sizeof(kInputText) == 217, "input text offsets changed");
+static_assert(sizeof(kInputText) == 133, "input text offsets changed");
 
 }  // namespace
 
 InputDisplay gInputDisplay;
 
+CreationStyle InputDisplay::defaultStyle() {
+    return CreationStyle{16, 314, 100, 255, 0, 0, 0, 0x7f, 100, 0};
+}
+
 void InputDisplay::resetDefaults() {
-    mCfg.x              = 16;
-    mCfg.y              = 314;
+    mStyle              = defaultStyle();
     mCfg.startVisible   = 1;
-    mCfg.scale          = 100;
-    mCfg.bgR            = 0;
-    mCfg.bgG            = 0;
-    mCfg.bgB            = 0;
-    mCfg.bgA            = 0x7f;
-    mCfg.brightness     = 100;
     mCfg.valueMode      = SUSAMUNE_INPUT_VALUES_OFF;
     mCfg.valueSource    = SUSAMUNE_INPUT_SOURCE_RAW;
     mCfg.valuePlacement = SUSAMUNE_INPUT_VALUES_BELOW;
+    for (int i = 0; i < SUSAMUNE_INPUT_COLOR_COUNT; i++) {
+        for (int c = 0; c < 3; c++) mColors[i][c] = kDefaultColors[i][c];
+    }
 
-    mVisible          = false;
+    mEditor.reset();
+    mVisible           = false;
     mVisibleBeforeEdit = true;
-    mDirty            = false;
-    mDirtyBeforeEdit  = false;
-    mEditing          = false;
-    mEditChannel      = 0;
+    mDirty             = false;
+    mDirtyBeforeEdit   = false;
 }
 
 void InputDisplay::adopt(const volatile SusamuneInputDisplayCfg *src) {
@@ -163,17 +172,17 @@ void InputDisplay::adopt(const volatile SusamuneInputDisplayCfg *src) {
         return;
     }
 
-    if (src->x != SUSAMUNE_INPUT_CFG_U16_UNSET) mCfg.x = src->x;
-    if (src->y != SUSAMUNE_INPUT_CFG_U16_UNSET) mCfg.y = src->y;
+    if (src->x != SUSAMUNE_INPUT_CFG_U16_UNSET) mStyle.x = src->x;
+    if (src->y != SUSAMUNE_INPUT_CFG_U16_UNSET) mStyle.y = src->y;
     if (src->startVisible != SUSAMUNE_INPUT_CFG_U8_UNSET)
         mCfg.startVisible = src->startVisible != 0;
-    if (src->scale != SUSAMUNE_INPUT_CFG_U8_UNSET) mCfg.scale = src->scale;
-    if (src->bgR != SUSAMUNE_INPUT_CFG_U8_UNSET) mCfg.bgR = src->bgR;
-    if (src->bgG != SUSAMUNE_INPUT_CFG_U8_UNSET) mCfg.bgG = src->bgG;
-    if (src->bgB != SUSAMUNE_INPUT_CFG_U8_UNSET) mCfg.bgB = src->bgB;
-    if (src->bgA != SUSAMUNE_INPUT_CFG_U8_UNSET) mCfg.bgA = src->bgA;
+    if (src->scale != SUSAMUNE_INPUT_CFG_U8_UNSET) mStyle.scale = src->scale;
+    if (src->bgR != SUSAMUNE_INPUT_CFG_U8_UNSET) mStyle.bgR = src->bgR;
+    if (src->bgG != SUSAMUNE_INPUT_CFG_U8_UNSET) mStyle.bgG = src->bgG;
+    if (src->bgB != SUSAMUNE_INPUT_CFG_U8_UNSET) mStyle.bgB = src->bgB;
+    if (src->bgA != SUSAMUNE_INPUT_CFG_U8_UNSET) mStyle.bgA = src->bgA;
     if (src->brightness != SUSAMUNE_INPUT_CFG_U8_UNSET)
-        mCfg.brightness = src->brightness;
+        mStyle.textBrightness = src->brightness;
     if (src->valueMode != SUSAMUNE_INPUT_CFG_U8_UNSET)
         mCfg.valueMode = src->valueMode;
     if (src->valueSource != SUSAMUNE_INPUT_CFG_U8_UNSET)
@@ -182,8 +191,6 @@ void InputDisplay::adopt(const volatile SusamuneInputDisplayCfg *src) {
         mCfg.valuePlacement = src->valuePlacement;
 
     mCfg.startVisible   = mCfg.startVisible ? 1 : 0;
-    mCfg.scale          = (u8)clampi(mCfg.scale, 50, 150);
-    mCfg.brightness     = (u8)clampi(mCfg.brightness, 25, 200);
     mCfg.valueMode      = (u8)clampi(mCfg.valueMode, 0, 2);
     mCfg.valueSource    = (u8)clampi(mCfg.valueSource, 0, 1);
     mCfg.valuePlacement = (u8)clampi(mCfg.valuePlacement, 0, 2);
@@ -192,21 +199,49 @@ void InputDisplay::adopt(const volatile SusamuneInputDisplayCfg *src) {
     mDirty   = false;
 }
 
+void InputDisplay::adoptStyle(const volatile SusamuneInputStyleCfg *src) {
+    if (!src || src->magic != SUSAMUNE_INPUT_STYLE_MAGIC ||
+        src->version != SUSAMUNE_INPUT_STYLE_VERSION) return;
+
+    if (src->present & SUSAMUNE_INPUT_STYLE_OPACITY)
+        mStyle.textA = src->elementOpacity;
+    if (src->present & SUSAMUNE_INPUT_STYLE_PADDING)
+        mStyle.padding = src->padding;
+    for (int i = 0; i < SUSAMUNE_INPUT_COLOR_COUNT; i++) {
+        if (src->present & SUSAMUNE_INPUT_STYLE_COLOR(i)) {
+            for (int c = 0; c < 3; c++) mColors[i][c] = src->rgb[i][c];
+        }
+    }
+    clampLayout();
+}
+
 void InputDisplay::stageInto(volatile SusamuneInputDisplayCfg *dst) const {
     dst->magic          = SUSAMUNE_INPUT_CFG_MAGIC;
     dst->version        = SUSAMUNE_INPUT_CFG_VERSION;
-    dst->x              = mCfg.x;
-    dst->y              = mCfg.y;
+    dst->x              = mStyle.x;
+    dst->y              = mStyle.y;
     dst->startVisible   = mCfg.startVisible;
-    dst->scale          = mCfg.scale;
-    dst->bgR            = mCfg.bgR;
-    dst->bgG            = mCfg.bgG;
-    dst->bgB            = mCfg.bgB;
-    dst->bgA            = mCfg.bgA;
-    dst->brightness     = mCfg.brightness;
+    dst->scale          = mStyle.scale;
+    dst->bgR            = mStyle.bgR;
+    dst->bgG            = mStyle.bgG;
+    dst->bgB            = mStyle.bgB;
+    dst->bgA            = mStyle.bgA;
+    dst->brightness     = mStyle.textBrightness;
     dst->valueMode      = mCfg.valueMode;
     dst->valueSource    = mCfg.valueSource;
     dst->valuePlacement = mCfg.valuePlacement;
+    for (u32 i = 0; i < sizeof(dst->reserved); i++) dst->reserved[i] = 0;
+}
+
+void InputDisplay::stageStyleInto(volatile SusamuneInputStyleCfg *dst) const {
+    dst->magic          = SUSAMUNE_INPUT_STYLE_MAGIC;
+    dst->version        = SUSAMUNE_INPUT_STYLE_VERSION;
+    dst->present        = SUSAMUNE_INPUT_STYLE_ALL;
+    dst->elementOpacity = mStyle.textA;
+    dst->padding        = mStyle.padding;
+    for (int i = 0; i < SUSAMUNE_INPUT_COLOR_COUNT; i++) {
+        for (int c = 0; c < 3; c++) dst->rgb[i][c] = mColors[i][c];
+    }
     for (u32 i = 0; i < sizeof(dst->reserved); i++) dst->reserved[i] = 0;
 }
 
@@ -216,32 +251,31 @@ void InputDisplay::markDirty() {
 }
 
 void InputDisplay::resetLayout() {
-    mCfg.x          = 16;
-    mCfg.y          = 314;
-    mCfg.scale      = 100;
-    mCfg.bgR        = 0;
-    mCfg.bgG        = 0;
-    mCfg.bgB        = 0;
-    mCfg.bgA        = 0x7f;
-    mCfg.brightness = 100;
+    mStyle = defaultStyle();
     markDirty();
 }
 
 void InputDisplay::clampLayout() {
-    int w = kDesignW * (int)mCfg.scale / 100;
-    int h = kDesignH * (int)mCfg.scale / 100;
+    mStyle.scale          = (u8)clampi(mStyle.scale, 50, 200);
+    mStyle.textBrightness = (u8)clampi(mStyle.textBrightness, 25, 200);
+    if (mStyle.padding != 0xff)
+        mStyle.padding = (u8)clampi(mStyle.padding, 0, 16);
+    const int pad = mStyle.padding == 0xff ? 0 : mStyle.padding;
+    int w = kDesignW * (int)mStyle.scale / 100;
+    int h = kDesignH * (int)mStyle.scale / 100;
     int lines = valueLines(mCfg);
     int extra = lines * kValueLineH;
     int minY = (mCfg.valuePlacement == SUSAMUNE_INPUT_VALUES_ABOVE) ? extra : 0;
-    int maxY = kSafeBottom - h;
+    minY += pad;
+    int maxY = kSafeBottom - h - pad;
     if (mCfg.valuePlacement == SUSAMUNE_INPUT_VALUES_BELOW) maxY -= extra;
     if (maxY < minY) maxY = minY;
-    mCfg.x = (u16)clampi(mCfg.x, 0, 640 - w);
-    mCfg.y = (u16)clampi(mCfg.y, minY, maxY);
+    mStyle.x = (u16)clampi(mStyle.x, pad, 640 - w - pad);
+    mStyle.y = (u16)clampi(mStyle.y, minY, maxY);
 }
 
 void InputDisplay::update() {
-    if (!mEditing && (!gMenu || !gMenu->shown()) &&
+    if (!editing() && (!gMenu || !gMenu->shown()) &&
         gBinds.wasPressed(BIND_TOGGLE_INPUT_DISPLAY)) {
         mVisible = !mVisible;
     }
@@ -295,71 +329,22 @@ void InputDisplay::adjustMenuRow(int row, int dir) {
 }
 
 void InputDisplay::beginEditor() {
-    if (mEditing) return;
-    mEditBackup       = {mCfg.x, mCfg.y, mCfg.scale, mCfg.bgR, mCfg.bgG,
-                         mCfg.bgB, mCfg.bgA, mCfg.brightness};
-    mDirtyBeforeEdit  = mDirty;
+    if (editing()) return;
+    mDirtyBeforeEdit   = mDirty;
     mVisibleBeforeEdit = mVisible;
-    mVisible          = true;
-    mEditing          = true;
-    mEditChannel      = 0;
-}
-
-void InputDisplay::finishEditor(bool keep) {
-    if (!keep) {
-        mCfg.x          = mEditBackup.x;
-        mCfg.y          = mEditBackup.y;
-        mCfg.scale      = mEditBackup.scale;
-        mCfg.bgR        = mEditBackup.bgR;
-        mCfg.bgG        = mEditBackup.bgG;
-        mCfg.bgB        = mEditBackup.bgB;
-        mCfg.bgA        = mEditBackup.bgA;
-        mCfg.brightness = mEditBackup.brightness;
-        mDirty = mDirtyBeforeEdit;
-    }
-    mVisible = mVisibleBeforeEdit;
-    mEditing = false;
+    mVisible           = true;
+    mEditor.begin(&mStyle, mColors, mBackupRgb, SUSAMUNE_INPUT_COLOR_COUNT,
+                  SUSAMUNE_INPUT_COLOR_COUNT, kColorNames);
 }
 
 void InputDisplay::updateEditor(TMarioGamePad *pad) {
-    u32 rapid = pad->mButtons.mRapidInput;
-
-    if (rapid & TMarioGamePad::A) {
-        finishEditor(true);
-        return;
-    }
-    if (rapid & TMarioGamePad::B) {
-        finishEditor(false);
-        return;
-    }
-    if (rapid & TMarioGamePad::Z) {
-        resetLayout();
-        return;
-    }
-
-    bool changed = LayoutEditor::updatePositionScale(
-        rapid, mCfg.x, mCfg.y, mCfg.scale);
-    if (rapid & TMarioGamePad::START) {
-        mEditChannel = (u8)((mEditChannel + 1) % 5);
-    }
-    int delta = 0;
-    if (rapid & TMarioGamePad::X) delta = -8;
-    if (rapid & TMarioGamePad::Y) delta = 8;
-    if (delta) {
-        u8 *field = nullptr;
-        if (mEditChannel == 0) field = &mCfg.bgA;
-        if (mEditChannel == 1) field = &mCfg.bgR;
-        if (mEditChannel == 2) field = &mCfg.bgG;
-        if (mEditChannel == 3) field = &mCfg.bgB;
-        if (field) {
-            *field = (u8)clampi((int)*field + delta, 0, 254);
-        } else {
-            mCfg.brightness = (u8)clampi((int)mCfg.brightness + delta, 25, 200);
-        }
-        changed = true;
-    }
-
-    if (changed) markDirty();
+    const u8 result = mEditor.update(pad, defaultStyle(), kDefaultColors,
+                                     SUSAMUNE_INPUT_COLOR_COUNT);
+    if (result & CreationEditor::UPDATE_CHANGED) markDirty();
+    if (result & CreationEditor::UPDATE_CANCELLED)
+        mDirty = mDirtyBeforeEdit;
+    if (result & CreationEditor::UPDATE_FINISHED)
+        mVisible = mVisibleBeforeEdit;
 }
 
 void InputDisplay::draw(Menu *menu, bool force) const {
@@ -367,23 +352,38 @@ void InputDisplay::draw(Menu *menu, bool force) const {
 
     const PADStatus &raw = JUTGamePad::mPadStatus[0];
     const u16 buttons = raw.mButton;
-    Painter p = { menu, &mCfg };
+    Painter p = { menu, &mStyle, mColors };
 
-    p.box(0, 0, kDesignW, kDesignH, color(mCfg.bgR, mCfg.bgG, mCfg.bgB, mCfg.bgA));
+    const int lines = valueLines(mCfg);
+    const int extra = lines * kValueLineH;
+    const int graphicH = p.scale(kDesignH);
+    int bgY = mStyle.y;
+    int bgH = graphicH;
+    if (mCfg.valuePlacement == SUSAMUNE_INPUT_VALUES_ABOVE) {
+        bgY -= extra;
+        bgH += extra;
+    } else if (mCfg.valuePlacement == SUSAMUNE_INPUT_VALUES_BELOW) {
+        bgH += extra;
+    }
+    if (mStyle.padding != 0xff) {
+        const int pad = mStyle.padding;
+        menu->fillBox(mStyle.x - pad, bgY - pad,
+                      p.scale(kDesignW) + pad * 2, bgH + pad * 2,
+                      color(mStyle.bgR, mStyle.bgG, mStyle.bgB, mStyle.bgA));
+    }
 
-    // Analog trigger bars, with the digital click guaranteeing a full bar.
-    int l = raw.mTriggerLeft;
-    int r = raw.mTriggerRight;
-    if (buttons & JUTGamePad::L) l = 255;
-    if (buttons & JUTGamePad::R) r = 255;
-    // Analog travel fills 56 of the 64 design units; a digital click fills
-    // the complete outlined trigger, exactly like the Gecko original.
-    const int lFill = (buttons & JUTGamePad::L) ? 64 : 56 * l / 255;
-    const int rFill = (buttons & JUTGamePad::R) ? 64 : 56 * r / 255;
-    const Color triggerFill = p.lit(223, 223, 223, 0xbf);
-    p.box(12, 10, lFill, 8, triggerFill);
-    p.box(170 - rFill, 10, rFill, 8, triggerFill);
-    const Color triggerStroke = p.lit(238, 238, 238, 0xbf);
+    // PAD clicks at 170; analog travel stops near 80% so the click is visible.
+    const int lFill = (buttons & JUTGamePad::L) ? 64
+        : clampi((int)raw.mTriggerLeft * kTriggerAnalogFill / kTriggerClick,
+                 0, kTriggerAnalogFill);
+    const int rFill = (buttons & JUTGamePad::R) ? 64
+        : clampi((int)raw.mTriggerRight * kTriggerAnalogFill / kTriggerClick,
+                 0, kTriggerAnalogFill);
+    p.box(12, 10, lFill, 8, p.lit(SUSAMUNE_INPUT_COLOR_L, 0xbf));
+    p.box(170 - rFill, 10, rFill, 8,
+          p.lit(SUSAMUNE_INPUT_COLOR_R, 0xbf));
+    const Color triggerStroke =
+        p.lit(SUSAMUNE_INPUT_COLOR_TRIGGER_OUTLINE, 0xbf);
     s16 trigger[8] = {
         (s16)p.x(12), (s16)p.y(10), (s16)p.x(76), (s16)p.y(10),
         (s16)p.x(76), (s16)p.y(18), (s16)p.x(12), (s16)p.y(18)
@@ -398,35 +398,32 @@ void InputDisplay::draw(Menu *menu, bool force) const {
     const int my = clampi((s8)raw.mStickY, -100, 100) * 14 / 100;
     const int cx = clampi((s8)raw.mSubStickX, -100, 100) * 14 / 100;
     const int cy = clampi((s8)raw.mSubStickY, -100, 100) * 14 / 100;
-    const Color mainStick = p.lit(238, 238, 238, 0xef);
+    const Color mainStick = p.lit(SUSAMUNE_INPUT_COLOR_MAIN_STICK, 0xef);
     p.fillCircle(32 + mx, 52 - my, 12, mainStick);
     p.strokeGate(32, 52, 19, mainStick);
-    const Color cStick = p.lit(255, 211, 0, 0xef);
+    const Color cStick = p.lit(SUSAMUNE_INPUT_COLOR_C_STICK, 0xef);
     p.fillCircle(64 + cx, 92 - cy, 12, cStick);
     p.strokeGate(64, 92, 19, cStick);
 
-    p.button(138, 66, 18, buttons & JUTGamePad::A, 46, 229, 184);
-    p.button(113, 89, 9, buttons & JUTGamePad::B, 255, 26, 26);
-    p.button(164, 50, 8, buttons & JUTGamePad::X, 238, 238, 238);
-    p.button(119, 41, 8, buttons & JUTGamePad::Y, 238, 238, 238);
-    p.button(144, 34, 6, buttons & JUTGamePad::Z, 148, 148, 255);
-    p.button(91, 64, 5, buttons & JUTGamePad::START, 238, 238, 238);
+    p.button(138, 66, 18, buttons & JUTGamePad::A, SUSAMUNE_INPUT_COLOR_A);
+    p.button(113, 89, 9, buttons & JUTGamePad::B, SUSAMUNE_INPUT_COLOR_B);
+    p.button(164, 50, 8, buttons & JUTGamePad::X, SUSAMUNE_INPUT_COLOR_X);
+    p.button(119, 41, 8, buttons & JUTGamePad::Y, SUSAMUNE_INPUT_COLOR_Y);
+    p.button(144, 34, 6, buttons & JUTGamePad::Z, SUSAMUNE_INPUT_COLOR_Z);
+    p.button(91, 64, 5, buttons & JUTGamePad::START,
+             SUSAMUNE_INPUT_COLOR_START);
 
-    int lines = valueLines(mCfg);
     if (lines == 0) return;
 
-    int textSize = clampi(10 * (int)mCfg.scale / 100, 8, 14);
-    int graphicH = p.scale(kDesignH);
+    int textSize = clampi(10 * (int)mStyle.scale / 100, 8, 14);
     int textY;
     if (mCfg.valuePlacement == SUSAMUNE_INPUT_VALUES_ABOVE) {
-        textY = (int)mCfg.y - lines * kValueLineH;
+        textY = (int)mStyle.y - lines * kValueLineH;
     } else if (mCfg.valuePlacement == SUSAMUNE_INPUT_VALUES_INSIDE) {
-        textY = (int)mCfg.y + graphicH - lines * kValueLineH - 2;
+        textY = (int)mStyle.y + graphicH - lines * kValueLineH - 2;
     } else {
-        textY = (int)mCfg.y + graphicH;
+        textY = (int)mStyle.y + graphicH;
     }
-    menu->fillBox(mCfg.x, textY, p.scale(kDesignW), lines * kValueLineH,
-                  color(mCfg.bgR, mCfg.bgG, mCfg.bgB, mCfg.bgA));
 
     int mainX, mainY, cX, cY, triggerL, triggerR;
     TMarioGamePad *pad = gpApplication.mGamePads[0];
@@ -447,34 +444,21 @@ void InputDisplay::draw(Menu *menu, bool force) const {
     }
 
     char text[48];
-    const Color valueText = p.lit(255, 255, 255, 255);
+    const Color valueText = p.lit(SUSAMUNE_INPUT_COLOR_VALUES, 255);
     snprintf(text, sizeof(text), "M  X:%+04d  Y:%+04d", mainX, mainY);
-    menu->drawText(text, mCfg.x + 4, textY + 2, textSize, textSize,
+    menu->drawText(text, mStyle.x + 4, textY + 2, textSize, textSize,
                    valueText);
     snprintf(text, sizeof(text), "C  X:%+04d  Y:%+04d", cX, cY);
-    menu->drawText(text, mCfg.x + 4, textY + kValueLineH + 1,
+    menu->drawText(text, mStyle.x + 4, textY + kValueLineH + 1,
                    textSize, textSize, valueText);
     if (lines == 3) {
         snprintf(text, sizeof(text), "L:%03d  R:%03d", triggerL, triggerR);
-        menu->drawText(text, mCfg.x + 4, textY + kValueLineH * 2 + 1,
+        menu->drawText(text, mStyle.x + 4, textY + kValueLineH * 2 + 1,
                        textSize, textSize, valueText);
     }
 }
 
 void InputDisplay::drawEditor(Menu *menu) const {
     draw(menu, true);
-
-    char status[112];
-    // Keep every editor instruction in the title-safe upper area. The old
-    // footer reached y=472 and was clipped by real PAL output/capture paths.
-    snprintf(status, sizeof(status),
-             "X:%u Y:%u  Size:%u%%  BG:%03u,%03u,%03u  A:%03u  Bright:%u%%",
-             mCfg.x, mCfg.y, mCfg.scale, mCfg.bgR, mCfg.bgG, mCfg.bgB,
-             mCfg.bgA, mCfg.brightness);
-    LayoutEditor::drawHeader(menu, 88, "Input Display editor", status);
-    snprintf(status, sizeof(status), "START Field: %s   X -   Y +",
-             inputText(TEXT_EDIT_CHANNELS + mEditChannel));
-    menu->drawText(status, 18, 57, 11, 11, color(255, 255, 255, 255));
-    menu->drawText("D-pad Move   L/R Size   A Save   B Cancel   Z Reset",
-                   18, 76, 11, 11, color(255, 255, 255, 255));
+    mEditor.draw(menu, "Input Display editor", nullptr);
 }

@@ -1,5 +1,7 @@
 venv/
 build/
+build_memdiag/
+build-*/
 .cache
 __pycache__/
 .sconsign.dblite

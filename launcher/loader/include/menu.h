@@ -101,6 +101,9 @@ static inline void ShowLoadingScreen(void)
  */
 void PrintInfo(void);
 
+// Susamune's title belongs only on its main launcher screen.
+void PrintSusamuneBuild(void);
+
 /**
  * Print button actions.
  * Call this function after PrintInfo().

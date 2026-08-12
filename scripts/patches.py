@@ -33,6 +33,10 @@ patches = [
     # standard, selecting the format actually recorded in the mounted card.
     {'jp': 0x800a31fc, 'us': 0x803588dc, 'pal': 0x80350afc,
      'sym': 'susamuneCardMount', 'type': PatchType.B},
+    # evGetSystemFlag: virtualize the box-game flags read by Delfino's
+    # Sunscript without changing the actual save data.
+    {'jp': 0x800e64e8, 'us': 0x80292fa0, 'pal': 0x8028ad2c,
+     'sym': 'susamuneGetSystemFlag', 'type': PatchType.BL},
 #   {'jp': 0x800fa110, 'us': ..., 'pal': ..., 'sym': 'onFinishAppState', 'type': PatchType.BL},
     # insert NOPs to speed up boot process
     # initialize__12TApplicationFv + 0x2c / +0x40.
@@ -62,11 +66,11 @@ arena_lo = {
 
 # Size of the carved region. Comes out of the ~19 MiB heap, so it can be
 # generous; the mod must fit within it. MUST match
-# SUSAMUNE_MOD_REGION_SIZE in addresses.hxx.
-mod_region_size = 0x10000
+# SUSAMUNE_MOD_REGION_SIZE in mod_bin.h.
+mod_region_size = 0x20000
 
 # Tail of the region reserved for the asm caves' fixed-address scratch, which
-# the blob must not grow into. MUST match SUSAMUNE_SCRATCH in addresses.hxx.
+# the blob must not grow into. MUST match SUSAMUNE_SCRATCH in mod_bin.h.
 mod_scratch_size = 0x40
 
 # Ceiling enforced on the linked blob by every link_mod.py mode.
@@ -80,7 +84,7 @@ debug_stack_size = 0x2000
 
 # What getArenaLo() adds to __OSArenaLo, and therefore the amount every
 # bottom-anchored heap allocation shifts up by. MUST match
-# SUSAMUNE_ARENA_RESERVE_SIZE in addresses.hxx.
+# SUSAMUNE_ARENA_RESERVE_SIZE in mod_bin.h.
 arena_reserve = mod_region_size + debug_stack_size
 
 # Base address to link code against, i.e. where we insert the code.

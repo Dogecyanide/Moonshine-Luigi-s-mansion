@@ -269,7 +269,7 @@ u32  gFfOrig;
 u32  gFfLast;
 bool gFfCaptured;
 
-void fastForward() {
+void fastForward(bool allowBinds) {
     if (!gFfCaptured) {
         gFfOrig     = *reinterpret_cast<volatile u32 *>(kFfSite);
         gFfLast     = gFfOrig;
@@ -277,9 +277,9 @@ void fastForward() {
     }
 
     u32 want = gFfOrig;
-    if (gBinds.isHeld(BIND_FAST_FORWARD_8X)) {
+    if (allowBinds && gBinds.isHeld(BIND_FAST_FORWARD_8X)) {
         want = (gFfOrig & 0xFFFF0000u) | kFf8x;
-    } else if (gBinds.isHeld(BIND_FAST_FORWARD_4X)) {
+    } else if (allowBinds && gBinds.isHeld(BIND_FAST_FORWARD_4X)) {
         want = (gFfOrig & 0xFFFF0000u) | kFf4x;
     }
 
@@ -310,10 +310,12 @@ extern "C" void susamuneOnEggYoshiControl(TEggYoshi *egg) {
     egg->TMapObjBase::makeObjDead();
 }
 
-void actionsApply() {
-    fastForward();
-    regrabLastHeldObject();
-    spawnYoshiFromBinds();
+void actionsApply(bool allowBinds) {
+    fastForward(allowBinds);
+    if (allowBinds) {
+        regrabLastHeldObject();
+        spawnYoshiFromBinds();
+    }
 
     applyEggHook(gEggKillFrames != 0);
     if (gEggKillFrames > 0) {

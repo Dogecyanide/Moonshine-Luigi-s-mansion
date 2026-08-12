@@ -12,8 +12,10 @@
 
 #include "Dolphin/OS.h"  // DCInvalidateRange, DCStoreRange
 #include "susamune/binds.hxx"
+#include "susamune/creation_extras.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/metadata_display.hxx"
+#include "susamune/qft_display.hxx"
 #include "susamune/packed_text.hxx"
 #include "susamune/susamune_cfg.h"
 
@@ -26,6 +28,7 @@ enum ChoiceSet {
     CHOICES_SUNSHINE_TIMER,
     CHOICES_QFT_VISIBILITY,
     CHOICES_FREEZE_DURATION,
+    CHOICES_BOX_GAME,
     CHOICES_COUNT,
 };
 
@@ -48,7 +51,7 @@ const char kSettingNames[] =
 const char kChoiceLabels[] =
     "Off\0On\0Completed\0No FLUDD\0All secrets\0Unlocked\0Rocket\0Turbo\0Hover\0"
     "Always\0Shine only\0Hidden\0On freeze\0"
-    "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0";
+    "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0" "1\0" "2\0";
 
 const u8 kChoiceMap[] = {
     0, 1,              // bool
@@ -57,8 +60,9 @@ const u8 kChoiceMap[] = {
     9, 10, 11,         // Sunshine timer
     9, 12, 11,         // QFT visibility
     0, 13, 14, 15, 16, 17,  // freeze duration
+    0, 18, 19,          // box game
 };
-const u8 kChoiceFirst[CHOICES_COUNT + 1] = {0, 2, 5, 9, 12, 15, 21};
+const u8 kChoiceFirst[CHOICES_COUNT + 1] = {0, 2, 5, 9, 12, 15, 21, 24};
 
 u8 choiceCount(const SettingDesc &desc) {
     return kChoiceFirst[desc.choices + 1] - kChoiceFirst[desc.choices];
@@ -98,6 +102,8 @@ void Settings::resetDefaults() {
     gBinds.resetDefaults();
     gInputDisplay.resetDefaults();
     gMetadataDisplay.resetDefaults();
+    gQftDisplay.resetDefaults();
+    gCreationExtras.resetDefaults();
 
     for (int i = 0; i < SETTING_COUNT; i++) {
         mValues[i] = defaultValue(kSettingDescs[i]);
@@ -113,26 +119,11 @@ void Settings::resetDefaults() {
 // Persistence
 //
 // On console the Nintendont ARM kernel has already parsed susamune.ini into
-// the MEM2 handoff block by the time the game boots (see SusamuneCfg.c), so
-// loading is just "validate and copy". On emulator there is no launcher and
-// hence no backend, so we keep the compiled-in defaults.
+// the MEM2 handoff block by the time the game boots (see SusamuneCfg.c).
+// Dolphin's implementation lives in settings_emulator.cpp and uses slot B.
 // ---------------------------------------------------------------------
 
-#if IS_EMULATOR
-
-void Settings::init() { resetDefaults(); }
-
-void Settings::save() {
-    mSaveState = SETTINGS_SAVE_UNSUPPORTED;
-    mDirty     = false;
-    gBinds.clearDirty();
-    gInputDisplay.clearDirty();
-    gMetadataDisplay.clearDirty();
-}
-
-SettingsSaveState Settings::pollSave() { return (SettingsSaveState)mSaveState; }
-
-#else
+#if !IS_EMULATOR
 
 void Settings::init() {
     resetDefaults();
@@ -150,9 +141,79 @@ void Settings::init() {
         return;
     }
 
-    // Copy only what the writer actually filled in. A kernel older than the
-    // mod carries fewer settings than SETTING_COUNT; the remainder keep their
-    // compiled-in defaults, which is what makes adding a setting safe.
+    adopt(cfg);
+    mSaveSeq = cfg->saveSeq;
+
+    // First boot of this game version on this SD card: the kernel found no
+    // sections for it and cannot author defaults, because those live here
+    // rather than in the launcher.
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_NO_CONFIG) {
+        save();
+    }
+}
+
+bool Settings::finishInit() { return true; }
+
+void Settings::save() {
+    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+
+    if (mSaveState == SETTINGS_SAVE_UNSUPPORTED) {
+        mDirty = false;
+        gBinds.clearDirty();
+        gInputDisplay.clearDirty();
+        gMetadataDisplay.clearDirty();
+        gQftDisplay.clearDirty();
+        gCreationExtras.clearDirty();
+        return;
+    }
+
+    stageInto(cfg);
+
+    // Publish the payload before the doorbell, so the kernel can never see a
+    // bumped saveSeq alongside a half-written values[]/binds[]. Both live in
+    // the same mod-owned run of cache lines starting at values[].
+    DCStoreRange((void *)cfg->values,
+                 sizeof(cfg->values) + sizeof(cfg->binds) + sizeof(cfg->inputDisplay) +
+                 sizeof(cfg->metadataDisplay));
+    DCStoreRange((void *)&cfg->qftDisplay,
+                 sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle) +
+                 sizeof(cfg->inputStyle) + sizeof(cfg->creation));
+
+    mSaveSeq     = cfg->saveSeq + 1;
+    cfg->saveSeq = mSaveSeq;
+    DCStoreRange((void *)cfg, 32);  // line 0: magic/version/count/saveSeq
+
+    mDirty          = false;
+    mLastError      = 0;
+    mSaveWaitFrames = 0;
+    mSaveState      = SETTINGS_SAVE_PENDING;
+}
+
+SettingsSaveState Settings::pollSave() {
+    if (mSaveState != SETTINGS_SAVE_PENDING) {
+        return (SettingsSaveState)mSaveState;
+    }
+
+    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+    // Line 1 is written exclusively by the kernel, so invalidating it can
+    // never discard a pending write of ours (see the ownership note in
+    // susamune_cfg.h).
+    DCInvalidateRange((void *)&cfg->ackSeq, 32);
+
+    if (cfg->ackSeq == mSaveSeq) {
+        mLastError = cfg->status;
+        mSaveState = mLastError ? SETTINGS_SAVE_ERROR : SETTINGS_SAVE_OK;
+    } else if (++mSaveWaitFrames > kSaveTimeoutFrames) {
+        mSaveState = SETTINGS_SAVE_TIMEOUT;
+    }
+    return (SettingsSaveState)mSaveState;
+}
+
+#endif  // !IS_EMULATOR
+
+void Settings::adopt(const volatile SusamuneCfg *cfg) {
+    // Copy only what the writer actually filled in. An older backend carries
+    // fewer settings; the remainder keep their compiled-in defaults.
     u16 n = cfg->count;
     if (n > SETTING_COUNT) {
         n = SETTING_COUNT;
@@ -186,35 +247,28 @@ void Settings::init() {
     if (cfg->flags & SUSAMUNE_CFG_FLAG_INPUT_DISPLAY) {
         gInputDisplay.adopt(&cfg->inputDisplay);
     }
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_INPUT_STYLE) {
+        gInputDisplay.adoptStyle(&cfg->inputStyle);
+    }
     if (cfg->flags & SUSAMUNE_CFG_FLAG_METADATA_DISPLAY) {
         gMetadataDisplay.adopt(&cfg->metadataDisplay);
+    }
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_METADATA_STYLE) {
+        gMetadataDisplay.adoptStyle(&cfg->metadataStyle);
+    }
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_QFT_DISPLAY) {
+        gQftDisplay.adopt(&cfg->qftDisplay);
+    }
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_CREATION) {
+        gCreationExtras.adopt(&cfg->creation);
     }
 
     // set() marks dirty; adopting persisted values is not a user edit.
     mDirty     = false;
-    mSaveSeq   = cfg->saveSeq;
     mSaveState = SETTINGS_SAVE_IDLE;
-
-    // First boot of this game version on this SD card: the kernel found no
-    // sections for it and cannot author defaults, because those live here
-    // rather than in the launcher. Write them out now so the user has
-    // something to look at (and to hand-edit) without having to visit the menu
-    // first. Fire-and-forget -- the menu that would report the result does not
-    // exist this early.
-    if (cfg->flags & SUSAMUNE_CFG_FLAG_NO_CONFIG) {
-        save();
-    }
 }
 
-void Settings::save() {
-    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
-
-    if (mSaveState == SETTINGS_SAVE_UNSUPPORTED) {
-        mDirty = false;
-        gBinds.clearDirty();
-        return;
-    }
-
+void Settings::stageInto(volatile SusamuneCfg *cfg) {
     for (int i = 0; i < SETTING_COUNT; i++) {
         cfg->values[i] = mValues[i];
     }
@@ -229,48 +283,16 @@ void Settings::save() {
     gBinds.clearDirty();
 
     gInputDisplay.stageInto(&cfg->inputDisplay);
+    gInputDisplay.stageStyleInto(&cfg->inputStyle);
     gInputDisplay.clearDirty();
     gMetadataDisplay.stageInto(&cfg->metadataDisplay);
+    gMetadataDisplay.stageStyleInto(&cfg->metadataStyle);
     gMetadataDisplay.clearDirty();
-
-    // Publish the payload before the doorbell, so the kernel can never see a
-    // bumped saveSeq alongside a half-written values[]/binds[]. Both live in
-    // the same mod-owned run of cache lines starting at values[].
-    DCStoreRange((void *)cfg->values,
-                 sizeof(cfg->values) + sizeof(cfg->binds) + sizeof(cfg->inputDisplay) +
-                 sizeof(cfg->metadataDisplay));
-
-    mSaveSeq     = cfg->saveSeq + 1;
-    cfg->saveSeq = mSaveSeq;
-    DCStoreRange((void *)cfg, 32);  // line 0: magic/version/count/saveSeq
-
-    mDirty          = false;
-    mLastError      = 0;
-    mSaveWaitFrames = 0;
-    mSaveState      = SETTINGS_SAVE_PENDING;
+    gQftDisplay.stageInto(&cfg->qftDisplay);
+    gQftDisplay.clearDirty();
+    gCreationExtras.stageInto(&cfg->creation);
+    gCreationExtras.clearDirty();
 }
-
-SettingsSaveState Settings::pollSave() {
-    if (mSaveState != SETTINGS_SAVE_PENDING) {
-        return (SettingsSaveState)mSaveState;
-    }
-
-    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
-    // Line 1 is written exclusively by the kernel, so invalidating it can
-    // never discard a pending write of ours (see the ownership note in
-    // susamune_cfg.h).
-    DCInvalidateRange((void *)&cfg->ackSeq, 32);
-
-    if (cfg->ackSeq == mSaveSeq) {
-        mLastError = cfg->status;
-        mSaveState = mLastError ? SETTINGS_SAVE_ERROR : SETTINGS_SAVE_OK;
-    } else if (++mSaveWaitFrames > kSaveTimeoutFrames) {
-        mSaveState = SETTINGS_SAVE_TIMEOUT;
-    }
-    return (SettingsSaveState)mSaveState;
-}
-
-#endif  // IS_EMULATOR
 
 void Settings::set(SettingId id, u8 value) {
     value = value % choiceCount(kSettingDescs[id]);

@@ -4096,6 +4096,10 @@ static const struct SusamuneModHeader *SusamuneModStaged(void)
 		return NULL;
 	if (hdr->gameId != GAME_ID)
 		return NULL;
+	if (hdr->baseAddr != SUSAMUNE_MOD_BASE_FOR_GAME_ID(GAME_ID)
+			|| hdr->arenaReserve != SUSAMUNE_ARENA_RESERVE_SIZE
+			|| hdr->codeSize > SUSAMUNE_MOD_BLOB_MAX_SIZE)
+		return NULL;
 
 	// The file is untrusted input off an SD card: refuse anything whose parts
 	// do not add up, rather than memcpy'ing a bogus length into MEM1.

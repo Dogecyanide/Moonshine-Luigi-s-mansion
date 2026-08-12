@@ -37,6 +37,23 @@
 #define SUSAMUNE_MOD_GAME_ID_US  0x474D5345u  // "GMSE"
 #define SUSAMUNE_MOD_GAME_ID_PAL 0x474D5350u  // "GMSP"
 
+#define SUSAMUNE_MOD_BASE_JP  0x80426020u
+#define SUSAMUNE_MOD_BASE_US  0x80429800u
+#define SUSAMUNE_MOD_BASE_PAL 0x80420D60u
+#define SUSAMUNE_MOD_REGION_SIZE 0x20000u
+#define SUSAMUNE_SCRATCH 0x40u
+#define SUSAMUNE_MOD_BLOB_MAX_SIZE \
+    (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
+#define SUSAMUNE_DEBUG_STACK_SIZE 0x2000u
+#define SUSAMUNE_ARENA_RESERVE_SIZE \
+    (SUSAMUNE_MOD_REGION_SIZE + SUSAMUNE_DEBUG_STACK_SIZE)
+
+#define SUSAMUNE_MOD_BASE_FOR_GAME_ID(gameId)                         \
+    ((gameId) == SUSAMUNE_MOD_GAME_ID_JP    ? SUSAMUNE_MOD_BASE_JP   \
+     : (gameId) == SUSAMUNE_MOD_GAME_ID_US  ? SUSAMUNE_MOD_BASE_US   \
+     : (gameId) == SUSAMUNE_MOD_GAME_ID_PAL ? SUSAMUNE_MOD_BASE_PAL  \
+                                             : 0u)
+
 // File layout: this header, then codeSize bytes of code, then writeCount
 // pairs of (addr, val). codeSize is a multiple of 4, so the write list is
 // word-aligned relative to the header.
@@ -64,13 +81,11 @@ struct SusamuneModHeader {
 #define SUSAMUNE_MOD_FILE_FMT "mod_%s.bin"
 
 // Portable compile-time checks (no C11 dependency). The window has to hold a
-// blob that fills the whole 64 KiB mod region plus the header and write list;
-// SUSAMUNE_MOD_REGION_SIZE itself lives in addresses.hxx, which is C++-only, so
-// the ceiling is spelled out here.
+// blob that fills the whole 128 KiB mod region plus the header and write list;
 typedef char susamune_mod_header_size_check
     [(sizeof(struct SusamuneModHeader) == SUSAMUNE_MOD_HEADER_SIZE) ? 1 : -1];
 typedef char susamune_mod_window_size_check
-    [(SUSAMUNE_MEM2_MODBIN_SIZE >= 0x10000u + 0x1000u) ? 1 : -1];
+    [(SUSAMUNE_MEM2_MODBIN_SIZE >= SUSAMUNE_MOD_REGION_SIZE + 0x1000u) ? 1 : -1];
 
 #define SUSAMUNE_MOD_PPC_PTR  ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PPC_BASE)
 #define SUSAMUNE_MOD_PHYS_PTR ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PHYS_BASE)

@@ -1,4 +1,4 @@
-name: Build release launcher
+name: Build release artifacts
 
 on:
   release:
@@ -47,3 +47,43 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.event.release.tag_name }}" "build/susamune_launcher.zip" --clobber
+
+  build-emulator-patch:
+    name: emulator BPS
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.target_commitish }}
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify build tools
+        run: |
+          cmake --version
+          ninja --version
+
+      - name: Install build dependencies
+        run: python setup_venv.py
+
+      - name: Configure Dolphin build
+        run: cmake --preset release_emu -DVERS="jp;us;pal"
+
+      - name: Build source-free BPS patches
+        run: cmake --build --preset emu_patches
+
+      - name: Upload emulator patches to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "${{ github.event.release.tag_name }}"
+          "build/susamune_jp.bps"
+          "build/susamune_us.bps"
+          "build/susamune_pal.bps"
+          --clobber

@@ -8,11 +8,15 @@ class Menu;
 namespace ILing {
 
 void init();
+// Dolphin's CARD backend becomes available after init(), during the boot
+// state. Console persistence is already loaded by init().
+void onPersistenceReady();
 int count();
 const char *label(int entry);
 s32 pbQf(int entry);
 int jumpGroup(int entry, int direction);
 bool beginsGroup(int entry);
+const char *groupName(int entry);
 
 bool start(int entry);
 void clearPB(int entry);

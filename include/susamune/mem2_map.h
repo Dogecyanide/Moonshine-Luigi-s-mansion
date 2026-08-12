@@ -33,7 +33,7 @@
 // alias and the ARM kernel consumes the same bytes through the physical alias.
 #define NIN_MEM2_FILE_PATCH_PHYS_BASE        0x11900000u
 #define NIN_MEM2_FILE_PATCH_PPC_BASE         0x91900000u
-#define NIN_MEM2_FILE_PATCH_SIZE             0x005E0000u
+#define NIN_MEM2_FILE_PATCH_SIZE             0x005DF000u
 
 // mod_<region>.bin staging (struct SusamuneModHeader, mod_bin.h). The PPC
 // loader reads the file for the detected disc here before booting the kernel;
@@ -42,12 +42,12 @@
 //
 // It shares the file-patch buffer's lifetime -- both are loader-to-kernel
 // handoffs consumed at PatchGame time -- so it is carved off that buffer's tail
-// rather than given memory of its own: 128 KiB out of six MiB, and the game
+// rather than given memory of its own: 132 KiB out of six MiB, and the game
 // never ships a patch.bin anyway. Deliberately NOT taken out of the snapshot
 // window, whose payload can legitimately grow to fill its reservation.
-#define SUSAMUNE_MEM2_MODBIN_PHYS_BASE       0x11EE0000u
-#define SUSAMUNE_MEM2_MODBIN_PPC_BASE        0x91EE0000u
-#define SUSAMUNE_MEM2_MODBIN_SIZE            0x00020000u
+#define SUSAMUNE_MEM2_MODBIN_PHYS_BASE       0x11EDF000u
+#define SUSAMUNE_MEM2_MODBIN_PPC_BASE        0x91EDF000u
+#define SUSAMUNE_MEM2_MODBIN_SIZE            0x00021000u
 
 // Dedicated Susamune snapshot window. No Nintendont buffer may overlap this
 // range. Its exclusive end is the settings block below.
