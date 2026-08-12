@@ -11,6 +11,9 @@
 #include "Dolphin/THP.h"
 #include "susamune/menu.hxx"
 #include "susamune/settings.hxx"
+#if IS_EMULATOR
+#include "susamune/emulator_persistence.hxx"
+#endif
 #include "susamune/features.hxx"
 #include "susamune/actions.hxx"
 #include "susamune/binds.hxx"
@@ -78,9 +81,10 @@ extern "C" void onAppInit(TApplication* app) {
     }
 #endif
 
-    // Intro Skip patches the logo director, which is already directing by the
-    // time the first onUpdate reaches featuresApply().
+#if !IS_EMULATOR
+    // The launcher made persisted settings available before initialize().
     featuresApplyEarly();
+#endif
 }
 
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
@@ -151,6 +155,17 @@ extern "C" void onSetup(TMarDirector* director) {
 
 
 extern "C" s32 onUpdate(JDrama::TDirector* director) {
+#if IS_EMULATOR
+    static bool persistenceReady = false;
+    if (!persistenceReady && gSettings.finishInit()) {
+        persistenceReady = true;
+        ILing::onPersistenceReady();
+        // This is before direct() for the first Nintendo-logo frame. Applying
+        // the boot patches after direct() is too late for that director.
+        featuresApplyEarly();
+    }
+#endif
+
     // Sample the pad before direct(), not after: onUpdateGameMode runs inside
     // it and asks whether the menu bind was pressed this frame, which would
     // otherwise be answered from the previous frame's sample.
@@ -186,6 +201,10 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     }
     if (!gSettings.getBool(SETTING_DISABLE_WARPS))
         state = LevelWarp::onDirected(state);
+
+#if IS_EMULATOR
+    EmulatorPersistence::service();
+#endif
 
     gQFTTimer.update();
     ILing::update();

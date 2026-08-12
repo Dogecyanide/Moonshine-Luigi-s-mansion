@@ -57,6 +57,49 @@ inline Color cRowDim()     { return col(120, 130, 150, 255); }
 inline Color cValue()      { return col(120, 220, 150, 255); }// setting value
 inline Color cFooter()     { return col(104, 114, 136, 255); }
 
+const char *settingsStorageError(u32 error) {
+    switch (error) {
+#if IS_EMULATOR
+    case 2:   return "wrong device in slot B";
+    case 3:   return "no card in slot B";
+    case 4:   return "settings file missing";
+    case 5:   return "slot B card I/O error";
+    case 6:   return "slot B card unformatted";
+    case 7:   return "settings file already exists";
+    case 8:   return "card directory is full";
+    case 9:   return "slot B card is full";
+    case 10:  return "settings file not writable";
+    case 11:  return "slot B card limit reached";
+    case 12:  return "settings filename too long";
+    case 13:  return "slot B encoding mismatch";
+    case 14:  return "card operation canceled";
+    case 128: return "fatal slot B card error";
+    case 256: return "not enough memory";
+#else
+    case 1:  return "storage I/O error";
+    case 2:  return "storage internal error";
+    case 3:  return "storage not ready";
+    case 4:  return "settings file missing";
+    case 5:  return "settings path missing";
+    case 6:  return "invalid settings filename";
+    case 7:  return "storage access denied";
+    case 8:  return "settings file already exists";
+    case 9:  return "invalid settings file";
+    case 10: return "storage is write-protected";
+    case 11: return "invalid storage device";
+    case 12: return "storage not mounted";
+    case 13: return "storage has no FAT filesystem";
+    case 14: return "format aborted";
+    case 15: return "storage timed out";
+    case 16: return "settings file locked";
+    case 17: return "not enough memory";
+    case 18: return "too many open files";
+    case 19: return "invalid storage parameter";
+#endif
+    default:  return nullptr;
+    }
+}
+
 // -------- font metrics ----------------------------------------------------
 // Cached in Menu::Menu so the static textWidth() can reach them. They describe
 // the same font drawText() renders with (gpSystemFont), so measuring matches
@@ -346,23 +389,18 @@ private:
     bool mConfirmDelete;
 };
 
-// ---------------------------------------------------------------------
-// Warp presets tab
-// ---------------------------------------------------------------------
 #if ENABLE_DEBUG_WARPS
 class WarpPresetsTab : public MenuTab {
 public:
     WarpPresetsTab() : mSel(0) {}
-
     const char *title() const override { return "Warps"; }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
-        u32 rapid = menu->navigationInput(pad);
-        if (rapid & TMarioGamePad::CSTICK_UP) {
+        const u32 rapid = menu->navigationInput(pad);
+        if (rapid & TMarioGamePad::CSTICK_UP)
             mSel = wrap(mSel - 1, Warp::kNumPresets);
-        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+        else if (rapid & TMarioGamePad::CSTICK_DOWN)
             mSel = wrap(mSel + 1, Warp::kNumPresets);
-        }
         if (rapid & TMarioGamePad::A) {
             const WarpDescriptor &d = Warp::kPresets[mSel];
             Warp::request(d.area, d.episode, d.overrideArea, d.extraFlag);
@@ -371,22 +409,19 @@ public:
     }
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
-        int maxRows = h / ROW_H;
-        int start   = listScrollStart(mSel, Warp::kNumPresets, maxRows);
-        int end     = start + maxRows;
-        if (end > Warp::kNumPresets) {
-            end = Warp::kNumPresets;
-        }
+        const int maxRows = h / ROW_H;
+        const int start = listScrollStart(mSel, Warp::kNumPresets, maxRows);
+        int end = start + maxRows;
+        if (end > Warp::kNumPresets) end = Warp::kNumPresets;
         int ry = y;
-        for (int i = start; i < end; i++) {
-            bool selected = (i == mSel);
+        for (int i = start; i < end; i++, ry += ROW_H) {
+            const bool selected = i == mSel;
             if (selected) {
                 drawRowHighlight(menu, x, ry, w, ROW_H);
                 menu->drawText(">", x - 2, ry, ROW_SZ, ROW_SZ, cAccent());
             }
             menu->drawText(Warp::kPresets[i].name, x + 22, ry, ROW_SZ, ROW_SZ,
                            selected ? cRowSel() : cRow());
-            ry += ROW_H;
         }
         drawScrollHints(menu, x, y, w, h, start, end, Warp::kNumPresets);
     }
@@ -395,27 +430,21 @@ private:
     int mSel;
 };
 
-// ---------------------------------------------------------------------
-// Stage / episode picker tab
-// ---------------------------------------------------------------------
 class WarpStagesTab : public MenuTab {
 public:
     WarpStagesTab() : mArea(0), mEpisode(0) {}
-
     const char *title() const override { return "Stages"; }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
-        u32 rapid = menu->navigationInput(pad);
-        if (rapid & TMarioGamePad::CSTICK_UP) {
+        const u32 rapid = menu->navigationInput(pad);
+        if (rapid & TMarioGamePad::CSTICK_UP)
             mArea = wrap(mArea - 1, WARP_NUM_STAGES);
-        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+        else if (rapid & TMarioGamePad::CSTICK_DOWN)
             mArea = wrap(mArea + 1, WARP_NUM_STAGES);
-        }
-        if (rapid & TMarioGamePad::CSTICK_LEFT) {
+        if (rapid & TMarioGamePad::CSTICK_LEFT)
             mEpisode = wrap(mEpisode - 1, WARP_NUM_EPISODES);
-        } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
+        else if (rapid & TMarioGamePad::CSTICK_RIGHT)
             mEpisode = wrap(mEpisode + 1, WARP_NUM_EPISODES);
-        }
         if (rapid & TMarioGamePad::A) {
             Warp::request(mArea, mEpisode, -1, -1);
             menu->hide();
@@ -423,32 +452,24 @@ public:
     }
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
-        int maxRows = h / ROW_H;
-        int start   = listScrollStart(mArea, WARP_NUM_STAGES, maxRows);
-        int end     = start + maxRows;
-        if (end > WARP_NUM_STAGES) {
-            end = WARP_NUM_STAGES;
-        }
-        const int epX    = x + 230;
-        const int epStep = 26;
-        char      digit[2];
-        digit[1] = '\0';
-
+        const int maxRows = h / ROW_H;
+        const int start = listScrollStart(mArea, WARP_NUM_STAGES, maxRows);
+        int end = start + maxRows;
+        if (end > WARP_NUM_STAGES) end = WARP_NUM_STAGES;
+        const int epX = x + 230;
+        char digit[2] = {'1', '\0'};
         int ry = y;
-        for (int i = start; i < end; i++) {
-            bool selArea = (i == mArea);
-            if (selArea) {
-                drawRowHighlight(menu, x, ry, w, ROW_H);
-            }
+        for (int i = start; i < end; i++, ry += ROW_H) {
+            const bool selected = i == mArea;
+            if (selected) drawRowHighlight(menu, x, ry, w, ROW_H);
             menu->drawText(Warp::kStageNames[i], x + 4, ry, ROW_SZ, ROW_SZ,
-                           selArea ? cRowSel() : cRow());
+                           selected ? cRowSel() : cRow());
             for (int e = 0; e < WARP_NUM_EPISODES; e++) {
-                bool here = selArea && (e == mEpisode);
-                digit[0]  = (char)('1' + e);
-                menu->drawText(digit, epX + e * epStep, ry, ROW_SZ, ROW_SZ,
-                               here ? cAccent() : (selArea ? cRow() : cRowDim()));
+                digit[0] = (char)('1' + e);
+                menu->drawText(digit, epX + e * 26, ry, ROW_SZ, ROW_SZ,
+                               selected && e == mEpisode ? cAccent()
+                               : selected ? cRow() : cRowDim());
             }
-            ry += ROW_H;
         }
     }
 
@@ -830,8 +851,8 @@ private:
 // does not run).
 namespace {
 #if ENABLE_DEBUG_WARPS
-u8 sPresetsBuf[sizeof(WarpPresetsTab)]         __attribute__((aligned(8)));
-u8 sStagesBuf[sizeof(WarpStagesTab)]           __attribute__((aligned(8)));
+u8 sPresetsBuf[sizeof(WarpPresetsTab)] __attribute__((aligned(8)));
+u8 sStagesBuf[sizeof(WarpStagesTab)]   __attribute__((aligned(8)));
 #endif
 u8 sQolBuf[sizeof(CategorySettingsTab)]        __attribute__((aligned(8)));
 u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
@@ -1058,8 +1079,14 @@ void Menu::drawToast() {
 void Menu::requestSettingsSave() {
     gSettings.save();
     if (gSettings.saveState() == SETTINGS_SAVE_UNSUPPORTED) {
-        // Emulator build, or booted without the susamune launcher.
-        toast("Settings not saved: no launcher");
+        const char *error = settingsStorageError(gSettings.lastError());
+        if (error) {
+            snprintf(mToastBuf, sizeof(mToastBuf), "Settings unavailable: %s", error);
+        } else {
+            snprintf(mToastBuf, sizeof(mToastBuf), "Settings unavailable (error %lu)",
+                     gSettings.lastError());
+        }
+        mToastFrames = kToastFrames;
         return;
     }
     mSaveWatch = true;
@@ -1081,8 +1108,7 @@ void Menu::pollSettingsSave() {
 
     SettingsSaveState st = gSettings.pollSave();
     if (st == SETTINGS_SAVE_PENDING) {
-        // The kernel only services the doorbell between disc reads, so hold
-        // the "saving" message up rather than letting it time out on screen.
+        // Hold the "saving" message up rather than letting it time out.
         mToastFrames = kToastFrames;
         return;
     }
@@ -1093,15 +1119,18 @@ void Menu::pollSettingsSave() {
         toast("Settings saved");
         break;
     case SETTINGS_SAVE_ERROR: {
-        // Keep the FatFS result for diagnosing removal vs write protection.
-        // 7 = write protection, 9 = invalid object, ...
-        snprintf(mToastBuf, sizeof(mToastBuf), "Could not write susamune.ini (fs %lu)",
-                 gSettings.lastError());
+        const char *error = settingsStorageError(gSettings.lastError());
+        if (error) {
+            snprintf(mToastBuf, sizeof(mToastBuf), "Settings save failed: %s", error);
+        } else {
+            snprintf(mToastBuf, sizeof(mToastBuf), "Settings save failed (error %lu)",
+                     gSettings.lastError());
+        }
         mToastFrames = kToastFrames;
         break;
     }
     case SETTINGS_SAVE_TIMEOUT:
-        toast("Save timed out: launcher too old?");
+        toast("Settings save timed out");
         break;
     default:
         break;

@@ -33,6 +33,10 @@ patches = [
     # standard, selecting the format actually recorded in the mounted card.
     {'jp': 0x800a31fc, 'us': 0x803588dc, 'pal': 0x80350afc,
      'sym': 'susamuneCardMount', 'type': PatchType.B},
+    # evGetSystemFlag: virtualize the box-game flags read by Delfino's
+    # Sunscript without changing the actual save data.
+    {'jp': 0x800e64e8, 'us': 0x80292fa0, 'pal': 0x8028ad2c,
+     'sym': 'susamuneGetSystemFlag', 'type': PatchType.BL},
 #   {'jp': 0x800fa110, 'us': ..., 'pal': ..., 'sym': 'onFinishAppState', 'type': PatchType.BL},
     # insert NOPs to speed up boot process
     # initialize__12TApplicationFv + 0x2c / +0x40.

@@ -5,6 +5,8 @@
 
 #include "susamune/settings_list.h"
 
+struct SusamuneCfg;
+
 // =====================================================================
 // settings.hxx
 //
@@ -16,11 +18,9 @@
 // susamune.ini on the SD card -- is driven off that table so adding a
 // setting is a one-line change.
 //
-// Persistence (console only) is a two-step handoff with the Nintendont
-// kernel; see susamune_cfg.h for the protocol and settings.cpp for the
-// implementation. Values live in this BSS struct during gameplay, not in
-// the MEM2 handoff block, so every read is a plain cached MEM1 load with
-// no coherency rules -- features.cpp reads settings every frame.
+// Persistence uses the Nintendont handoff on console and a private slot-B
+// file on Dolphin. Values live in this BSS struct during gameplay, so every
+// read remains a plain cached MEM1 load -- features.cpp reads them every frame.
 // =====================================================================
 
 // The full set of settings. Append a row to SUSAMUNE_SETTING_LIST
@@ -57,19 +57,22 @@ enum SettingsSaveState {
     SETTINGS_SAVE_OK,       // kernel wrote susamune.ini
     SETTINGS_SAVE_ERROR,    // kernel reported a FatFS error (see lastError)
     SETTINGS_SAVE_TIMEOUT,  // kernel never answered (old/stock launcher?)
-    SETTINGS_SAVE_UNSUPPORTED,  // emulator build: no persistence backend
+    SETTINGS_SAVE_UNSUPPORTED,  // launcher/card backend unavailable
 };
 static_assert(SETTINGS_SAVE_UNSUPPORTED <= 0xFF,
               "settings save state no longer fits in a byte");
 
 class Settings {
 public:
-    // Install compiled-in defaults, then adopt any values the launcher
-    // persisted into the MEM2 handoff block. Call once at boot before
-    // anything reads a setting (values live in BSS, so they are zero until
-    // this runs) -- see onAppInit in main.cpp, which runs before
-    // TApplication::proc() and therefore before the logo/title sequence.
+    // Install compiled-in defaults, then adopt the launcher's values on
+    // console. Dolphin finishes the adoption through finishInit() once CARD
+    // is ready. Call from onAppInit before anything reads a setting.
     void init();
+
+    // Dolphin cannot read slot B until Sunshine has initialized CARD during
+    // the boot state. onUpdate polls this before the next director runs.
+    // Returns true once loading has completed or the backend is unavailable.
+    bool finishInit();
 
     // Install compiled-in defaults only. init() calls this first; it is also
     // the whole of init() on builds with no persistence backend.
@@ -77,9 +80,9 @@ public:
 
     // --- persistence ---
 
-    // Ask the launcher to write susamune.ini. Non-blocking: this stages the
-    // values into the MEM2 block and rings the doorbell. No-op (and reports
-    // SETTINGS_SAVE_UNSUPPORTED) when there is no backend. Clears dirty().
+    // Ask the active backend to save. Both backends queue the write and expose
+    // completion through the same pollable API. Reports UNSUPPORTED without
+    // configured storage.
     void save();
 
     // Advance an in-flight save. Call once per frame; returns the current
@@ -88,11 +91,10 @@ public:
 
     SettingsSaveState saveState() const { return (SettingsSaveState)mSaveState; }
 
-    // FatFS FRESULT from the last failed save, for the toast text.
+    // Positive backend error code from the last failed save.
     u32 lastError() const { return mLastError; }
 
-    // True when a value changed since the last save. The menu uses this to
-    // avoid touching the SD card when nothing was edited.
+    // True when a value changed since the last save.
     bool dirty() const { return mDirty; }
 
     u8   get(SettingId id) const { return mValues[id]; }
@@ -110,6 +112,9 @@ public:
     static SettingCategory category(SettingId id);
 
 private:
+    void adopt(const volatile SusamuneCfg *cfg);
+    void stageInto(volatile SusamuneCfg *cfg);
+
     u8   mValues[SETTING_COUNT];
     bool mDirty;
     u8   mSaveState;
