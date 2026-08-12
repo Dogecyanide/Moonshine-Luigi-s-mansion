@@ -16,9 +16,9 @@ class CreationExtras {
 public:
     enum {
         MENU_ROW_COUNT = 23,
-        HUD_PANE_COUNT = 27,
-        TIMER_PANE_COUNT = 15,
-        PREVIEW_PANE_COUNT = 3,
+        HUD_PANE_COUNT = 25,
+        TIMER_PANE_COUNT = 17,
+        PREVIEW_PANE_COUNT = 2,
     };
 
     void resetDefaults();
@@ -27,7 +27,7 @@ public:
 
     void onStageSetup();
     void prepareUpdate();
-    void update(bool captureTimerBase);
+    void update();
     void draw(Menu *menu) const;
 
     static int menuRowCount() { return MENU_ROW_COUNT; }
@@ -45,7 +45,6 @@ public:
     const u8 *menuBackground() const {
         return mColors[SUSAMUNE_CREATION_MENU_BG];
     }
-
 private:
     enum EditMode { EDIT_NONE, EDIT_COLOR, EDIT_TIMER, EDIT_WORD_STYLE };
 
@@ -58,7 +57,7 @@ private:
     void updateKeyboard(TMarioGamePad *pad);
     void drawKeyboard(Menu *menu) const;
     void applyHud();
-    void applyTimerLayout(bool captureBase);
+    void applyTimerLayout();
     void beginHudPreview(int color);
     void endHudPreview();
     void addPreviewPane(J2DPane *pane);
@@ -79,6 +78,7 @@ private:
     J2DPicture *mHudPictures[HUD_PANE_COUNT];
     JUTRect mTimerPaneBase[TIMER_PANE_COUNT];
     J2DPane *mTimerText;
+    J2DPane *mTimerGroups[2];
     J2DScreen *mHudScreen;
     J2DPane *mPreviewPanes[PREVIEW_PANE_COUNT];
     CreationEditor mEditor;
@@ -96,7 +96,6 @@ private:
     u32 mColorPresent;
     u32 mColorPresentBeforeEdit;
     u32 mPreviewVisible;
-    u8 mHudOverlayDefault[2][3];
     u8 mWaterFillDefault[2][3];
     bool mKeyboard;
     bool mUppercase;

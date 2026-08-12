@@ -14,10 +14,10 @@ namespace {
 typedef JUtility::TColor Color;
 
 const u32 kHudPaneTags[] = {
-    'w_ba', 't_ba', 'c_ba', 'r_ba', 'b_ba', 'm_ba', 's_ba', 'm_tx',
+    'w_ba', 't_ba', 'c_ba', 'r_ba', 'd_ba', 'm_ba', 's_ba', 'm_tx',
     '\0m_x', 'm_n1', 'm_n2', 'm_n3', 't_n1', 't_n2', 't_n3', 't_n4',
     't_n5', 't_n6', 't_n7', 't_n8', 't_n9', 't_n0', 't_c1', 't_c2',
-    't_c3', 'b_sl', 'r_sl',
+    't_c3',
 };
 const u8 kHudPaneColors[] = {
     SUSAMUNE_CREATION_FLUDD_CIRCLE, SUSAMUNE_CREATION_TIMER_BG,
@@ -39,7 +39,6 @@ const u8 kHudPaneColors[] = {
     SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 10,
     SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 11,
     SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 12,
-    SUSAMUNE_CREATION_BLUE_BG, SUSAMUNE_CREATION_RED_BG,
 };
 static_assert(sizeof(kHudPaneTags) / sizeof(kHudPaneTags[0]) ==
                   CreationExtras::HUD_PANE_COUNT,
@@ -63,7 +62,7 @@ constexpr char kMenuText[] =
     "MOD MENU\0Menu background";
 
 const u32 kPreviewRootTags[] = {
-    '\0t_0', '\0c_0', '\0b_1', '\0b_0', '\0m_0', '\0s_0',
+    '\0t_0', '\0c_0', '\0r_0', '\0d_0', '\0m_0', '\0s_0',
 };
 
 constexpr int packedEntries(const char *pool, u32 bytes) {
@@ -109,10 +108,12 @@ bool sameRgb(const u8 a[3], const u8 b[3]) {
     return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
 }
 
-J2DPane *timerPane(J2DPicture *const pictures[], J2DPane *text, u32 index) {
+J2DPane *timerPane(J2DPicture *const pictures[], J2DPane *text,
+                   J2DPane *const groups[], u32 index) {
     if (index == 0) return pictures[1];
     if (index == 1) return text;
-    return pictures[index + 10];
+    if (index == 2 || index == 3) return groups[index - 2];
+    return pictures[index + 8];
 }
 
 }  // namespace
@@ -143,6 +144,8 @@ void CreationExtras::resetDefaults() {
     for (u32 i = 0; i < sizeof(mHudPictures) / sizeof(mHudPictures[0]); i++)
         mHudPictures[i] = nullptr;
     mTimerText = nullptr;
+    mTimerGroups[0] = nullptr;
+    mTimerGroups[1] = nullptr;
     mHudScreen = nullptr;
     mTimerStyle = CreationStyle{
         0xffff, 0xffff, 100, 255, 0, 0, 0, 0xff, 100, 0xff,
@@ -189,11 +192,6 @@ void CreationExtras::adopt(const volatile SusamuneCreationCfg *src) {
         ~SUSAMUNE_CREATION_COLOR(SUSAMUNE_CREATION_MARIO_HAT);
     mTimerStyle.scale = src->timerScale >= 50 && src->timerScale <= 200
                             ? src->timerScale : 100;
-    if (src->timerPositionPresent && src->timerX <= 640 &&
-        src->timerY <= 456) {
-        mTimerStyle.x = src->timerX;
-        mTimerStyle.y = src->timerY;
-    }
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         const volatile SusamuneCreationWordCfg &in = src->words[word];
         CreationStyle &s = mWordStyle[word];
@@ -217,10 +215,9 @@ void CreationExtras::stageInto(volatile SusamuneCreationCfg *dst) const {
     dst->reserved0 = 0;
     dst->colorPresent = mColorPresent;
     dst->timerScale = mTimerStyle.scale;
-    dst->timerX = mTimerStyle.x;
-    dst->timerY = mTimerStyle.y;
-    dst->timerPositionPresent =
-        mTimerStyle.x <= 640 && mTimerStyle.y <= 456;
+    dst->timerX = 0xffff;
+    dst->timerY = 0xffff;
+    dst->timerPositionPresent = 0;
     for (int i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
         for (int c = 0; c < 3; c++) dst->rgb[i][c] = mColors[i][c];
     for (u32 i = 0; i < sizeof(dst->reserved1); i++) dst->reserved1[i] = 0;
@@ -269,11 +266,13 @@ void CreationExtras::onStageSetup() {
     }
 
     mTimerText = screen->search('t_tx');
+    mTimerGroups[0] = screen->search('\0t_1');
+    mTimerGroups[1] = screen->search('\0t_2');
     for (u32 i = 0; i < TIMER_PANE_COUNT; i++) {
-        J2DPane *pane = timerPane(mHudPictures, mTimerText, i);
+        J2DPane *pane = timerPane(mHudPictures, mTimerText, mTimerGroups, i);
         if (pane) mTimerPaneBase[i] = pane->mRect;
     }
-    if (J2DPane *timer = timerPane(mHudPictures, mTimerText, 0)) {
+    if (J2DPane *timer = timerPane(mHudPictures, mTimerText, mTimerGroups, 0)) {
         mTimerDefaultStyle = CreationStyle{
             (u16)clampi(timer->mRect.mX1, 0, 640),
             (u16)clampi(timer->mRect.mY1, 0, 456),
@@ -285,14 +284,6 @@ void CreationExtras::onStageSetup() {
         }
     }
 
-    const u8 overlayPanes[] = {0, 4};
-    for (u32 i = 0; i < sizeof(overlayPanes); i++) {
-        J2DPicture *picture = mHudPictures[overlayPanes[i]];
-        if (!picture) continue;
-        mHudOverlayDefault[i][0] = picture->mColorOverlay.r;
-        mHudOverlayDefault[i][1] = picture->mColorOverlay.g;
-        mHudOverlayDefault[i][2] = picture->mColorOverlay.b;
-    }
     const JUtility::TColor water[] = {
         gpMarDirector->mGCConsole->mWaterLeftPanelColor,
         gpMarDirector->mGCConsole->mWaterRightPanelColor,
@@ -311,7 +302,7 @@ void CreationExtras::onStageSetup() {
     }
 
     applyHud();
-    applyTimerLayout(false);
+    applyTimerLayout();
 }
 
 void CreationExtras::applyHud() {
@@ -324,22 +315,15 @@ void CreationExtras::applyHud() {
         picture->mColorMask.r = rgb[0];
         picture->mColorMask.g = rgb[1];
         picture->mColorMask.b = rgb[2];
-    }
-
-    const u8 overlayPanes[] = {0, 4};
-    const u8 overlayColors[] = {
-        SUSAMUNE_CREATION_FLUDD_CIRCLE, SUSAMUNE_CREATION_BLUE_BG,
-    };
-    for (u32 i = 0; i < sizeof(overlayPanes); i++) {
-        J2DPicture *picture = mHudPictures[overlayPanes[i]];
-        const u8 color = overlayColors[i];
-        if (!picture || !(mColorPresent & SUSAMUNE_CREATION_COLOR(color)))
-            continue;
-        const u8 *rgb = mColors[color];
-        const bool original = sameRgb(rgb, mDefaultColors[color]);
-        picture->mColorOverlay.r = original ? mHudOverlayDefault[i][0] : rgb[0];
-        picture->mColorOverlay.g = original ? mHudOverlayDefault[i][1] : rgb[1];
-        picture->mColorOverlay.b = original ? mHudOverlayDefault[i][2] : rgb[2];
+        const u8 color = kHudPaneColors[i];
+        // Retail streaks encode their hue in both black/white endpoints.
+        if (color == SUSAMUNE_CREATION_FLUDD_CIRCLE ||
+            (color >= SUSAMUNE_CREATION_TIMER_BG &&
+             color <= SUSAMUNE_CREATION_SHINES_BG)) {
+            picture->mColorOverlay.r = rgb[0];
+            picture->mColorOverlay.g = rgb[1];
+            picture->mColorOverlay.b = rgb[2];
+        }
     }
 
     if (!gpMarDirector || !gpMarDirector->mGCConsole ||
@@ -365,33 +349,26 @@ void CreationExtras::prepareUpdate() {
         !gpMarDirector->mGCConsole ||
         gpMarDirector->mGCConsole->mMainScreen != mHudScreen) return;
     for (u32 i = 0; i < TIMER_PANE_COUNT; i++)
-        if (J2DPane *pane = timerPane(mHudPictures, mTimerText, i))
+        if (J2DPane *pane = timerPane(mHudPictures, mTimerText, mTimerGroups, i))
             pane->mRect = mTimerPaneBase[i];
 }
 
-void CreationExtras::applyTimerLayout(bool captureBase) {
+void CreationExtras::applyTimerLayout() {
     const int scale = mTimerStyle.scale;
-    if (!timerPane(mHudPictures, mTimerText, 0)) return;
-    if (captureBase)
-        for (u32 i = 0; i < TIMER_PANE_COUNT; i++) {
-            J2DPane *pane = timerPane(mHudPictures, mTimerText, i);
-            if (pane) mTimerPaneBase[i] = pane->mRect;
-        }
+    if (!timerPane(mHudPictures, mTimerText, mTimerGroups, 0)) return;
     const int anchorX = mTimerPaneBase[0].mX1;
     const int anchorY = mTimerPaneBase[0].mY1;
-    const int dx = (int)mTimerStyle.x - mTimerDefaultStyle.x;
-    const int dy = (int)mTimerStyle.y - mTimerDefaultStyle.y;
     for (u32 i = 0; i < TIMER_PANE_COUNT; i++) {
-        J2DPane *pane = timerPane(mHudPictures, mTimerText, i);
+        J2DPane *pane = timerPane(mHudPictures, mTimerText, mTimerGroups, i);
         if (!pane) continue;
         JUTRect &r = pane->mRect;
-        r.mX1 = anchorX + dx +
+        r.mX1 = anchorX +
                 (mTimerPaneBase[i].mX1 - anchorX) * scale / 100;
-        r.mY1 = anchorY + dy +
+        r.mY1 = anchorY +
                 (mTimerPaneBase[i].mY1 - anchorY) * scale / 100;
-        r.mX2 = anchorX + dx +
+        r.mX2 = anchorX +
                 (mTimerPaneBase[i].mX2 - anchorX) * scale / 100;
-        r.mY2 = anchorY + dy +
+        r.mY2 = anchorY +
                 (mTimerPaneBase[i].mY2 - anchorY) * scale / 100;
     }
 }
@@ -422,7 +399,7 @@ void CreationExtras::endHudPreview() {
     mPreviewVisible = 0;
 }
 
-void CreationExtras::update(bool captureTimerBase) {
+void CreationExtras::update() {
     // The cached panes live in the stage heap. Do not follow them while that
     // heap is being torn down or rebuilt by the setup thread.
     if (!gpMarDirector || gpMarDirector->_260 == 0 ||
@@ -432,7 +409,7 @@ void CreationExtras::update(bool captureTimerBase) {
     for (u32 i = 0; i < mPreviewPaneCount; i++)
         if (mPreviewPanes[i]) mPreviewPanes[i]->mIsVisible = true;
     applyHud();
-    applyTimerLayout(captureTimerBase);
+    applyTimerLayout();
 }
 
 void CreationExtras::draw(Menu *menu) const {
@@ -487,7 +464,7 @@ void CreationExtras::beginTimerEditor() {
     mEditor.begin(&mTimerStyle, mColors + mEditFirst,
                   mColorBackup + mEditFirst, mEditCount, mEditCount,
                   kTimerNames,
-                  CreationEditor::CAP_POSITION | CreationEditor::CAP_SCALE);
+                  CreationEditor::CAP_SCALE);
     beginHudPreview(SUSAMUNE_CREATION_TIMER_BG);
 }
 
@@ -564,8 +541,6 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
         if (mEditMode == EDIT_WORD_STYLE) {
             clampWord(mEditWord);
         } else {
-            if (mEditMode == EDIT_TIMER)
-                mTimerStyle.y = (u16)clampi(mTimerStyle.y, 0, 456);
             for (int i = 0; i < mEditCount; i++) {
                 const int slot = mEditFirst + i;
                 mColorPresent |= SUSAMUNE_CREATION_COLOR(slot);
@@ -573,7 +548,6 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
         }
         mDirty = true;
         applyHud();
-        if (mEditMode == EDIT_TIMER) applyTimerLayout(false);
     }
     if (result & CreationEditor::UPDATE_CANCELLED) {
         mDirty = mDirtyBeforeEdit;
@@ -584,7 +558,6 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
                 mColorPresent |= SUSAMUNE_CREATION_COLOR(mEditFirst + i);
             applyHud();
             mColorPresent = savedPresent;
-            if (mEditMode == EDIT_TIMER) applyTimerLayout(false);
         }
     }
     if (!mEditor.editing()) {

@@ -338,7 +338,9 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
     int optionCount = 0;
     for (int i = 0; i < OPTION_COUNT; i++)
         if (optionEnabled((u8)i)) optionCount++;
-    const bool layoutControls = mCapabilities & (CAP_POSITION | CAP_SCALE);
+    const bool positionControls = mCapabilities & CAP_POSITION;
+    const bool scaleControls = mCapabilities & CAP_SCALE;
+    const bool layoutControls = positionControls || scaleControls;
     const int optionRows = optionCount > 5 ? 5 : optionCount;
     const int panelH = 80 + optionRows * 14 + (layoutControls ? 17 : 0);
     menu->fillBox(8, panelY, 624, panelH, Color(0, 0, 0, 215));
@@ -361,9 +363,20 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
                    12, 12, Color(190, 220, 255, 255));
 
     int infoY = panelY + 29;
-    if (layoutControls) {
+    if (positionControls && scaleControls) {
         snprintf(status, sizeof(status), "Position X:%u Y:%u   Size:%u%%",
                  mStyle->x, mStyle->y, mStyle->scale);
+        menu->drawText(status, 18, infoY, 12, 12,
+                       Color(190, 220, 255, 255));
+        infoY += 17;
+    } else if (positionControls) {
+        snprintf(status, sizeof(status), "Position X:%u Y:%u",
+                 mStyle->x, mStyle->y);
+        menu->drawText(status, 18, infoY, 12, 12,
+                       Color(190, 220, 255, 255));
+        infoY += 17;
+    } else if (scaleControls) {
+        snprintf(status, sizeof(status), "Size:%u%%", mStyle->scale);
         menu->drawText(status, 18, infoY, 12, 12,
                        Color(190, 220, 255, 255));
         infoY += 17;
@@ -437,10 +450,15 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
                            "+START: Previous";
     menu->drawText(controls, 18, panelY + panelH - 32, 9, 9,
                    Color(150, 170, 205, 255));
-    if (layoutControls)
-        menu->drawText("D-pad Move   L/R Size",
+    if (layoutControls) {
+        const char *layoutHelp = positionControls && scaleControls
+                                     ? "D-pad Move   L/R Size"
+                                 : positionControls ? "D-pad Move"
+                                                    : "L/R Size";
+        menu->drawText(layoutHelp,
                        18, panelY + panelH - 17, 9, 9,
                        Color(150, 170, 205, 255));
+    }
     const char *finish = SUSAMUNE_GLYPH_A " Keep  " SUSAMUNE_GLYPH_B
                          " Cancel  " SUSAMUNE_GLYPH_Z " Reset";
     menu->drawText(finish, 622 - Menu::textWidth(finish, 9), panelY + panelH - 17,
