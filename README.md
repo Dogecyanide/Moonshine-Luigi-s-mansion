@@ -1,6 +1,6 @@
 # A romhack for Super Mario Sunshine practice
 
-It adds emulator-like savestates to console (Wii through Nintendont)  Vibe coded software, use at your own risk.
+It adds emulator-like savestates to console (Wii through Nintendont).  Vibe coded software, use at your own risk.
 
 It exploits the fact that the Wii has a considerable amount of RAM free when running a Gamecube game through Nintendont, to snapshot more or less the entire state of the game. This lets you save and restore basically anywhere, any time within the same stage/area (including during a cutscene, shine get or death animation, etc.).
 
@@ -8,6 +8,7 @@ It exploits the fact that the Wii has a considerable amount of RAM free when run
 
 D-pad left to save, d-pad right to load. 
 In Nintendont, Please turn cheats OFF.
+Open the Menu in-game with the default Y+Start.
 
 * JP 1.0 (GMSJ01), US (GMSE01), and PAL (GMSP01) are supported. Builds and
   launchers must match the disc's region.
