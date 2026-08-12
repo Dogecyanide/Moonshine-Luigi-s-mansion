@@ -80,9 +80,9 @@ public:
 
     // --- persistence ---
 
-    // Ask the active backend to save. Nintendont stages an asynchronous
-    // request; Dolphin completes its small card write inline but retains the
-    // same pollable API. Reports UNSUPPORTED without configured storage.
+    // Ask the active backend to save. Both backends queue the write and expose
+    // completion through the same pollable API. Reports UNSUPPORTED without
+    // configured storage.
     void save();
 
     // Advance an in-flight save. Call once per frame; returns the current

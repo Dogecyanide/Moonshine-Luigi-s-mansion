@@ -52,6 +52,7 @@ struct State {
     s32 completedStatus;
     s8 activeRecord;
     bool initialSave;
+    bool idleObserved;
 };
 
 State sStateStorage;
@@ -149,14 +150,12 @@ s32 openOrCreate(CARDFileInfo *file) {
     return result;
 }
 
-s32 writeRecord() {
+s32 writeRecordLocked() {
     // Saves happen only after the boot option payload has been consumed. The
-    // manager refills its sector buffer before every later game read/write, so
-    // both buffers can be borrowed while its mutex excludes the slot-A worker.
-    // Public unmount waits for any slot-A command and releases the manager's
-    // workspace. Its next operation remounts automatically.
+    // manager refills its sector buffer before every later game operation.
+    // service() owns its mutex here, so the slot-A worker cannot touch either
+    // borrowed buffer until the slot-B write is finished.
     gpCardManager->unmount();
-    OSLockMutex(&gpCardManager->mMutex);
     void *mountWork = gpCardManager->mCardWorkArea;
     Record *record = reinterpret_cast<Record *>(gpCardManager->mCARDBlock);
 
@@ -175,7 +174,6 @@ s32 writeRecord() {
 
     s32 result = mount(mountWork);
     if (result != CARD_ERROR_READY) {
-        OSUnlockMutex(&gpCardManager->mMutex);
         return result;
     }
 
@@ -188,7 +186,6 @@ s32 writeRecord() {
         if (result == CARD_ERROR_READY) result = closeResult;
     }
     unmount();
-    OSUnlockMutex(&gpCardManager->mMutex);
 
     if (result == CARD_ERROR_READY) {
         OSLockMutex(&sState->mutex);
@@ -319,6 +316,49 @@ InitResult init() {
     return sInitResult;
 }
 
+void service() {
+    if (sInitResult != INIT_READY) return;
+
+    OSLockMutex(&sState->mutex);
+    const u32 ticket = sState->requested;
+    const bool pending = ticket != sState->completed;
+    OSUnlockMutex(&sState->mutex);
+    if (!pending) {
+        sState->idleObserved = false;
+        return;
+    }
+
+    // Never wait behind Sunshine's worker. Its status and completed-read
+    // payload remain untouched until the director has seen an idle frame.
+    if (!OSTryLockMutex(&gpCardManager->mMutex)) {
+        sState->idleObserved = false;
+        return;
+    }
+    if (gpCardManager->mLastStatus == CARD_ERROR_BUSY) {
+        sState->idleObserved = false;
+        OSUnlockMutex(&gpCardManager->mMutex);
+        return;
+    }
+    if (!sState->idleObserved) {
+        sState->idleObserved = true;
+        OSUnlockMutex(&gpCardManager->mMutex);
+        return;
+    }
+    sState->idleObserved = false;
+
+    // unmount() normally replaces this with CARDUnmount's result. Keep the
+    // result Sunshine's state machine is waiting to observe.
+    const s32 gameStatus = gpCardManager->mLastStatus;
+    const s32 result = writeRecordLocked();
+    gpCardManager->mLastStatus = gameStatus;
+    OSUnlockMutex(&gpCardManager->mMutex);
+
+    OSLockMutex(&sState->mutex);
+    sState->completedStatus = result;
+    sState->completed = ticket;
+    OSUnlockMutex(&sState->mutex);
+}
+
 SusamuneCfg *lock() {
     if (sInitResult != INIT_READY) return nullptr;
     OSLockMutex(&sState->mutex);
@@ -332,11 +372,6 @@ void unlock() {
 u32 commit() {
     if (sInitResult != INIT_READY) return 0;
     const u32 ticket = ++sState->requested;
-    OSUnlockMutex(&sState->mutex);
-    const s32 result = writeRecord();
-    OSLockMutex(&sState->mutex);
-    sState->completedStatus = result;
-    sState->completed = ticket;
     OSUnlockMutex(&sState->mutex);
     return ticket;
 }

@@ -11,6 +11,9 @@
 #include "Dolphin/THP.h"
 #include "susamune/menu.hxx"
 #include "susamune/settings.hxx"
+#if IS_EMULATOR
+#include "susamune/emulator_persistence.hxx"
+#endif
 #include "susamune/features.hxx"
 #include "susamune/actions.hxx"
 #include "susamune/binds.hxx"
@@ -185,6 +188,10 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     }
     if (!gSettings.getBool(SETTING_DISABLE_WARPS))
         state = LevelWarp::onDirected(state);
+
+#if IS_EMULATOR
+    EmulatorPersistence::service();
+#endif
 
     gQFTTimer.update();
     ILing::update();

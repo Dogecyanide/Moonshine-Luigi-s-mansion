@@ -22,6 +22,10 @@ enum SaveResult {
 // Called from onUpdate after Sunshine has constructed its slot-A manager.
 InitResult init();
 
+// Called after the game director each frame. A queued write waits until the
+// game's card worker has been observed idle across two director passes.
+void service();
+
 // The returned configuration stays locked until unlock() or commit().
 SusamuneCfg *lock();
 void unlock();
