@@ -78,12 +78,21 @@ jobs:
       - name: Build source-free BPS patches
         run: cmake --build --preset emu_patches
 
+      - name: Add version to emulator patch names
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          Rename-Item -LiteralPath "build/susamune_jp.bps" -NewName "susamune_emu_jp_${env:RELEASE_TAG}.bps"
+          Rename-Item -LiteralPath "build/susamune_us.bps" -NewName "susamune_emu_us_${env:RELEASE_TAG}.bps"
+          Rename-Item -LiteralPath "build/susamune_pal.bps" -NewName "susamune_emu_pal_${env:RELEASE_TAG}.bps"
+
       - name: Upload emulator patches to release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: >-
-          gh release upload "${{ github.event.release.tag_name }}"
-          "build/susamune_jp.bps"
-          "build/susamune_us.bps"
-          "build/susamune_pal.bps"
+          gh release upload "${env:RELEASE_TAG}"
+          "build/susamune_emu_jp_${env:RELEASE_TAG}.bps"
+          "build/susamune_emu_us_${env:RELEASE_TAG}.bps"
+          "build/susamune_emu_pal_${env:RELEASE_TAG}.bps"
           --clobber
