@@ -1,12 +1,13 @@
 # A romhack for Super Mario Sunshine practice
 
-It adds emulator-like savestates to console (Wii through Nintendont) and is compatible with many existing speedrun gecko codes. Vibe coded software, use at your own risk.
+It adds emulator-like savestates to console (Wii through Nintendont)  Vibe coded software, use at your own risk.
 
 It exploits the fact that the Wii has a considerable amount of RAM free when running a Gamecube game through Nintendont, to snapshot more or less the entire state of the game. This lets you save and restore basically anywhere, any time within the same stage/area (including during a cutscene, shine get or death animation, etc.).
 
 ## Usage + Caveats
 
-D-pad left to save, d-pad right to load. If you have the position/red coin/timer/etc. savestate gecko codes on it will technically run both but these savestates will take precedence. 
+D-pad left to save, d-pad right to load. 
+In Nintendont, Please turn cheats OFF.
 
 * JP 1.0 (GMSJ01), US (GMSE01), and PAL (GMSP01) are supported. Builds and
   launchers must match the disc's region.
@@ -22,7 +23,7 @@ Download the launcher zip from the Releases page. There is one launcher for ever
 
 Settings and binds are stored per region in `susamune.ini` at the root of the SD card, in `[settings_jp]` / `[binds_jp]` sections and their `us` / `pal` counterparts.
 
-To launch your game, simply go to the homebrew channel and run the susamune launcher app that should appear. Your gecko codes should work out of the box if you are already using Nintendont for practice. The code file must match the disc, such as `codes/GMSJ01.gct` (JP), `codes/GMSE01.gct` (US), or `codes/GMSP01.gct` (PAL).
+To launch your game, simply go to the homebrew channel and run the susamune launcher app that should appear. Your gecko codes should work out of the box if you are already using Nintendont for practice, They are directly integrated with susamune and do NOT require seperate practice codes to be installed. 
 
 ### Emulator
 
