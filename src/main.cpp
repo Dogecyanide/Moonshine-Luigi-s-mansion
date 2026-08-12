@@ -220,7 +220,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     featuresApply();
 
     actionsApply(!creationEditing);
-    gCreationExtras.update();
+    gCreationExtras.update(!freeze);
 
     if (gSavestateMgr && !creationEditing) {
         gSavestateMgr->updateHook();

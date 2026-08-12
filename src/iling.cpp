@@ -546,6 +546,12 @@ bool sameDest(const LevelWarp::Dest &a, const LevelWarp::Dest &b) {
 }
 
 bool acceptsSkipOrigin(const Entry &item) {
+    const bool hidden = item.result == 29 || item.result == 59 ||
+                        item.result == 69;
+    const bool hundred = item.result >= 100 && item.result <= 107;
+    if ((hidden || hundred) && sAttemptStart.area == item.start.area) {
+        return true;
+    }
     if (item.result == 27 && item.start.area == 4 && item.start.episode == 7) {
         return sAttemptStart.area == 4 && sAttemptStart.episode == 0;
     }

@@ -17,7 +17,7 @@ const u32 kHudPaneTags[] = {
     'w_ba', 't_ba', 'c_ba', 'r_ba', 'b_ba', 'm_ba', 's_ba', 'm_tx',
     '\0m_x', 'm_n1', 'm_n2', 'm_n3', 't_n1', 't_n2', 't_n3', 't_n4',
     't_n5', 't_n6', 't_n7', 't_n8', 't_n9', 't_n0', 't_c1', 't_c2',
-    't_c3',
+    't_c3', 'b_sl', 'r_sl',
 };
 const u8 kHudPaneColors[] = {
     SUSAMUNE_CREATION_FLUDD_CIRCLE, SUSAMUNE_CREATION_TIMER_BG,
@@ -39,6 +39,7 @@ const u8 kHudPaneColors[] = {
     SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 10,
     SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 11,
     SUSAMUNE_CREATION_TIMER_CHAR_FIRST + 12,
+    SUSAMUNE_CREATION_BLUE_BG, SUSAMUNE_CREATION_RED_BG,
 };
 static_assert(sizeof(kHudPaneTags) / sizeof(kHudPaneTags[0]) ==
                   CreationExtras::HUD_PANE_COUNT,
@@ -310,7 +311,7 @@ void CreationExtras::onStageSetup() {
     }
 
     applyHud();
-    applyTimerLayout();
+    applyTimerLayout(false);
 }
 
 void CreationExtras::applyHud() {
@@ -368,14 +369,14 @@ void CreationExtras::prepareUpdate() {
             pane->mRect = mTimerPaneBase[i];
 }
 
-void CreationExtras::applyTimerLayout() {
+void CreationExtras::applyTimerLayout(bool captureBase) {
     const int scale = mTimerStyle.scale;
     if (!timerPane(mHudPictures, mTimerText, 0)) return;
-    for (u32 i = 0; i < TIMER_PANE_COUNT; i++) {
-        J2DPane *pane = timerPane(mHudPictures, mTimerText, i);
-        if (!pane) continue;
-        mTimerPaneBase[i] = pane->mRect;
-    }
+    if (captureBase)
+        for (u32 i = 0; i < TIMER_PANE_COUNT; i++) {
+            J2DPane *pane = timerPane(mHudPictures, mTimerText, i);
+            if (pane) mTimerPaneBase[i] = pane->mRect;
+        }
     const int anchorX = mTimerPaneBase[0].mX1;
     const int anchorY = mTimerPaneBase[0].mY1;
     const int dx = (int)mTimerStyle.x - mTimerDefaultStyle.x;
@@ -401,9 +402,6 @@ void CreationExtras::addPreviewPane(J2DPane *pane) {
     mPreviewPanes[index] = pane;
     if (pane->mIsVisible) mPreviewVisible |= 1u << index;
     pane->mIsVisible = true;
-    for (JSUPtrLink *link = pane->mChildrenList.mFirst; link;
-         link = link->mNextLink)
-        addPreviewPane(static_cast<J2DPane *>(link->mItemPtr));
 }
 
 void CreationExtras::beginHudPreview(int color) {
@@ -412,6 +410,8 @@ void CreationExtras::beginHudPreview(int color) {
         color > SUSAMUNE_CREATION_SHINES_BG) return;
     addPreviewPane(mHudScreen->search(
         kPreviewRootTags[color - SUSAMUNE_CREATION_TIMER_BG]));
+    for (u32 i = 0; i < HUD_PANE_COUNT; i++)
+        if (kHudPaneColors[i] == color) addPreviewPane(mHudPictures[i]);
 }
 
 void CreationExtras::endHudPreview() {
@@ -422,7 +422,7 @@ void CreationExtras::endHudPreview() {
     mPreviewVisible = 0;
 }
 
-void CreationExtras::update() {
+void CreationExtras::update(bool captureTimerBase) {
     // The cached panes live in the stage heap. Do not follow them while that
     // heap is being torn down or rebuilt by the setup thread.
     if (!gpMarDirector || gpMarDirector->_260 == 0 ||
@@ -432,7 +432,7 @@ void CreationExtras::update() {
     for (u32 i = 0; i < mPreviewPaneCount; i++)
         if (mPreviewPanes[i]) mPreviewPanes[i]->mIsVisible = true;
     applyHud();
-    applyTimerLayout();
+    applyTimerLayout(captureTimerBase);
 }
 
 void CreationExtras::draw(Menu *menu) const {
@@ -573,6 +573,7 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
         }
         mDirty = true;
         applyHud();
+        if (mEditMode == EDIT_TIMER) applyTimerLayout(false);
     }
     if (result & CreationEditor::UPDATE_CANCELLED) {
         mDirty = mDirtyBeforeEdit;
@@ -583,6 +584,7 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
                 mColorPresent |= SUSAMUNE_CREATION_COLOR(mEditFirst + i);
             applyHud();
             mColorPresent = savedPresent;
+            if (mEditMode == EDIT_TIMER) applyTimerLayout(false);
         }
     }
     if (!mEditor.editing()) {
@@ -721,16 +723,5 @@ void CreationExtras::drawEditor(Menu *menu) const {
         mEditor.draw(menu, mEditTitle, "12:34:567");
         return;
     }
-    CreationStyle preview = mTimerStyle;
-    preview.x = 170;
-    preview.y = 96;
-    preview.scale = 120;
-    preview.textA = 255;
-    preview.textBrightness = 100;
-    preview.padding = 0xff;
-    const u16 selected = mEditor.target() ? mEditor.target() - 1 : 0xffff;
-    const char *sample = mEditTitle;
-    Creation::drawTextBox(menu, preview, mColors + mEditFirst, mEditCount,
-                          sample, false, selected);
-    mEditor.draw(menu, mEditTitle, sample);
+    mEditor.draw(menu, mEditTitle, mEditTitle);
 }

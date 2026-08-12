@@ -16,9 +16,9 @@ class CreationExtras {
 public:
     enum {
         MENU_ROW_COUNT = 23,
-        HUD_PANE_COUNT = 25,
+        HUD_PANE_COUNT = 27,
         TIMER_PANE_COUNT = 15,
-        PREVIEW_PANE_COUNT = 24,
+        PREVIEW_PANE_COUNT = 3,
     };
 
     void resetDefaults();
@@ -27,7 +27,7 @@ public:
 
     void onStageSetup();
     void prepareUpdate();
-    void update();
+    void update(bool captureTimerBase);
     void draw(Menu *menu) const;
 
     static int menuRowCount() { return MENU_ROW_COUNT; }
@@ -58,7 +58,7 @@ private:
     void updateKeyboard(TMarioGamePad *pad);
     void drawKeyboard(Menu *menu) const;
     void applyHud();
-    void applyTimerLayout();
+    void applyTimerLayout(bool captureBase);
     void beginHudPreview(int color);
     void endHudPreview();
     void addPreviewPane(J2DPane *pane);
