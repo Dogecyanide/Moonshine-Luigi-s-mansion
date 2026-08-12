@@ -691,6 +691,7 @@ private:
         ROW_QFT_HEADER,
         ROW_QFT_EDITOR,
         ROW_QFT_LEADING_ZERO,
+        ROW_SUNSHINE_TIMER,
         ROW_INPUT_HEADER,
         ROW_INPUT_FIRST,
         ROW_INPUT_END = ROW_INPUT_FIRST + InputDisplay::MENU_ROW_COUNT,
@@ -719,6 +720,8 @@ private:
             gQftDisplay.beginEditor();
         } else if (mSel == ROW_QFT_LEADING_ZERO) {
             gQftDisplay.toggleLeadingZero();
+        } else if (mSel == ROW_SUNSHINE_TIMER) {
+            gCreationExtras.beginTimerEditor();
         } else if (mSel >= ROW_INPUT_FIRST && mSel < ROW_INPUT_END) {
             gInputDisplay.adjustMenuRow(inputRow(mSel), dir);
         } else if (mSel >= ROW_METADATA_FIRST && mSel < ROW_METADATA_END) {
@@ -731,6 +734,7 @@ private:
     const char *rowName(int row) const {
         if (row == ROW_QFT_EDITOR) return "QFT timer";
         if (row == ROW_QFT_LEADING_ZERO) return "QFT leading zero";
+        if (row == ROW_SUNSHINE_TIMER) return "Sunshine timer";
         if (row >= ROW_INPUT_FIRST && row < ROW_INPUT_END)
             return InputDisplay::menuRowName(inputRow(row));
         if (row >= ROW_METADATA_FIRST && row < ROW_METADATA_END)
@@ -742,6 +746,7 @@ private:
         if (row == ROW_QFT_EDITOR) return "Edit";
         if (row == ROW_QFT_LEADING_ZERO)
             return gQftDisplay.leadingZero() ? "On" : "Off";
+        if (row == ROW_SUNSHINE_TIMER) return "Edit";
         if (row >= ROW_INPUT_FIRST && row < ROW_INPUT_END)
             return gInputDisplay.menuRowValue(inputRow(row));
         if (row >= ROW_METADATA_FIRST && row < ROW_METADATA_END)

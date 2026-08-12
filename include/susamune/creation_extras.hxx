@@ -4,8 +4,6 @@
 #include "susamune/creation.hxx"
 #include "susamune/susamune_cfg.h"
 
-#include "JSystem/JUtility/JUTRect.hxx"
-
 class J2DPicture;
 class J2DPane;
 class J2DScreen;
@@ -15,9 +13,8 @@ class TMarioGamePad;
 class CreationExtras {
 public:
     enum {
-        MENU_ROW_COUNT = 23,
-        HUD_PANE_COUNT = 25,
-        TIMER_PANE_COUNT = 17,
+        MENU_ROW_COUNT = 21,
+        HUD_PANE_COUNT = 24,
         PREVIEW_PANE_COUNT = 2,
     };
 
@@ -26,9 +23,9 @@ public:
     void stageInto(volatile SusamuneCreationCfg *dst) const;
 
     void onStageSetup();
-    void prepareUpdate();
     void update();
     void draw(Menu *menu) const;
+    void beginTimerEditor();
 
     static int menuRowCount() { return MENU_ROW_COUNT; }
     static bool menuRowSeparator(int row);
@@ -51,21 +48,18 @@ private:
     static CreationStyle defaultWordStyle(int index);
     void beginColorEditor(int first, int count, const char *title,
                           const char *names = nullptr);
-    void beginTimerEditor();
     void beginWordEditor(int index);
     void beginKeyboard(int index);
     void updateKeyboard(TMarioGamePad *pad);
     void drawKeyboard(Menu *menu) const;
     void applyHud();
-    void applyTimerLayout();
     void beginHudPreview(int color);
     void endHudPreview();
     void addPreviewPane(J2DPane *pane);
     void clampWord(int index);
 
     CreationStyle mWordStyle[SUSAMUNE_CREATION_WORD_COUNT];
-    CreationStyle mTimerStyle;
-    CreationStyle mTimerDefaultStyle;
+    CreationStyle mColorStyle;
     u8 mColors[SUSAMUNE_CREATION_COLOR_COUNT][3];
     u8 mDefaultColors[SUSAMUNE_CREATION_COLOR_COUNT][3];
     u8 mColorBackup[SUSAMUNE_CREATION_COLOR_COUNT][3];
@@ -76,9 +70,6 @@ private:
                [SUSAMUNE_CREATION_WORD_TEXT_SIZE];
     char mTextBackup[SUSAMUNE_CREATION_WORD_TEXT_SIZE];
     J2DPicture *mHudPictures[HUD_PANE_COUNT];
-    JUTRect mTimerPaneBase[TIMER_PANE_COUNT];
-    J2DPane *mTimerText;
-    J2DPane *mTimerGroups[2];
     J2DScreen *mHudScreen;
     J2DPane *mPreviewPanes[PREVIEW_PANE_COUNT];
     CreationEditor mEditor;

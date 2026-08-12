@@ -178,6 +178,7 @@ struct SusamuneCreationCfg {
     unsigned short reserved0;
     unsigned int   colorPresent;
     unsigned char  rgb[SUSAMUNE_CREATION_COLOR_COUNT][3];
+    // Retained at neutral values for compatibility with experimental builds.
     unsigned char  timerScale;
     unsigned short timerX;
     unsigned short timerY;
