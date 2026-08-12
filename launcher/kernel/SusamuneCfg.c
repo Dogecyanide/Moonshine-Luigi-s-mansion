@@ -20,7 +20,8 @@ button combination per configurable action, keyed by binds_list.h and written as
 [input_display_<region>] holds its wider position/colour configuration.
 [metadata_display_<region>] holds the native metadata overlay, including its
 optional hand-authored text template. [qft_display_<region>] holds the compact
-QFT readout's Creation style.
+QFT readout's Creation style. [creation_<region>] holds native HUD/model
+colours and the three custom text overlays.
 [nintendont] holds
 the launcher's own options -- game version, per-version disc image paths, and
 the Nintendont settings that used to live in nincfg.bin -- and belongs to
@@ -93,10 +94,23 @@ static const char *const InputColorKeys[SUSAMUNE_INPUT_COLOR_COUNT] =
 	"trigger_outline_rgb"
 };
 
+static const char *const CreationColorKeys[SUSAMUNE_CREATION_COLOR_COUNT] =
+{
+	"water_text_rgb", "fludd_tank_rgb", "timer_streak_rgb",
+	"coin_streak_rgb", "red_streak_rgb", "blue_streak_rgb",
+	"lives_streak_rgb", "shines_streak_rgb", "life_counter_rgb",
+	"timer_normal_1_rgb", "timer_normal_2_rgb", "timer_normal_3_rgb",
+	"timer_normal_4_rgb", "timer_normal_5_rgb", "timer_normal_6_rgb",
+	"timer_rush_1_rgb", "timer_rush_2_rgb", "timer_rush_3_rgb",
+	"timer_rush_4_rgb", "timer_separator_1_rgb", "timer_separator_2_rgb",
+	"timer_separator_3_rgb", "shine_outfit_rgb", "mario_hat_rgb",
+	"menu_background_rgb"
+};
+
 // Enough for the whole file: the settings plus display payloads for all
 // three versions, section headers, and the comment banner.
 // A file larger than this is refused rather than truncated (see WriteIniFile).
-#define SUSAMUNE_INI_BUF_SIZE 32768
+#define SUSAMUNE_INI_BUF_SIZE 49152
 
 // Longest section name we build: "settings" + '_' + "pal" + NUL.
 #define SUSAMUNE_SECTION_NAME_MAX 24
@@ -128,6 +142,7 @@ static char BindsSection[SUSAMUNE_SECTION_NAME_MAX];
 static char InputDisplaySection[SUSAMUNE_SECTION_NAME_MAX];
 static char MetadataDisplaySection[SUSAMUNE_SECTION_NAME_MAX];
 static char QftDisplaySection[SUSAMUNE_SECTION_NAME_MAX];
+static char CreationSection[SUSAMUNE_SECTION_NAME_MAX];
 
 // name + '_' + region tag, e.g. "settings" + "jp".
 static void BuildSectionName(char *out, const char *base, const char *region)
@@ -496,7 +511,7 @@ static bool ParseBindMask(const char *s, u16 *out)
 }
 
 // Which section the parser is currently inside. Anything that is not one of
-// this version's five sections -- [nintendont], or another version's settings --
+// this version's six sections -- [nintendont], or another version's settings --
 // is SECTION_OTHER and left alone.
 enum IniSection {
 	SECTION_OTHER,
@@ -504,7 +519,8 @@ enum IniSection {
 	SECTION_BINDS,
 	SECTION_INPUT_DISPLAY,
 	SECTION_METADATA_DISPLAY,
-	SECTION_QFT_DISPLAY
+	SECTION_QFT_DISPLAY,
+	SECTION_CREATION
 };
 
 static enum IniSection ClassifySection(const char *name)
@@ -519,6 +535,8 @@ static enum IniSection ClassifySection(const char *name)
 		return SECTION_METADATA_DISPLAY;
 	if (strcmp(name, QftDisplaySection) == 0)
 		return SECTION_QFT_DISPLAY;
+	if (strcmp(name, CreationSection) == 0)
+		return SECTION_CREATION;
 	return SECTION_OTHER;
 }
 
@@ -865,6 +883,109 @@ static void ApplyMetadataStyleKey(struct SusamuneMetadataStyleCfg *cfg,
 	}
 }
 
+static bool ParseCreationWordKey(const char *key, u32 *word, const char **field)
+{
+	if (memcmp(key, "word", 4) != 0 || key[4] < '1' || key[4] > '3' ||
+	    key[5] != '_')
+		return false;
+	*word = (u32)(key[4] - '1');
+	*field = key + 6;
+	return true;
+}
+
+static bool ParseCreationCharKey(const char *field, u32 *slot)
+{
+	u32 value = 0;
+	const char *p;
+
+	if (memcmp(field, "char_", 5) != 0)
+		return false;
+	p = field + 5;
+	if (*p < '0' || *p > '9')
+		return false;
+	while (*p >= '0' && *p <= '9')
+	{
+		value = value * 10 + (u32)(*p++ - '0');
+		if (value > SUSAMUNE_CREATION_WORD_CHARS)
+			return false;
+	}
+	if (value == 0 || strcmp(p, "_rgb") != 0)
+		return false;
+	*slot = value - 1;
+	return true;
+}
+
+static void ApplyCreationKey(struct SusamuneCreationCfg *cfg,
+	                         const char *key, const char *text)
+{
+	u8 rgb[3];
+	u8 v8;
+	u16 v16;
+	u32 i;
+	u32 word;
+	u32 slot;
+	const char *field;
+
+	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
+	{
+		if (strcmp(key, CreationColorKeys[i]) == 0 && ParseQftRgb(text, rgb))
+		{
+			cfg->rgb[i][0] = rgb[0];
+			cfg->rgb[i][1] = rgb[1];
+			cfg->rgb[i][2] = rgb[2];
+			cfg->colorPresent |= SUSAMUNE_CREATION_COLOR(i);
+			return;
+		}
+	}
+	if (!ParseCreationWordKey(key, &word, &field))
+		return;
+	if (strcmp(field, "text") == 0)
+	{
+		u32 length = (u32)strlen(text);
+		if (length > SUSAMUNE_CREATION_WORD_CHARS)
+			length = SUSAMUNE_CREATION_WORD_CHARS;
+		memcpy(cfg->words[word].text, text, length);
+		cfg->words[word].text[length] = '\0';
+		cfg->words[word].length = (u8)length;
+		return;
+	}
+	if (strcmp(field, "text_rgb") == 0 && ParseQftRgb(text, rgb))
+	{
+		for (i = 0; i < SUSAMUNE_CREATION_WORD_CHARS; i++)
+		{
+			cfg->words[word].rgb[i][0] = rgb[0];
+			cfg->words[word].rgb[i][1] = rgb[1];
+			cfg->words[word].rgb[i][2] = rgb[2];
+		}
+		return;
+	}
+	if (ParseCreationCharKey(field, &slot) && ParseQftRgb(text, rgb))
+	{
+		cfg->words[word].rgb[slot][0] = rgb[0];
+		cfg->words[word].rgb[slot][1] = rgb[1];
+		cfg->words[word].rgb[slot][2] = rgb[2];
+		return;
+	}
+	if ((strcmp(field, "x") == 0 || strcmp(field, "y") == 0) &&
+	    ParseU16(text, &v16))
+	{
+		if (field[0] == 'x') cfg->words[word].x = v16;
+		else cfg->words[word].y = v16;
+		return;
+	}
+	if (!ParseQftU8(text, &v8))
+		return;
+	if (strcmp(field, "scale") == 0) cfg->words[word].scale = v8;
+	else if (strcmp(field, "text_alpha") == 0) cfg->words[word].textA = v8;
+	else if (strcmp(field, "background_r") == 0) cfg->words[word].bgR = v8;
+	else if (strcmp(field, "background_g") == 0) cfg->words[word].bgG = v8;
+	else if (strcmp(field, "background_b") == 0) cfg->words[word].bgB = v8;
+	else if (strcmp(field, "background_alpha") == 0) cfg->words[word].bgA = v8;
+	else if (strcmp(field, "text_brightness") == 0) cfg->words[word].textBrightness = v8;
+	else if (strcmp(field, "padding") == 0) cfg->words[word].padding = v8;
+	else if (strcmp(field, "visible") == 0) cfg->words[word].visible = v8;
+}
+
 // Whether the file already carries settings for this game version. When it does
 // not, the mod is asked to author them (SUSAMUNE_CFG_FLAG_NO_CONFIG).
 static bool SawSettingsSection = false;
@@ -948,6 +1069,10 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 		else if (section == SECTION_QFT_DISPLAY)
 		{
 			ApplyQftDisplayKey(&cfg->qftDisplay, Trim(line), Trim(eq + 1));
+		}
+		else if (section == SECTION_CREATION)
+		{
+			ApplyCreationKey(&cfg->creation, Trim(line), Trim(eq + 1));
 		}
 
 		line = next;
@@ -1245,6 +1370,58 @@ static void EmitQftDisplaySection(FIL *f, int *err, const struct SusamuneCfg *cf
 	          SUSAMUNE_QFT_DISPLAY_LEADING_ZERO);
 }
 
+static void EmitCreationSection(FIL *f, int *err,
+	                            const struct SusamuneCfg *cfg)
+{
+	const struct SusamuneCreationCfg *d = &cfg->creation;
+	char key[40];
+	char line[160];
+	u32 i;
+	u32 word;
+
+	EmitStr(f, err, "[");
+	EmitStr(f, err, CreationSection);
+	EmitStr(f, err, "]\r\n");
+	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
+	{
+		if (d->colorPresent & SUSAMUNE_CREATION_COLOR(i))
+			Emit(f, err, line, (u32)_sprintf(
+				line, "%s = %u,%u,%u\r\n", CreationColorKeys[i],
+				d->rgb[i][0], d->rgb[i][1], d->rgb[i][2]));
+	}
+	for (word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++)
+	{
+		const struct SusamuneCreationWordCfg *w = &d->words[word];
+		const u32 n = word + 1;
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_text = %s\r\n", n, w->text));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_visible = %u\r\n", n, w->visible));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_x = %u\r\n", n, w->x));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_y = %u\r\n", n, w->y));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_scale = %u\r\n", n, w->scale));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_text_alpha = %u\r\n", n, w->textA));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_text_brightness = %u\r\n", n, w->textBrightness));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_background_r = %u\r\n", n, w->bgR));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_background_g = %u\r\n", n, w->bgG));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_background_b = %u\r\n", n, w->bgB));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_background_alpha = %u\r\n", n, w->bgA));
+		Emit(f, err, line, (u32)_sprintf(line, "word%u_padding = %u\r\n", n, w->padding));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "word%u_text_rgb = %u,%u,%u\r\n", n,
+			w->rgb[0][0], w->rgb[0][1], w->rgb[0][2]));
+		for (i = 1; i < SUSAMUNE_CREATION_WORD_CHARS; i++)
+		{
+			if (w->rgb[i][0] == w->rgb[0][0] &&
+			    w->rgb[i][1] == w->rgb[0][1] &&
+			    w->rgb[i][2] == w->rgb[0][2])
+				continue;
+			_sprintf(key, "word%u_char_%u_rgb", n, i + 1);
+			Emit(f, err, line, (u32)_sprintf(
+				line, "%s = %u,%u,%u\r\n", key,
+				w->rgb[i][0], w->rgb[i][1], w->rgb[i][2]));
+		}
+	}
+}
+
 static const char kIniBanner[] =
 	"; susamune settings\r\n"
 	"; Written by the susamune launcher. Values are edited in-game from the\r\n"
@@ -1252,8 +1429,8 @@ static const char kIniBanner[] =
 	"; whenever the menu is closed with changes pending, so comments added\r\n"
 	"; inside it are lost. Everything else in this file is preserved.\r\n"
 	";\r\n"
-	"; Each disc has settings, binds, input_display, metadata_display and\r\n"
-	"; qft_display sections.\r\n"
+	"; Each disc has settings, binds, input_display, metadata_display,\r\n"
+	"; qft_display and creation sections.\r\n"
 	"; Their suffix is jp = GMSJ, us = GMSE, or pal = GMSP.\r\n"
 	"; Metadata format uses \\n for lines and placeholders such as <x> or <HSpd|.2>.\r\n"
 	";\r\n"
@@ -1263,11 +1440,11 @@ static const char kIniBanner[] =
 	"\r\n"
 	"[" SUSAMUNE_INI_SECTION_NINTENDONT "]\r\n";
 
-// Rewrite the ini with this version's five sections replaced.
+// Rewrite the ini with this version's six sections replaced.
 //
 // The whole point of the copy-through is that the other versions' settings are
 // never materialised: they exist only as the text we are reading back here.
-// Everything outside our five sections -- other regions, [nintendont], comments,
+// Everything outside our six sections -- other regions, [nintendont], comments,
 // blank lines -- lands in the output unchanged and in its original order.
 static int WriteIniFile(const struct SusamuneCfg *cfg)
 {
@@ -1283,6 +1460,7 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 	bool  wroteInputDisplay = false;
 	bool  wroteMetadataDisplay = false;
 	bool  wroteQftDisplay = false;
+	bool  wroteCreation = false;
 
 	buf = (char*)malloca(SUSAMUNE_INI_BUF_SIZE, 32);
 	if (buf == NULL)
@@ -1374,6 +1552,11 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 					EmitQftDisplaySection(&f, &err, cfg);
 					wroteQftDisplay = true;
 				}
+				else if (kind == SECTION_CREATION)
+				{
+					EmitCreationSection(&f, &err, cfg);
+					wroteCreation = true;
+				}
 			}
 		}
 
@@ -1412,6 +1595,11 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 		EmitStr(&f, &err, "\r\n");
 		EmitQftDisplaySection(&f, &err, cfg);
 	}
+	if (!wroteCreation)
+	{
+		EmitStr(&f, &err, "\r\n");
+		EmitCreationSection(&f, &err, cfg);
+	}
 
 	ret = f_close(&f);
 	if (err == FR_OK && ret != FR_OK)
@@ -1423,6 +1611,41 @@ static int WriteIniFile(const struct SusamuneCfg *cfg)
 // ---------------------------------------------------------------------
 // Entry points
 // ---------------------------------------------------------------------
+
+static void InitCreationDefaults(struct SusamuneCreationCfg *cfg)
+{
+	u32 i;
+	u32 word;
+
+	cfg->magic = SUSAMUNE_CREATION_CFG_MAGIC;
+	cfg->version = SUSAMUNE_CREATION_CFG_VERSION;
+	cfg->colorPresent = 0;
+	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
+	{
+		cfg->rgb[i][0] = 255;
+		cfg->rgb[i][1] = 255;
+		cfg->rgb[i][2] = 255;
+	}
+	cfg->rgb[SUSAMUNE_CREATION_MENU_BG][0] = 24;
+	cfg->rgb[SUSAMUNE_CREATION_MENU_BG][1] = 28;
+	cfg->rgb[SUSAMUNE_CREATION_MENU_BG][2] = 40;
+	for (word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++)
+	{
+		struct SusamuneCreationWordCfg *w = &cfg->words[word];
+		w->x = 220;
+		w->y = (u16)(80 + word * 42);
+		w->scale = 100;
+		w->textA = 255;
+		w->bgR = w->bgG = w->bgB = 0;
+		w->bgA = 128;
+		w->textBrightness = 100;
+		w->padding = 2;
+		w->visible = 0;
+		w->length = (u8)_sprintf(w->text, "Custom Text %u", word + 1);
+		for (i = 0; i < SUSAMUNE_CREATION_WORD_CHARS; i++)
+			w->rgb[i][0] = w->rgb[i][1] = w->rgb[i][2] = 255;
+	}
+}
 
 void SusamuneCfgInit(void)
 {
@@ -1464,6 +1687,7 @@ void SusamuneCfgInit(void)
 	BuildSectionName(InputDisplaySection, SUSAMUNE_INI_SECTION_INPUT_DISPLAY, region);
 	BuildSectionName(MetadataDisplaySection, SUSAMUNE_INI_SECTION_METADATA_DISPLAY, region);
 	BuildSectionName(QftDisplaySection, SUSAMUNE_INI_SECTION_QFT_DISPLAY, region);
+	BuildSectionName(CreationSection, SUSAMUNE_INI_SECTION_CREATION, region);
 
 	for (i = 0; i < SUSAMUNE_CFG_MAX_SETTINGS; i++)
 		cfg->values[i] = SUSAMUNE_CFG_UNSET;
@@ -1505,6 +1729,7 @@ void SusamuneCfgInit(void)
 	cfg->inputStyle.magic = SUSAMUNE_INPUT_STYLE_MAGIC;
 	cfg->inputStyle.version = SUSAMUNE_INPUT_STYLE_VERSION;
 	cfg->inputStyle.present = 0;
+	InitCreationDefaults(&cfg->creation);
 
 	cfg->magic     = SUSAMUNE_CFG_MAGIC;
 	cfg->version   = SUSAMUNE_CFG_VERSION;
@@ -1514,7 +1739,8 @@ void SusamuneCfgInit(void)
 	                 SUSAMUNE_CFG_FLAG_METADATA_DISPLAY |
 	                 SUSAMUNE_CFG_FLAG_QFT_DISPLAY |
 	                 SUSAMUNE_CFG_FLAG_METADATA_STYLE |
-	                 SUSAMUNE_CFG_FLAG_INPUT_STYLE;
+	                 SUSAMUNE_CFG_FLAG_INPUT_STYLE |
+	                 SUSAMUNE_CFG_FLAG_CREATION;
 	if (InitPbFiles(cfg, region))
 		cfg->flags |= SUSAMUNE_CFG_FLAG_ILING_PBS;
 
@@ -1579,7 +1805,7 @@ void SusamuneCfgService(void)
 	                 sizeof(cfg->inputDisplay) + sizeof(cfg->metadataDisplay));
 	sync_before_read(&cfg->qftDisplay,
 	                 sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle) +
-	                 sizeof(cfg->inputStyle));
+	                 sizeof(cfg->inputStyle) + sizeof(cfg->creation));
 	seq = cfg->saveSeq;
 
 	ret = WriteIniFile(cfg);

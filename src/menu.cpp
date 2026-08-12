@@ -13,6 +13,7 @@
 
 #include "susamune/menu.hxx"
 #include "susamune/binds.hxx"
+#include "susamune/creation_extras.hxx"
 #include "susamune/glyphs.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/iling.hxx"
@@ -45,7 +46,10 @@ inline Color col(u8 r, u8 g, u8 b, u8 a) { return Color(r, g, b, a); }
 
 // -------- palette (built inline so nothing lives in static storage) -------
 inline Color cBackdrop()   { return col(6, 8, 14, 150); }    // full-screen dim
-inline Color cPanel()      { return col(24, 28, 40, 240); }  // menu body
+inline Color cPanel()      {
+    const u8 *rgb = gCreationExtras.menuBackground();
+    return col(rgb[0], rgb[1], rgb[2], 240);
+}  // menu body
 inline Color cAccent()     { return col(90, 170, 255, 255); }// primary accent
 inline Color cTitle()      { return col(238, 242, 252, 255); }
 inline Color cTabIdle()    { return col(150, 160, 182, 255); }
@@ -596,7 +600,7 @@ public:
     const char *title() const override { return "Creation"; }
     bool grabsInput() const override {
         return gQftDisplay.editing() || gInputDisplay.editing() ||
-               gMetadataDisplay.editing();
+               gMetadataDisplay.editing() || gCreationExtras.editing();
     }
     bool fullScreen() const override { return grabsInput(); }
 
@@ -611,6 +615,10 @@ public:
         }
         if (gMetadataDisplay.editing()) {
             gMetadataDisplay.updateEditor(pad);
+            return;
+        }
+        if (gCreationExtras.editing()) {
+            gCreationExtras.updateEditor(pad);
             return;
         }
         const u32 rapid = menu->navigationInput(pad);
@@ -639,6 +647,10 @@ public:
             gMetadataDisplay.drawEditor(menu);
             return;
         }
+        if (gCreationExtras.editing()) {
+            gCreationExtras.drawEditor(menu);
+            return;
+        }
 
         const int hintY = y + h - FOOT_SZ;
         h -= ROW_H;
@@ -652,7 +664,9 @@ public:
         for (int row = start; row < end; row++) {
             if (isSeparator(row)) {
                 const char *label = row == ROW_QFT_HEADER ? "QFT"
-                    : row == ROW_INPUT_HEADER ? "INPUT DISPLAY" : "METADATA";
+                    : row == ROW_INPUT_HEADER ? "INPUT DISPLAY"
+                    : row == ROW_METADATA_HEADER ? "METADATA"
+                    : gCreationExtras.menuRowName(extraRow(row));
                 drawSectionHeader(menu, x, ry, w, label);
             } else {
                 const bool selected = row == mSel;
@@ -682,12 +696,16 @@ private:
         ROW_INPUT_END = ROW_INPUT_FIRST + InputDisplay::MENU_ROW_COUNT,
         ROW_METADATA_HEADER = ROW_INPUT_END,
         ROW_METADATA_FIRST,
-        ROW_COUNT = ROW_METADATA_FIRST + MetadataDisplay::FIELD_COUNT + 4,
+        ROW_METADATA_END = ROW_METADATA_FIRST + MetadataDisplay::FIELD_COUNT + 4,
+        ROW_EXTRAS_FIRST = ROW_METADATA_END,
+        ROW_COUNT = ROW_EXTRAS_FIRST + CreationExtras::MENU_ROW_COUNT,
     };
 
     static bool isSeparator(int row) {
         return row == ROW_QFT_HEADER || row == ROW_INPUT_HEADER ||
-               row == ROW_METADATA_HEADER;
+               row == ROW_METADATA_HEADER ||
+               (row >= ROW_EXTRAS_FIRST &&
+                gCreationExtras.menuRowSeparator(extraRow(row)));
     }
 
     void moveSelection(int dir) {
@@ -703,8 +721,10 @@ private:
             gQftDisplay.toggleLeadingZero();
         } else if (mSel >= ROW_INPUT_FIRST && mSel < ROW_INPUT_END) {
             gInputDisplay.adjustMenuRow(inputRow(mSel), dir);
-        } else if (mSel >= ROW_METADATA_FIRST) {
+        } else if (mSel >= ROW_METADATA_FIRST && mSel < ROW_METADATA_END) {
             gMetadataDisplay.adjustMenuRow(metadataRow(mSel), dir);
+        } else if (mSel >= ROW_EXTRAS_FIRST) {
+            gCreationExtras.adjustMenuRow(extraRow(mSel), dir);
         }
     }
 
@@ -713,7 +733,9 @@ private:
         if (row == ROW_QFT_LEADING_ZERO) return "QFT leading zero";
         if (row >= ROW_INPUT_FIRST && row < ROW_INPUT_END)
             return InputDisplay::menuRowName(inputRow(row));
-        return gMetadataDisplay.menuRowName(metadataRow(row));
+        if (row >= ROW_METADATA_FIRST && row < ROW_METADATA_END)
+            return gMetadataDisplay.menuRowName(metadataRow(row));
+        return gCreationExtras.menuRowName(extraRow(row));
     }
 
     const char *rowValue(int row) const {
@@ -722,7 +744,9 @@ private:
             return gQftDisplay.leadingZero() ? "On" : "Off";
         if (row >= ROW_INPUT_FIRST && row < ROW_INPUT_END)
             return gInputDisplay.menuRowValue(inputRow(row));
-        return gMetadataDisplay.menuRowValue(metadataRow(row));
+        if (row >= ROW_METADATA_FIRST && row < ROW_METADATA_END)
+            return gMetadataDisplay.menuRowValue(metadataRow(row));
+        return gCreationExtras.menuRowValue(extraRow(row));
     }
 
     static int inputRow(int row) {
@@ -739,6 +763,8 @@ private:
         if (local <= style) return local - 1;
         return style + 1;
     }
+
+    static int extraRow(int row) { return row - ROW_EXTRAS_FIRST; }
 
     u8 mSel;
 };
@@ -1096,7 +1122,8 @@ void Menu::requestSettingsSave() {
 void Menu::hide() {
     mShown = false;
     if (gSettings.dirty() || gBinds.dirty() || gInputDisplay.dirty() ||
-        gMetadataDisplay.dirty() || gQftDisplay.dirty()) {
+        gMetadataDisplay.dirty() || gQftDisplay.dirty() ||
+        gCreationExtras.dirty()) {
         requestSettingsSave();
     }
 }
@@ -1218,7 +1245,7 @@ void Menu::update(TMarioGamePad *pad) {
         // dirty() so merely opening and closing the menu never touches storage.
         if (!mShown && (gSettings.dirty() || gBinds.dirty() ||
                         gInputDisplay.dirty() || gMetadataDisplay.dirty() ||
-                        gQftDisplay.dirty())) {
+                        gQftDisplay.dirty() || gCreationExtras.dirty())) {
             requestSettingsSave();
         }
         return;
@@ -1245,6 +1272,7 @@ void Menu::draw(J2DOrthoGraph *ortho) {
         gMetadataDisplay.draw(this);
         gQFTTimer.draw(this);
         gAttemptCounter.draw(this);
+        gCreationExtras.draw(this);
         drawToast();  // still visible with the menu closed
         bgmStatsDraw(this);
         return;

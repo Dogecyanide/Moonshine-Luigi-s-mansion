@@ -41,6 +41,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "../../common/include/CommonConfigStrings.h"
 #include "ff_utf8.h"
 #include "ShowGameInfo.h"
+#include "susamune_build_id.h"
 
 // Dark gray for grayed-out menu items.
 #define DARK_GRAY 0x666666FF
@@ -178,6 +179,8 @@ void ShowMessageScreenAndWaitForPower(const char *msg)
  */
 void PrintInfo(void)
 {
+	static const char JoyTitle[] = "V1.0.0 \"The Joy of Creation\".";
+	static const char JoyChecksum[] = "[" SUSAMUNE_BUILD_CHECKSUM "].";
 	const char *consoleType = (isWiiVC ? (IsWiiUFastCPU() ? "WiiVC 5x CPU" : "Wii VC") : (IsWiiUFastCPU() ? "WiiU 5x CPU" : (IsWiiU() ? "Wii U" : "Wii")));
 #ifdef NIN_SPECIAL_VERSION
 	// "Special" version with customizations. (Not mainline!)
@@ -190,6 +193,12 @@ void PrintInfo(void)
 	PrintFormat(DEFAULT_SIZE, BLACK, MENU_POS_X, MENU_POS_Y + 20*1, "Built   : " __DATE__ " " __TIME__);
 	PrintFormat(DEFAULT_SIZE, BLACK, MENU_POS_X, MENU_POS_Y + 20*2, "Firmware: %u.%u.%u",
 		    *(vu16*)0x80003140, *(vu8*)0x80003142, *(vu8*)0x80003143);
+	PrintFormat(DEFAULT_SIZE, BLACK,
+	            640 - MENU_POS_X - ((int)sizeof(JoyTitle) - 1) * 10,
+	            426, "%s", JoyTitle);
+	PrintFormat(DEFAULT_SIZE, BLACK,
+	            640 - MENU_POS_X - ((int)sizeof(JoyChecksum) - 1) * 10,
+	            446, "%s", JoyChecksum);
 }
 
 /**

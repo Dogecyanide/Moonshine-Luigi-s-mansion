@@ -12,6 +12,7 @@
 
 #include "Dolphin/OS.h"  // DCInvalidateRange, DCStoreRange
 #include "susamune/binds.hxx"
+#include "susamune/creation_extras.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/metadata_display.hxx"
 #include "susamune/qft_display.hxx"
@@ -102,6 +103,7 @@ void Settings::resetDefaults() {
     gInputDisplay.resetDefaults();
     gMetadataDisplay.resetDefaults();
     gQftDisplay.resetDefaults();
+    gCreationExtras.resetDefaults();
 
     for (int i = 0; i < SETTING_COUNT; i++) {
         mValues[i] = defaultValue(kSettingDescs[i]);
@@ -161,6 +163,7 @@ void Settings::save() {
         gInputDisplay.clearDirty();
         gMetadataDisplay.clearDirty();
         gQftDisplay.clearDirty();
+        gCreationExtras.clearDirty();
         return;
     }
 
@@ -174,7 +177,7 @@ void Settings::save() {
                  sizeof(cfg->metadataDisplay));
     DCStoreRange((void *)&cfg->qftDisplay,
                  sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle) +
-                 sizeof(cfg->inputStyle));
+                 sizeof(cfg->inputStyle) + sizeof(cfg->creation));
 
     mSaveSeq     = cfg->saveSeq + 1;
     cfg->saveSeq = mSaveSeq;
@@ -256,6 +259,9 @@ void Settings::adopt(const volatile SusamuneCfg *cfg) {
     if (cfg->flags & SUSAMUNE_CFG_FLAG_QFT_DISPLAY) {
         gQftDisplay.adopt(&cfg->qftDisplay);
     }
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_CREATION) {
+        gCreationExtras.adopt(&cfg->creation);
+    }
 
     // set() marks dirty; adopting persisted values is not a user edit.
     mDirty     = false;
@@ -284,6 +290,8 @@ void Settings::stageInto(volatile SusamuneCfg *cfg) {
     gMetadataDisplay.clearDirty();
     gQftDisplay.stageInto(&cfg->qftDisplay);
     gQftDisplay.clearDirty();
+    gCreationExtras.stageInto(&cfg->creation);
+    gCreationExtras.clearDirty();
 }
 
 void Settings::set(SettingId id, u8 value) {

@@ -43,6 +43,10 @@ set(_gen_dir   "${_shared}/gen")
 set(_lib_dir   "${_shared}/lib")
 set(_boot_dol  "${_shared}/boot.dol")
 file(MAKE_DIRECTORY "${_data_dir}" "${_gen_dir}" "${_lib_dir}")
+if(NOT EXISTS "${_gen_dir}/susamune_build_id.h")
+    file(WRITE "${_gen_dir}/susamune_build_id.h"
+        "#ifndef SUSAMUNE_BUILD_CHECKSUM\n#define SUSAMUNE_BUILD_CHECKSUM \"unknown\"\n#endif\n")
+endif()
 
 set(_common_args
     "-DCMAKE_BUILD_TYPE="

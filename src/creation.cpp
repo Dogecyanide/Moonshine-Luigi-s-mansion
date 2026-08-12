@@ -167,6 +167,7 @@ void CreationEditor::reset() {
     mTextSlots    = 0;
     mTargetSlots  = 0;
     mOption       = 0;
+    mCapabilities = CAP_ALL;
     mTextTarget   = 0;
     mRepeatFrames = 0;
     mConfirm      = CONFIRM_NONE;
@@ -175,7 +176,7 @@ void CreationEditor::reset() {
 
 void CreationEditor::begin(CreationStyle *style, u8 (*textRgb)[3],
                            u8 (*backupRgb)[3], u16 textSlots, u16 targetSlots,
-                           const char *targetNames) {
+                           const char *targetNames, u8 capabilities) {
     if (!style || !textRgb || !backupRgb || textSlots == 0 || mEditing) return;
     mStyle        = style;
     mBackup       = *style;
@@ -189,10 +190,28 @@ void CreationEditor::begin(CreationStyle *style, u8 (*textRgb)[3],
     }
     mRepeatMask   = 0;
     mOption       = 0;
+    mCapabilities = capabilities;
     mTextTarget   = 0;
     mRepeatFrames = 0;
     mConfirm      = CONFIRM_NONE;
     mEditing      = true;
+}
+
+bool CreationEditor::optionEnabled(u8 option) const {
+    if (option <= OPTION_TEXT_B) return true;
+    if (option == OPTION_TEXT_A)
+        return mCapabilities & CAP_TEXT_ALPHA;
+    if (option == OPTION_TEXT_BRIGHTNESS)
+        return mCapabilities & CAP_BRIGHTNESS;
+    if (option >= OPTION_BG_R && option <= OPTION_BG_A)
+        return mCapabilities & CAP_BACKGROUND;
+    return mCapabilities & CAP_PADDING;
+}
+
+void CreationEditor::moveOption(int direction) {
+    do {
+        mOption = (u8)((mOption + OPTION_COUNT + direction) % OPTION_COUNT);
+    } while (!optionEnabled(mOption));
 }
 
 u32 CreationEditor::repeatInput(TMarioGamePad *pad) {
@@ -267,19 +286,24 @@ u8 CreationEditor::update(TMarioGamePad *pad, const CreationStyle &defaults,
     }
 
     const u32 repeat = repeatInput(pad);
-    const u32 layout = (pad->mButtons.mRapidInput &
-                        (TMarioGamePad::DPAD_LEFT | TMarioGamePad::DPAD_RIGHT |
-                         TMarioGamePad::DPAD_UP | TMarioGamePad::DPAD_DOWN)) |
-                       (repeat & (TMarioGamePad::L | TMarioGamePad::R));
+    const u32 layout =
+        ((mCapabilities & CAP_POSITION)
+             ? pad->mButtons.mRapidInput &
+                   (TMarioGamePad::DPAD_LEFT | TMarioGamePad::DPAD_RIGHT |
+                    TMarioGamePad::DPAD_UP | TMarioGamePad::DPAD_DOWN)
+             : 0) |
+        ((mCapabilities & CAP_SCALE)
+             ? repeat & (TMarioGamePad::L | TMarioGamePad::R)
+             : 0);
     if (LayoutEditor::updatePositionScale(
             layout, mStyle->x, mStyle->y, mStyle->scale, 200)) {
         result |= UPDATE_CHANGED;
     }
 
     if (repeat & TMarioGamePad::CSTICK_UP) {
-        mOption = (u8)(mOption ? mOption - 1 : OPTION_COUNT - 1);
+        moveOption(-1);
     } else if (repeat & TMarioGamePad::CSTICK_DOWN) {
-        mOption = (u8)((mOption + 1) % OPTION_COUNT);
+        moveOption(1);
     }
 
     int delta = 0;
@@ -312,7 +336,12 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
     if (!menu || !mStyle) return;
 
     const int panelY = mStyle->y < 224 ? 264 : 8;
-    const int panelH = 168;
+    int optionCount = 0;
+    for (int i = 0; i < OPTION_COUNT; i++)
+        if (optionEnabled((u8)i)) optionCount++;
+    const bool layoutControls = mCapabilities & (CAP_POSITION | CAP_SCALE);
+    const int optionRows = optionCount > 5 ? 5 : optionCount;
+    const int panelH = 80 + optionRows * 14 + (layoutControls ? 17 : 0);
     menu->fillBox(8, panelY, 624, panelH, Color(0, 0, 0, 215));
 
     menu->drawText(title, 18, panelY + 9, 16, 16,
@@ -332,10 +361,14 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
     menu->drawText(status, 622 - Menu::textWidth(status, 12), panelY + 11,
                    12, 12, Color(190, 220, 255, 255));
 
-    snprintf(status, sizeof(status), "Position X:%u Y:%u   Size:%u%%",
-             mStyle->x, mStyle->y, mStyle->scale);
-    menu->drawText(status, 18, panelY + 29, 12, 12,
-                   Color(190, 220, 255, 255));
+    int infoY = panelY + 29;
+    if (layoutControls) {
+        snprintf(status, sizeof(status), "Position X:%u Y:%u   Size:%u%%",
+                 mStyle->x, mStyle->y, mStyle->scale);
+        menu->drawText(status, 18, infoY, 12, 12,
+                       Color(190, 220, 255, 255));
+        infoY += 17;
+    }
 
     u8 r, g, b;
     const bool sameR = textChannel(mTextRgb, mTextSlots, mTextTarget, 0, &r);
@@ -343,23 +376,30 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
     const bool sameB = textChannel(mTextRgb, mTextSlots, mTextTarget, 2, &b);
     const char *rgbLabel = mTargetNames ? "Element RGB"
         : (mTextTarget == 0 ? "Text RGB" : "Character RGB");
-    if (sameR && sameG && sameB) {
+    if (sameR && sameG && sameB && (mCapabilities & CAP_BACKGROUND)) {
         snprintf(status, sizeof(status),
                  "%s:%03u,%03u,%03u   Background RGB:%03u,%03u,%03u",
                  rgbLabel, r, g, b, mStyle->bgR, mStyle->bgG, mStyle->bgB);
-    } else {
+    } else if (mCapabilities & CAP_BACKGROUND) {
         snprintf(status, sizeof(status),
                  "%s: Mixed   Background RGB:%03u,%03u,%03u",
                  rgbLabel, mStyle->bgR, mStyle->bgG, mStyle->bgB);
+    } else if (sameR && sameG && sameB) {
+        snprintf(status, sizeof(status), "%s:%03u,%03u,%03u",
+                 rgbLabel, r, g, b);
+    } else {
+        snprintf(status, sizeof(status), "%s: Mixed", rgbLabel);
     }
-    menu->drawText(status, 18, panelY + 46, 11, 11,
+    menu->drawText(status, 18, infoY, 11, 11,
                    Color(190, 220, 255, 255));
 
+    int shown = 0;
     for (int i = 0; i < OPTION_COUNT; i++) {
-        const int column = i / 5;
-        const int row = i % 5;
+        if (!optionEnabled((u8)i)) continue;
+        const int column = shown / 5;
+        const int row = shown % 5;
         const int x = 18 + column * 306;
-        const int y = panelY + 64 + row * 14;
+        const int y = infoY + 18 + row * 14;
         const bool selected = i == mOption;
         if (selected) {
             menu->fillBox(x - 3, y - 1, 294, 14, Color(90, 170, 255, 60));
@@ -390,22 +430,25 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
         }
         menu->drawText(value, x + 282 - Menu::textWidth(value, 11), y,
                        11, 11, Color(120, 220, 150, 255));
+        shown++;
     }
 
     const char *controls = SUSAMUNE_GLYPH_C " U/D Option   " SUSAMUNE_GLYPH_C
                            " L/R Adjust   START: Next   " SUSAMUNE_GLYPH_X
                            "+START: Previous";
-    menu->drawText(controls, 18, panelY + 135, 9, 9,
+    menu->drawText(controls, 18, panelY + panelH - 32, 9, 9,
                    Color(150, 170, 205, 255));
-    menu->drawText("D-pad Move   L/R Size",
-                   18, panelY + 150, 9, 9, Color(150, 170, 205, 255));
+    if (layoutControls)
+        menu->drawText("D-pad Move   L/R Size",
+                       18, panelY + panelH - 17, 9, 9,
+                       Color(150, 170, 205, 255));
     const char *finish = SUSAMUNE_GLYPH_A " Keep  " SUSAMUNE_GLYPH_B
                          " Cancel  " SUSAMUNE_GLYPH_Z " Reset";
-    menu->drawText(finish, 622 - Menu::textWidth(finish, 9), panelY + 150,
+    menu->drawText(finish, 622 - Menu::textWidth(finish, 9), panelY + panelH - 17,
                    9, 9, Color(150, 170, 205, 255));
 
     if (mConfirm != CONFIRM_NONE) {
-        const int boxY = panelY + 43;
+        const int boxY = panelY + (panelH - 78) / 2;
         menu->fillBox(128, boxY, 384, 78, Color(8, 11, 20, 245));
         const char *prompt = mConfirm == CONFIRM_KEEP
                                  ? "Keep these changes?"

@@ -16,6 +16,7 @@
 #endif
 #include "susamune/features.hxx"
 #include "susamune/actions.hxx"
+#include "susamune/creation_extras.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/metadata_display.hxx"
@@ -134,6 +135,7 @@ extern "C" void onSetup(TMarDirector* director) {
     visibleGoopOnStageSetup();
     gQFTTimer.onStageSetup(director);
     gAttemptCounter.onStageSetup(director);
+    gCreationExtras.onStageSetup();
 #if ENABLE_MEM_DIAGNOSTICS
     memDiagnosticsOnStageSetup();
 #endif
@@ -172,7 +174,8 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     gBinds.update();
     const bool creationEditing = gQftDisplay.editing() ||
                                  gInputDisplay.editing() ||
-                                 gMetadataDisplay.editing();
+                                 gMetadataDisplay.editing() ||
+                                 gCreationExtras.editing();
     if (!creationEditing)
         gInputDisplay.update();
     PatternSelector::update(!creationEditing);
@@ -216,6 +219,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     featuresApply();
 
     actionsApply(!creationEditing);
+    gCreationExtras.update();
 
     if (gSavestateMgr && !creationEditing) {
         gSavestateMgr->updateHook();
@@ -236,7 +240,7 @@ extern "C" void afterDraw() {
     // GPU work are all complete, while the next game frame has not begun.
     THPPlayerDrawDone();
     if (gSavestateMgr && !gQftDisplay.editing() && !gInputDisplay.editing() &&
-        !gMetadataDisplay.editing())
+        !gMetadataDisplay.editing() && !gCreationExtras.editing())
         gSavestateMgr->processPendingLoad();
     // gpPollution is stale until the async setup thread reaches onSetup.
     if (gpMarDirector && gpMarDirector->_260 != 0 &&

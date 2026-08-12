@@ -3,6 +3,7 @@
 #if IS_EMULATOR
 
 #include "susamune/binds.hxx"
+#include "susamune/creation_extras.hxx"
 #include "susamune/emulator_persistence.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/metadata_display.hxx"
@@ -40,6 +41,7 @@ void Settings::save() {
         gInputDisplay.clearDirty();
         gMetadataDisplay.clearDirty();
         gQftDisplay.clearDirty();
+        gCreationExtras.clearDirty();
         return;
     }
 

@@ -25,6 +25,16 @@ static_assert(sizeof(CreationStyle) == 12, "creation style layout changed");
 
 class CreationEditor {
 public:
+    enum Capability {
+        CAP_POSITION   = 1 << 0,
+        CAP_SCALE      = 1 << 1,
+        CAP_TEXT_ALPHA = 1 << 2,
+        CAP_BRIGHTNESS = 1 << 3,
+        CAP_BACKGROUND = 1 << 4,
+        CAP_PADDING    = 1 << 5,
+        CAP_ALL        = 0x3f,
+    };
+
     enum UpdateResult {
         UPDATE_NONE      = 0,
         UPDATE_CHANGED   = 1,
@@ -35,7 +45,8 @@ public:
     void reset();
     void begin(CreationStyle *style, u8 (*textRgb)[3], u8 (*backupRgb)[3],
                u16 textSlots, u16 targetSlots = 0,
-               const char *targetNames = nullptr);
+               const char *targetNames = nullptr,
+               u8 capabilities = CAP_ALL);
     u8   update(TMarioGamePad *pad, const CreationStyle &defaults,
                 const u8 (*defaultRgb)[3], u16 defaultRgbSlots = 1);
     void draw(Menu *menu, const char *title, const char *preview) const;
@@ -44,6 +55,8 @@ public:
 
 private:
     u32 repeatInput(TMarioGamePad *pad);
+    bool optionEnabled(u8 option) const;
+    void moveOption(int direction);
 
     CreationStyle *mStyle;
     CreationStyle  mBackup;
@@ -55,6 +68,7 @@ private:
     u16            mTargetSlots;
     u16            mTextTarget;
     u8             mOption;
+    u8             mCapabilities;
     u8             mRepeatFrames;
     u8             mConfirm;
     bool           mEditing;
