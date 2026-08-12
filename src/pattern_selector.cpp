@@ -99,12 +99,13 @@ int selectedNode(TSpineEnemy *enemy, int current, int previous) {
 
 namespace PatternSelector {
 
-void update() {
+void update(bool allowInput) {
     const u16 held = JUTGamePad::mPadStatus[0].mButton;
     const u16 pressed = (u16)(held & ~sPreviousButtons);
     sPreviousButtons = held;
 
-    if (!gSettings.getBool(SETTING_PATTERN_SELECTOR) || !inPlayableStage() ||
+    if (!allowInput || !gSettings.getBool(SETTING_PATTERN_SELECTOR) ||
+        !inPlayableStage() ||
         !(held & JUTGamePad::L)) {
         return;
     }

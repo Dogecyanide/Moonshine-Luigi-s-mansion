@@ -10,7 +10,7 @@
 //
 // The on-screen menu: a tabbed overlay that renders and edits mod state.
 // It ONLY handles presentation and navigation -- debug warping lives in
-// settings in settings.*. Each tab is a small object
+// debug_warp.cpp, settings in settings.*. Each tab is a small object
 // implementing the internal MenuTab interface (defined in menu.cpp); Menu is a thin frame
 // around a list of them, so a new tab is a new class plus one line in the
 // constructor.
@@ -62,7 +62,7 @@ public:
     // text jitter as its content changes.
     static int textWidth(const char *s, int sizeX);
 
-    static const int kMaxTabs = 12;
+    static const int kMaxTabs = 11;
     // How long a toast stays up, in frames (~3s at 60Hz).
     static const int kToastFrames = 180;
 

@@ -3,9 +3,11 @@
 #if IS_EMULATOR
 
 #include "susamune/binds.hxx"
+#include "susamune/creation_extras.hxx"
 #include "susamune/emulator_persistence.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/metadata_display.hxx"
+#include "susamune/qft_display.hxx"
 
 namespace {
 constexpr u32 kSaveTimeoutFrames = 300;
@@ -38,6 +40,8 @@ void Settings::save() {
         gBinds.clearDirty();
         gInputDisplay.clearDirty();
         gMetadataDisplay.clearDirty();
+        gQftDisplay.clearDirty();
+        gCreationExtras.clearDirty();
         return;
     }
 

@@ -207,7 +207,9 @@ category means a new enum value, title-pool offset, static buffer and
 `CategorySettingsTab` construction in `Menu::Menu()`.
 
 Current generic tabs are `QoL`, `Cosmetic`, `Misc`, `Savestate`, `UI`, and
-`Timer`. Bespoke tabs are `ILs`, `Input`, `Metadata`, and `Binds`.
+`Timer`. Bespoke tabs are `Creation`, `ILs`, and `Binds`; `Warps` and `Stages`
+are prepended when `ENABLE_DEBUG_WARPS` is enabled. Creation contains QFT,
+Input Display, Metadata, HUD, Custom Text, and Mod Menu sections.
 
 ## Class B: asm hooks (`C2` codes)
 

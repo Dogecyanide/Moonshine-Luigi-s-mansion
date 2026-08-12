@@ -66,11 +66,11 @@ arena_lo = {
 
 # Size of the carved region. Comes out of the ~19 MiB heap, so it can be
 # generous; the mod must fit within it. MUST match
-# SUSAMUNE_MOD_REGION_SIZE in addresses.hxx.
-mod_region_size = 0x18000
+# SUSAMUNE_MOD_REGION_SIZE in mod_bin.h.
+mod_region_size = 0x20000
 
 # Tail of the region reserved for the asm caves' fixed-address scratch, which
-# the blob must not grow into. MUST match SUSAMUNE_SCRATCH in addresses.hxx.
+# the blob must not grow into. MUST match SUSAMUNE_SCRATCH in mod_bin.h.
 mod_scratch_size = 0x40
 
 # Ceiling enforced on the linked blob by every link_mod.py mode.
@@ -84,7 +84,7 @@ debug_stack_size = 0x2000
 
 # What getArenaLo() adds to __OSArenaLo, and therefore the amount every
 # bottom-anchored heap allocation shifts up by. MUST match
-# SUSAMUNE_ARENA_RESERVE_SIZE in addresses.hxx.
+# SUSAMUNE_ARENA_RESERVE_SIZE in mod_bin.h.
 arena_reserve = mod_region_size + debug_stack_size
 
 # Base address to link code against, i.e. where we insert the code.

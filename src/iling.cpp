@@ -124,6 +124,12 @@ const int kRegularLabelSize = 18;
 // Fixed-width names and computed suffix offsets cost less than lookup tables.
 constexpr char kRegularGroupNames[] =
     "Bianco\0Ricco\0\0Gelato\0Pinna\0\0Sirena\0Noki\0\0\0Pianta";
+constexpr char kMenuGroupNames[] =
+    "BIANCO\0RICCO\0GELATO\0PINNA\0SIRENA\0NOKI\0PIANTA\0"
+    "AIRSTRIP\0CORONA\0DELFINO\0ANY%";
+constexpr u8 kMenuGroupOffsets[] = {0, 7, 13, 20, 26, 33, 38, 45, 54, 61, 69};
+static_assert(sizeof(kMenuGroupOffsets) == GROUP_COUNT,
+              "IL menu group labels changed");
 constexpr char kRegularSuffixes[] =
     "\0\0\0\0 Reds\0 (Full)\0 (Secret)\0 (Race)";
 constexpr char kRegularLabelFormats[] =
@@ -540,6 +546,12 @@ bool sameDest(const LevelWarp::Dest &a, const LevelWarp::Dest &b) {
 }
 
 bool acceptsSkipOrigin(const Entry &item) {
+    const bool hidden = item.result == 29 || item.result == 59 ||
+                        item.result == 69;
+    const bool hundred = item.result >= 100 && item.result <= 107;
+    if ((hidden || hundred) && sAttemptStart.area == item.start.area) {
+        return true;
+    }
     if (item.result == 27 && item.start.area == 4 && item.start.episode == 7) {
         return sAttemptStart.area == 4 && sAttemptStart.episode == 0;
     }
@@ -966,12 +978,18 @@ int jumpGroup(int entry, int direction) {
 }
 
 bool beginsGroup(int entry) {
-    for (int group = 1; group < GROUP_COUNT; group++) {
+    for (int group = 0; group < GROUP_COUNT; group++) {
         if (entry == kGroupFirst[group]) {
             return true;
         }
     }
     return false;
+}
+
+const char *groupName(int entry) {
+    int group = 0;
+    while (group + 1 < GROUP_COUNT && entry >= kGroupFirst[group + 1]) group++;
+    return kMenuGroupNames + kMenuGroupOffsets[group];
 }
 
 bool start(int entry) {

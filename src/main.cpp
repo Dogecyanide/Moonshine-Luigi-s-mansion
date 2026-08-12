@@ -16,14 +16,21 @@
 #endif
 #include "susamune/features.hxx"
 #include "susamune/actions.hxx"
+#include "susamune/creation_extras.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
+#include "susamune/metadata_display.hxx"
+#include "susamune/mem_diagnostics.hxx"
 #include "susamune/iling.hxx"
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
+#include "susamune/qft_display.hxx"
 #include "susamune/pattern_selector.hxx"
 #include "susamune/warp_wheel.hxx"
 #include "susamune/visible_goop.hxx"
+#if ENABLE_DEBUG_WARPS
+#include "susamune/debug_warp.hxx"
+#endif
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
 #include "SMS/Manager/RumbleManager.hxx"
@@ -40,7 +47,7 @@ SavestateManager* gSavestateMgr = nullptr;
 //
 // The reserve is SUSAMUNE_ARENA_RESERVE_SIZE, not the region size: __OSArenaLo
 // sits a debug stack below the __ArenaLo the blob links at. Adding only the
-// region size puts the heap floor at MOD_BASE + 0xE000, inside the blob.
+// region size puts the heap floor at MOD_BASE + 0x1E000, inside the blob.
 // SUSAMUNE_ARENA_RESERVE_SIZE must match arena_reserve in scripts/patches.py.
 extern "C" void* getArenaLo() {
     return (void*)(*(volatile u32*)SUSAMUNE_ADDR_OS_ARENA_LO +
@@ -58,6 +65,9 @@ extern "C" void onAppInit(TApplication* app) {
     gQFTTimer.init();
     gAttemptCounter.init();
     ILing::init();
+#if ENABLE_MEM_DIAGNOSTICS
+    memDiagnosticsInit();
+#endif
 
 #if !IS_EMULATOR
     // The launcher owns this option because Sunshine cannot persist its own
@@ -92,6 +102,15 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     if (!gSettings.getBool(SETTING_DISABLE_WARPS))
         state = LevelWarp::kick(director, state);
 
+#if ENABLE_DEBUG_WARPS
+    if (Warp::pending()) {
+        Warp::execute();
+        gQFTTimer.requestReset();
+        director->moveStage();
+        state = 9;
+    }
+#endif
+
     return state;
 }
 
@@ -116,6 +135,10 @@ extern "C" void onSetup(TMarDirector* director) {
     visibleGoopOnStageSetup();
     gQFTTimer.onStageSetup(director);
     gAttemptCounter.onStageSetup(director);
+    gCreationExtras.onStageSetup();
+#if ENABLE_MEM_DIAGNOSTICS
+    memDiagnosticsOnStageSetup();
+#endif
 
     if (inited) return; else inited = true;
 
@@ -149,13 +172,18 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     // it and asks whether the menu bind was pressed this frame, which would
     // otherwise be answered from the previous frame's sample.
     gBinds.update();
-    gInputDisplay.update();
-    PatternSelector::update();
+    const bool creationEditing = gQftDisplay.editing() ||
+                                 gInputDisplay.editing() ||
+                                 gMetadataDisplay.editing() ||
+                                 gCreationExtras.editing();
+    if (!creationEditing)
+        gInputDisplay.update();
+    PatternSelector::update(!creationEditing);
     gQFTTimer.beginFrame();
     gQFTTimer.update();
     // Before direct(): while the wheel is open it takes the pad away from
     // the game.
-    if (!gSettings.getBool(SETTING_DISABLE_WARPS))
+    if (!creationEditing && !gSettings.getBool(SETTING_DISABLE_WARPS))
         WarpWheel::update(gpApplication.mGamePads[0]);
 
     // Freeze the stage while an overlay is up. direct() runs the movement and
@@ -183,20 +211,25 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
 
     gQFTTimer.update();
     ILing::update();
-    gAttemptCounter.update();
+    if (!creationEditing)
+        gAttemptCounter.update();
 
     // Apply/restore the toggled memory-patch features (ported gecko codes).
     // Runs every frame like the gecko handler; no-ops when nothing changed.
     featuresApply();
 
-    actionsApply();
+    actionsApply(!creationEditing);
+    gCreationExtras.update();
 
-    if (gSavestateMgr) {
+    if (gSavestateMgr && !creationEditing) {
         gSavestateMgr->updateHook();
     }
     if (gMenu) {
         gMenu->update(gpApplication.mGamePads[0]);
     }
+#if ENABLE_MEM_DIAGNOSTICS
+    memDiagnosticsUpdate();
+#endif
 
     return state;
 }
@@ -206,7 +239,9 @@ extern "C" void afterDraw() {
     // immediately afterward: director, fader, audio, and the current frame's
     // GPU work are all complete, while the next game frame has not begun.
     THPPlayerDrawDone();
-    if (gSavestateMgr) gSavestateMgr->processPendingLoad();
+    if (gSavestateMgr && !gQftDisplay.editing() && !gInputDisplay.editing() &&
+        !gMetadataDisplay.editing() && !gCreationExtras.editing())
+        gSavestateMgr->processPendingLoad();
     // gpPollution is stale until the async setup thread reaches onSetup.
     if (gpMarDirector && gpMarDirector->_260 != 0 &&
         gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING) {
@@ -226,6 +261,9 @@ extern "C" void afterDraw() {
         
         if (gMenu)
             gMenu->draw(&ortho);
+#if ENABLE_MEM_DIAGNOSTICS
+        memDiagnosticsDraw(gMenu);
+#endif
         ILing::draw(gMenu);
         if (!gMenu || !gMenu->shown())
             PatternSelector::draw(gMenu);

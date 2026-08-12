@@ -20,6 +20,7 @@ target_include_directories(loader PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../include"
     "${CMAKE_CURRENT_SOURCE_DIR}/../fatfs"
     "${CMAKE_CURRENT_SOURCE_DIR}/extlibs/include"
+    "${LAUNCHER_GEN_DIR}"
     "${LIBOGC_INC}")
 
 # Data blobs embedded into the loader (bin2o equivalent). The two committed

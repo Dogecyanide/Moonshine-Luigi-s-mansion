@@ -74,6 +74,8 @@ set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
 
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
 option(ENABLE_SAVESTATE_DBG "Enable savestate debug output" OFF)
+option(ENABLE_MEM_DIAGNOSTICS "Enable the MEM1 safety overlay and canaries" OFF)
+option(ENABLE_DEBUG_WARPS "Enable debug warp menu tabs and stage warping" OFF)
 option(UPDATE_ISO_METADATA "Update ISO metadata (game code 01 -> 02, change picture, name, etc.)" OFF)
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
 
@@ -100,6 +102,12 @@ set(MAP_FILE "${CMAKE_SOURCE_DIR}/maps/${VERS_PRIMARY}.map")
 # build directory.
 
 file(GLOB MOD_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
+if(NOT ENABLE_MEM_DIAGNOSTICS)
+    list(REMOVE_ITEM MOD_SOURCES "${CMAKE_SOURCE_DIR}/src/mem_diagnostics.cpp")
+endif()
+if(NOT ENABLE_DEBUG_WARPS)
+    list(REMOVE_ITEM MOD_SOURCES "${CMAKE_SOURCE_DIR}/src/debug_warp.cpp")
+endif()
 
 set(SHARED_FLAGS
     --target=powerpc-gecko-ibm-kuribo-eabi
@@ -146,6 +154,8 @@ function(susamune_add_mod_object vers)
     target_compile_definitions(susamune_obj_${vers} PRIVATE
         IS_EMULATOR=$<BOOL:${IS_EMULATOR}>
         ENABLE_SAVESTATE_DBG=$<BOOL:${ENABLE_SAVESTATE_DBG}>
+        ENABLE_MEM_DIAGNOSTICS=$<BOOL:${ENABLE_MEM_DIAGNOSTICS}>
+        ENABLE_DEBUG_WARPS=$<BOOL:${ENABLE_DEBUG_WARPS}>
         SUSAMUNE_VERSION_${_upper}=1)
 
     target_link_options(susamune_obj_${vers} PRIVATE ${SHARED_FLAGS} -fuse-ld=lld -Werror -r)
@@ -313,13 +323,23 @@ add_custom_target(iso DEPENDS "${FINAL_ISO}")
 # devkitPPC, devkitPPC+libogc) that CMake can't mix with the Kuribo clang used
 # here. We drive it as an ExternalProject.
 #
-# It no longer depends on the mod build at all: the blob and its hook writes are
-# read from mod_<vers>.bin at runtime, so the launcher is version-agnostic and a
-# mod-source edit only repacks the bins. The bins are handed to the packaging
-# step as files to drop into the app directory.
+# The launcher does not embed the blobs or hook writes; they remain runtime
+# mod_<vers>.bin files. Its displayed build checksum does fingerprint those
+# files, so their final bytes must exist before the otherwise-generic launcher.
 include(ExternalProject)
 
 string(REPLACE ";" "|" _mod_bins_arg "${MOD_BINS}")
+
+set(BUILD_ID_HEADER
+    "${CMAKE_BINARY_DIR}/launcher/shared/gen/susamune_build_id.h")
+add_custom_command(
+    OUTPUT "${BUILD_ID_HEADER}"
+    COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/gen_build_id.py"
+        --output "${BUILD_ID_HEADER}" ${MOD_BINS}
+    DEPENDS ${MOD_BINS} "${CMAKE_SOURCE_DIR}/scripts/gen_build_id.py"
+    COMMENT "Generating launcher mod checksum"
+    VERBATIM)
+add_custom_target(launcher_build_id DEPENDS "${BUILD_ID_HEADER}")
 
 ExternalProject_Add(nintendont_launcher
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/launcher"
@@ -333,7 +353,7 @@ ExternalProject_Add(nintendont_launcher
         "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
-    DEPENDS mod_bins
+    DEPENDS mod_bins launcher_build_id
     BUILD_ALWAYS ON
     INSTALL_COMMAND ""
     USES_TERMINAL_CONFIGURE ON

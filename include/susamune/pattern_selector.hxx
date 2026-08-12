@@ -8,7 +8,7 @@ namespace PatternSelector {
 
 // L + D-pad edits the three Chomplet patterns. Digits are hexadecimal, as in
 // sup39's original code; zero or an unavailable branch means random.
-void update();
+void update(bool allowInput = true);
 void draw(Menu *menu);
 
 }  // namespace PatternSelector

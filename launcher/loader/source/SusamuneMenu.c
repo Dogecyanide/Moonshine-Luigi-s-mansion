@@ -1202,6 +1202,7 @@ static void DrawMainMenu(int pos)
 	bool pathSet = (path[0] != '\0');
 
 	DrawHeader("Exit", "Select", NULL);
+	PrintSusamuneBuild();
 
 	PrintCenter(BLACK, MAIN_Y_LAUNCH, "Launch Game%s",
 		    pos == ROW_LAUNCH ? " " ARROW_LEFT : "");

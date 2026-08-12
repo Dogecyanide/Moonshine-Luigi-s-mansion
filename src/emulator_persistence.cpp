@@ -15,7 +15,7 @@ namespace EmulatorPersistence {
 namespace {
 
 constexpr u32 kRecordMagic = 0x53554346u;  // 'SUCF'
-constexpr u16 kRecordVersion = 1;
+constexpr u16 kRecordVersion = 2;
 constexpr u32 kSectorSize = 0x2000;
 constexpr u32 kFileSize = kSectorSize * 2;
 constexpr char kFileName[] = "susamune_settings";
@@ -32,6 +32,19 @@ struct Record {
     u8 padding[kSectorSize - 32 - sizeof(SusamuneCfg)];
 };
 static_assert(sizeof(Record) == kSectorSize, "card record must fill one sector");
+
+struct RecordV1 {
+    u32 magic;
+    u16 version;
+    u16 payloadSize;
+    u32 generation;
+    u32 checksum;
+    u32 gameVersion;
+    u8 reserved[12];
+    u8 cfg[2144];
+    u8 padding[kSectorSize - 32 - 2144];
+};
+static_assert(sizeof(RecordV1) == kSectorSize, "old card record size changed");
 
 // Only diskID is needed. The offset and stride come from the decomp's complete
 // CARDControl definition; keep this view tied to its 0x110-byte retail layout.
@@ -76,7 +89,11 @@ void initBlank(SusamuneCfg *cfg) {
     cfg->version = SUSAMUNE_CFG_VERSION;
     cfg->flags = SUSAMUNE_CFG_FLAG_INPUT_DISPLAY |
                  SUSAMUNE_CFG_FLAG_METADATA_DISPLAY |
-                 SUSAMUNE_CFG_FLAG_ILING_PBS;
+                 SUSAMUNE_CFG_FLAG_ILING_PBS |
+                 SUSAMUNE_CFG_FLAG_QFT_DISPLAY |
+                 SUSAMUNE_CFG_FLAG_METADATA_STYLE |
+                 SUSAMUNE_CFG_FLAG_INPUT_STYLE |
+                 SUSAMUNE_CFG_FLAG_CREATION;
     cfg->ilingPbs.magic = SUSAMUNE_ILING_PB_MAGIC;
     cfg->ilingPbs.version = SUSAMUNE_ILING_PB_VERSION;
     cfg->ilingPbs.count = SUSAMUNE_ILING_PB_SLOT_COUNT;
@@ -102,6 +119,16 @@ bool valid(const Record *source) {
     return record->magic == kRecordMagic &&
            record->version == kRecordVersion &&
            record->payloadSize == sizeof(SusamuneCfg) &&
+           record->gameVersion == SUSAMUNE_GAME_VERSION &&
+           record->cfg.magic == SUSAMUNE_CFG_MAGIC &&
+           record->cfg.version == SUSAMUNE_CFG_VERSION &&
+           checksum(record) == record->checksum;
+}
+
+bool validV1(const Record *source) {
+    Record *record = const_cast<Record *>(source);
+    return record->magic == kRecordMagic && record->version == 1 &&
+           record->payloadSize == 2144 &&
            record->gameVersion == SUSAMUNE_GAME_VERSION &&
            record->cfg.magic == SUSAMUNE_CFG_MAGIC &&
            record->cfg.version == SUSAMUNE_CFG_VERSION &&
@@ -253,9 +280,17 @@ s32 loadRecords(void *mountWork, Record *record) {
         result = CARDRead(&file, record, sizeof(*record),
                           slot * kSectorSize);
         if (result != CARD_ERROR_READY) break;
-        if (valid(record) &&
+        const bool current = valid(record);
+        const bool old = !current && validV1(record);
+        if ((current || old) &&
             (!haveRecord || newer(record->generation, bestGeneration))) {
-            memcpy(&sState->cfg, &record->cfg, sizeof(sState->cfg));
+            initBlank(&sState->cfg);
+            memcpy(&sState->cfg, &record->cfg,
+                   old ? sizeof(((RecordV1 *)0)->cfg) : sizeof(sState->cfg));
+            sState->cfg.flags |= SUSAMUNE_CFG_FLAG_QFT_DISPLAY |
+                                 SUSAMUNE_CFG_FLAG_METADATA_STYLE |
+                                 SUSAMUNE_CFG_FLAG_INPUT_STYLE |
+                                 SUSAMUNE_CFG_FLAG_CREATION;
             bestGeneration = record->generation;
             sState->activeRecord = slot;
             haveRecord = true;

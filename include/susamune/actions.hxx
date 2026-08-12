@@ -18,7 +18,7 @@
 
 // Poll the binds and run whatever they ask for. Call once per frame from
 // onUpdate, after gBinds.update().
-void actionsApply();
+void actionsApply(bool allowBinds = true);
 
 // Drop pointers into the previous stage heap. Call after setupObjects().
 void actionsOnStageLoad();
