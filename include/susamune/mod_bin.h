@@ -64,7 +64,7 @@ struct SusamuneModHeader {
 #define SUSAMUNE_MOD_FILE_FMT "mod_%s.bin"
 
 // Portable compile-time checks (no C11 dependency). The window has to hold a
-// blob that fills the whole 64 KiB mod region plus the header and write list;
+// blob that fills the whole mod region plus the header and write list;
 // SUSAMUNE_MOD_REGION_SIZE itself lives in addresses.hxx, which is C++-only, so
 // the ceiling is spelled out here.
 typedef char susamune_mod_header_size_check

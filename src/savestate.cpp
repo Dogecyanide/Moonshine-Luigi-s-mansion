@@ -211,7 +211,7 @@ const int kNumPointedAllocs = sizeof(kPointedAllocs) / sizeof(kPointedAllocs[0])
 // One header lives at the very start of the snapshot buffer; the saved
 // bytes follow at kHeaderSize.
 const u32 kSnapshotMagic   = 0x53555341u; // 'SUSA'
-const u32 kSnapshotVersion = 8u;          // 64 KiB mod region: the stage heap moved
+const u32 kSnapshotVersion = 9u;          // 68 KiB mod region: the stage heap moved
 const u32 kHeaderSize      = 0x100u;
 // One slot per static range, one per pointed alloc, plus one for the heap.
 const int kMaxRegions      = kNumStaticRanges + kNumPointedAllocs + 1;

@@ -63,7 +63,7 @@ arena_lo = {
 # Size of the carved region. Comes out of the ~19 MiB heap, so it can be
 # generous; the mod must fit within it. MUST match
 # SUSAMUNE_MOD_REGION_SIZE in addresses.hxx.
-mod_region_size = 0x10000
+mod_region_size = 0x11000
 
 # Tail of the region reserved for the asm caves' fixed-address scratch, which
 # the blob must not grow into. MUST match SUSAMUNE_SCRATCH in addresses.hxx.

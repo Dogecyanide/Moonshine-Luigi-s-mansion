@@ -56,6 +56,49 @@ inline Color cRowDim()     { return col(120, 130, 150, 255); }
 inline Color cValue()      { return col(120, 220, 150, 255); }// setting value
 inline Color cFooter()     { return col(104, 114, 136, 255); }
 
+const char *settingsStorageError(u32 error) {
+    switch (error) {
+#if IS_EMULATOR
+    case 2:   return "wrong device in slot B";
+    case 3:   return "no card in slot B";
+    case 4:   return "settings file missing";
+    case 5:   return "slot B card I/O error";
+    case 6:   return "slot B card unformatted";
+    case 7:   return "settings file already exists";
+    case 8:   return "card directory is full";
+    case 9:   return "slot B card is full";
+    case 10:  return "settings file not writable";
+    case 11:  return "slot B card limit reached";
+    case 12:  return "settings filename too long";
+    case 13:  return "slot B encoding mismatch";
+    case 14:  return "card operation canceled";
+    case 128: return "fatal slot B card error";
+    case 256: return "not enough memory";
+#else
+    case 1:  return "storage I/O error";
+    case 2:  return "storage internal error";
+    case 3:  return "storage not ready";
+    case 4:  return "settings file missing";
+    case 5:  return "settings path missing";
+    case 6:  return "invalid settings filename";
+    case 7:  return "storage access denied";
+    case 8:  return "settings file already exists";
+    case 9:  return "invalid settings file";
+    case 10: return "storage is write-protected";
+    case 11: return "invalid storage device";
+    case 12: return "storage not mounted";
+    case 13: return "storage has no FAT filesystem";
+    case 14: return "format aborted";
+    case 15: return "storage timed out";
+    case 16: return "settings file locked";
+    case 17: return "not enough memory";
+    case 18: return "too many open files";
+    case 19: return "invalid storage parameter";
+#endif
+    default:  return nullptr;
+    }
+}
+
 // -------- font metrics ----------------------------------------------------
 // Cached in Menu::Menu so the static textWidth() can reach them. They describe
 // the same font drawText() renders with (gpSystemFont), so measuring matches
@@ -972,8 +1015,14 @@ void Menu::drawToast() {
 void Menu::requestSettingsSave() {
     gSettings.save();
     if (gSettings.saveState() == SETTINGS_SAVE_UNSUPPORTED) {
-        // Emulator build, or booted without the susamune launcher.
-        toast("Settings not saved: no launcher");
+        const char *error = settingsStorageError(gSettings.lastError());
+        if (error) {
+            snprintf(mToastBuf, sizeof(mToastBuf), "Settings unavailable: %s", error);
+        } else {
+            snprintf(mToastBuf, sizeof(mToastBuf), "Settings unavailable (error %lu)",
+                     gSettings.lastError());
+        }
+        mToastFrames = kToastFrames;
         return;
     }
     mSaveWatch = true;
@@ -995,8 +1044,7 @@ void Menu::pollSettingsSave() {
 
     SettingsSaveState st = gSettings.pollSave();
     if (st == SETTINGS_SAVE_PENDING) {
-        // The kernel only services the doorbell between disc reads, so hold
-        // the "saving" message up rather than letting it time out on screen.
+        // Hold the "saving" message up rather than letting it time out.
         mToastFrames = kToastFrames;
         return;
     }
@@ -1007,15 +1055,18 @@ void Menu::pollSettingsSave() {
         toast("Settings saved");
         break;
     case SETTINGS_SAVE_ERROR: {
-        // Keep the FatFS result for diagnosing removal vs write protection.
-        // 7 = write protection, 9 = invalid object, ...
-        snprintf(mToastBuf, sizeof(mToastBuf), "Could not write susamune.ini (fs %lu)",
-                 gSettings.lastError());
+        const char *error = settingsStorageError(gSettings.lastError());
+        if (error) {
+            snprintf(mToastBuf, sizeof(mToastBuf), "Settings save failed: %s", error);
+        } else {
+            snprintf(mToastBuf, sizeof(mToastBuf), "Settings save failed (error %lu)",
+                     gSettings.lastError());
+        }
         mToastFrames = kToastFrames;
         break;
     }
     case SETTINGS_SAVE_TIMEOUT:
-        toast("Save timed out: launcher too old?");
+        toast("Settings save timed out");
         break;
     default:
         break;

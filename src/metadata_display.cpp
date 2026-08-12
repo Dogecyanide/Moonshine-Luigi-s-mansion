@@ -370,8 +370,8 @@ void MetadataDisplay::adopt(const volatile SusamuneMetadataDisplayCfg *src) {
         while (length + 1 < SUSAMUNE_METADATA_FORMAT_SIZE && src->format[length]) {
             length++;
         }
-        // The launcher publishes this fixed block before releasing the PPC and
-        // never rewrites its payload, so the custom template can stay borrowed.
+        // Both backends keep this fixed block at a stable address. stageInto()
+        // also preserves it when the borrowed pointer aliases its destination.
         mFormat       = const_cast<const char *>(&src->format[0]);
         mFormatLength = (u8)length;
     }

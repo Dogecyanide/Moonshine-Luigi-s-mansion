@@ -14,6 +14,9 @@
 #include "susamune/qft_timer.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/susamune_cfg.h"
+#if IS_EMULATOR
+#include "susamune/emulator_persistence.hxx"
+#endif
 #include "susamune/warp_wheel.hxx"
 
 namespace {
@@ -360,7 +363,7 @@ u32 sPbRetryFrames;
 
 bool sHaveSavedAttempt;
 
-void loadPBs() {
+void resetPBBackend() {
     sPbBackend = false;
     sPbDirty = false;
     sPbPending = false;
@@ -368,13 +371,10 @@ void loadPBs() {
     sPbSaveSeq = 0;
     sPbSaveWaitFrames = 0;
     sPbRetryFrames = 0;
+}
 
-#if !IS_EMULATOR
-    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
-    volatile SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
-    DCInvalidateRange((void *)cfg, 32);
-    DCInvalidateRange((void *)pbs, sizeof(SusamuneILingPbCfg));
-
+void adoptPBs(const volatile SusamuneCfg *cfg) {
+    volatile const SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
     if (cfg->magic != SUSAMUNE_CFG_MAGIC ||
         cfg->version != SUSAMUNE_CFG_VERSION ||
         !(cfg->flags & SUSAMUNE_CFG_FLAG_ILING_PBS) ||
@@ -396,6 +396,21 @@ void loadPBs() {
     }
     sPbSaveSeq = pbs->saveSeq;
     sPbBackend = true;
+}
+
+void loadPBs() {
+    resetPBBackend();
+
+#if IS_EMULATOR
+    SusamuneCfg *cfg = EmulatorPersistence::lock();
+    if (!cfg) return;
+    adoptPBs(cfg);
+    EmulatorPersistence::unlock();
+#else
+    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+    DCInvalidateRange((void *)cfg, 32);
+    DCInvalidateRange((void *)&cfg->ilingPbs, sizeof(SusamuneILingPbCfg));
+    adoptPBs(cfg);
 #endif
 }
 
@@ -406,12 +421,20 @@ void markPBsDirty() {
 }
 
 void stagePBSave() {
-#if !IS_EMULATOR
     if (!sPbBackend || !sPbDirty || sPbPending || sPbRetryFrames != 0) {
         return;
     }
 
+#if IS_EMULATOR
+    SusamuneCfg *cfg = EmulatorPersistence::lock();
+    if (!cfg) {
+        sPbBackend = false;
+        return;
+    }
+    volatile SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
+#else
     volatile SusamuneILingPbCfg *pbs = &SUSAMUNE_CFG_PPC_PTR->ilingPbs;
+#endif
     for (int i = 0; i < kPbSlotCount; i++) {
         pbs->values[i] = sPbQf[i];
     }
@@ -421,25 +444,50 @@ void stagePBSave() {
         pbs->count > SUSAMUNE_ILING_PB_MAX_SLOTS) {
         pbs->count = kPbSlotCount;
     }
+#if IS_EMULATOR
+    sPbSaveSeq = EmulatorPersistence::commit();
+#else
     DCStoreRange((void *)pbs->values, sizeof(pbs->values));
 
     sPbSaveSeq++;
     pbs->saveSeq = sPbSaveSeq;
     DCStoreRange((void *)pbs, 32);
+#endif
 
     sPbDirty = false;
     sPbPending = true;
     sPbTimeoutNotified = false;
     sPbSaveWaitFrames = 0;
-#endif
 }
 
 void servicePBSave() {
-#if !IS_EMULATOR
     if (!sPbPending && sPbRetryFrames != 0) {
         sPbRetryFrames--;
     }
     if (sPbPending) {
+#if IS_EMULATOR
+        u32 error = 0;
+        const EmulatorPersistence::SaveResult result =
+            EmulatorPersistence::poll(sPbSaveSeq, &error);
+        if (result != EmulatorPersistence::SAVE_PENDING) {
+            sPbPending = false;
+            sPbTimeoutNotified = false;
+            sPbSaveWaitFrames = 0;
+            if (result == EmulatorPersistence::SAVE_ERROR && gMenu) {
+                char message[40];
+                snprintf(message, sizeof(message), "PB card save failed: %lu", error);
+                gMenu->toast(message);
+            }
+            if (result == EmulatorPersistence::SAVE_ERROR) {
+                sPbDirty = true;
+                sPbRetryFrames = kPbRetryDelayFrames;
+            }
+        } else if (!sPbTimeoutNotified &&
+                   ++sPbSaveWaitFrames > kPbSaveTimeoutFrames) {
+            sPbTimeoutNotified = true;
+            if (gMenu) gMenu->toast("PB card save timed out");
+        }
+#else
         volatile SusamuneILingPbCfg *pbs = &SUSAMUNE_CFG_PPC_PTR->ilingPbs;
         DCInvalidateRange((void *)&pbs->ackSeq, 32);
         if (pbs->ackSeq == sPbSaveSeq) {
@@ -463,9 +511,9 @@ void servicePBSave() {
                 gMenu->toast("PB save timed out");
             }
         }
+#endif
     }
     stagePBSave();
-#endif
 }
 
 bool validEntry(int entry) {
@@ -866,6 +914,12 @@ void init() {
     sRecentNext = 0;
     sHaveSavedAttempt = false;
     loadPBs();
+}
+
+void onPersistenceReady() {
+#if IS_EMULATOR
+    loadPBs();
+#endif
 }
 
 int count() { return kEntryCount; }

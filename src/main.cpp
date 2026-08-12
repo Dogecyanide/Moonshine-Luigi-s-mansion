@@ -72,9 +72,10 @@ extern "C" void onAppInit(TApplication* app) {
     }
 #endif
 
-    // Intro Skip patches the logo director, which is already directing by the
-    // time the first onUpdate reaches featuresApply().
+#if !IS_EMULATOR
+    // The launcher made persisted settings available before initialize().
     featuresApplyEarly();
+#endif
 }
 
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
@@ -142,6 +143,17 @@ extern "C" void onSetup(TMarDirector* director) {
 
 
 extern "C" s32 onUpdate(JDrama::TDirector* director) {
+#if IS_EMULATOR
+    static bool persistenceReady = false;
+    if (!persistenceReady && gSettings.finishInit()) {
+        persistenceReady = true;
+        ILing::onPersistenceReady();
+        // This is before direct() for the first Nintendo-logo frame. Applying
+        // the boot patches after direct() is too late for that director.
+        featuresApplyEarly();
+    }
+#endif
+
     // Sample the pad before direct(), not after: onUpdateGameMode runs inside
     // it and asks whether the menu bind was pressed this frame, which would
     // otherwise be answered from the previous frame's sample.

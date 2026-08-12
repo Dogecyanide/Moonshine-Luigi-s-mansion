@@ -113,26 +113,11 @@ void Settings::resetDefaults() {
 // Persistence
 //
 // On console the Nintendont ARM kernel has already parsed susamune.ini into
-// the MEM2 handoff block by the time the game boots (see SusamuneCfg.c), so
-// loading is just "validate and copy". On emulator there is no launcher and
-// hence no backend, so we keep the compiled-in defaults.
+// the MEM2 handoff block by the time the game boots (see SusamuneCfg.c).
+// Dolphin's implementation lives in settings_emulator.cpp and uses slot B.
 // ---------------------------------------------------------------------
 
-#if IS_EMULATOR
-
-void Settings::init() { resetDefaults(); }
-
-void Settings::save() {
-    mSaveState = SETTINGS_SAVE_UNSUPPORTED;
-    mDirty     = false;
-    gBinds.clearDirty();
-    gInputDisplay.clearDirty();
-    gMetadataDisplay.clearDirty();
-}
-
-SettingsSaveState Settings::pollSave() { return (SettingsSaveState)mSaveState; }
-
-#else
+#if !IS_EMULATOR
 
 void Settings::init() {
     resetDefaults();
@@ -150,9 +135,74 @@ void Settings::init() {
         return;
     }
 
-    // Copy only what the writer actually filled in. A kernel older than the
-    // mod carries fewer settings than SETTING_COUNT; the remainder keep their
-    // compiled-in defaults, which is what makes adding a setting safe.
+    adopt(cfg);
+    mSaveSeq = cfg->saveSeq;
+
+    // First boot of this game version on this SD card: the kernel found no
+    // sections for it and cannot author defaults, because those live here
+    // rather than in the launcher.
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_NO_CONFIG) {
+        save();
+    }
+}
+
+bool Settings::finishInit() { return true; }
+
+void Settings::save() {
+    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+
+    if (mSaveState == SETTINGS_SAVE_UNSUPPORTED) {
+        mDirty = false;
+        gBinds.clearDirty();
+        gInputDisplay.clearDirty();
+        gMetadataDisplay.clearDirty();
+        return;
+    }
+
+    stageInto(cfg);
+
+    // Publish the payload before the doorbell, so the kernel can never see a
+    // bumped saveSeq alongside a half-written values[]/binds[]. Both live in
+    // the same mod-owned run of cache lines starting at values[].
+    DCStoreRange((void *)cfg->values,
+                 sizeof(cfg->values) + sizeof(cfg->binds) + sizeof(cfg->inputDisplay) +
+                 sizeof(cfg->metadataDisplay));
+
+    mSaveSeq     = cfg->saveSeq + 1;
+    cfg->saveSeq = mSaveSeq;
+    DCStoreRange((void *)cfg, 32);  // line 0: magic/version/count/saveSeq
+
+    mDirty          = false;
+    mLastError      = 0;
+    mSaveWaitFrames = 0;
+    mSaveState      = SETTINGS_SAVE_PENDING;
+}
+
+SettingsSaveState Settings::pollSave() {
+    if (mSaveState != SETTINGS_SAVE_PENDING) {
+        return (SettingsSaveState)mSaveState;
+    }
+
+    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+    // Line 1 is written exclusively by the kernel, so invalidating it can
+    // never discard a pending write of ours (see the ownership note in
+    // susamune_cfg.h).
+    DCInvalidateRange((void *)&cfg->ackSeq, 32);
+
+    if (cfg->ackSeq == mSaveSeq) {
+        mLastError = cfg->status;
+        mSaveState = mLastError ? SETTINGS_SAVE_ERROR : SETTINGS_SAVE_OK;
+    } else if (++mSaveWaitFrames > kSaveTimeoutFrames) {
+        mSaveState = SETTINGS_SAVE_TIMEOUT;
+    }
+    return (SettingsSaveState)mSaveState;
+}
+
+#endif  // !IS_EMULATOR
+
+void Settings::adopt(const volatile SusamuneCfg *cfg) {
+    // Copy only what the writer actually filled in. An older backend carries
+    // fewer settings; the remainder keep their compiled-in defaults.
     u16 n = cfg->count;
     if (n > SETTING_COUNT) {
         n = SETTING_COUNT;
@@ -192,29 +242,10 @@ void Settings::init() {
 
     // set() marks dirty; adopting persisted values is not a user edit.
     mDirty     = false;
-    mSaveSeq   = cfg->saveSeq;
     mSaveState = SETTINGS_SAVE_IDLE;
-
-    // First boot of this game version on this SD card: the kernel found no
-    // sections for it and cannot author defaults, because those live here
-    // rather than in the launcher. Write them out now so the user has
-    // something to look at (and to hand-edit) without having to visit the menu
-    // first. Fire-and-forget -- the menu that would report the result does not
-    // exist this early.
-    if (cfg->flags & SUSAMUNE_CFG_FLAG_NO_CONFIG) {
-        save();
-    }
 }
 
-void Settings::save() {
-    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
-
-    if (mSaveState == SETTINGS_SAVE_UNSUPPORTED) {
-        mDirty = false;
-        gBinds.clearDirty();
-        return;
-    }
-
+void Settings::stageInto(volatile SusamuneCfg *cfg) {
     for (int i = 0; i < SETTING_COUNT; i++) {
         cfg->values[i] = mValues[i];
     }
@@ -232,45 +263,7 @@ void Settings::save() {
     gInputDisplay.clearDirty();
     gMetadataDisplay.stageInto(&cfg->metadataDisplay);
     gMetadataDisplay.clearDirty();
-
-    // Publish the payload before the doorbell, so the kernel can never see a
-    // bumped saveSeq alongside a half-written values[]/binds[]. Both live in
-    // the same mod-owned run of cache lines starting at values[].
-    DCStoreRange((void *)cfg->values,
-                 sizeof(cfg->values) + sizeof(cfg->binds) + sizeof(cfg->inputDisplay) +
-                 sizeof(cfg->metadataDisplay));
-
-    mSaveSeq     = cfg->saveSeq + 1;
-    cfg->saveSeq = mSaveSeq;
-    DCStoreRange((void *)cfg, 32);  // line 0: magic/version/count/saveSeq
-
-    mDirty          = false;
-    mLastError      = 0;
-    mSaveWaitFrames = 0;
-    mSaveState      = SETTINGS_SAVE_PENDING;
 }
-
-SettingsSaveState Settings::pollSave() {
-    if (mSaveState != SETTINGS_SAVE_PENDING) {
-        return (SettingsSaveState)mSaveState;
-    }
-
-    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
-    // Line 1 is written exclusively by the kernel, so invalidating it can
-    // never discard a pending write of ours (see the ownership note in
-    // susamune_cfg.h).
-    DCInvalidateRange((void *)&cfg->ackSeq, 32);
-
-    if (cfg->ackSeq == mSaveSeq) {
-        mLastError = cfg->status;
-        mSaveState = mLastError ? SETTINGS_SAVE_ERROR : SETTINGS_SAVE_OK;
-    } else if (++mSaveWaitFrames > kSaveTimeoutFrames) {
-        mSaveState = SETTINGS_SAVE_TIMEOUT;
-    }
-    return (SettingsSaveState)mSaveState;
-}
-
-#endif  // IS_EMULATOR
 
 void Settings::set(SettingId id, u8 value) {
     value = value % choiceCount(kSettingDescs[id]);
