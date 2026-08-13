@@ -71,6 +71,8 @@ string(TOUPPER "${VERS_PRIMARY}" VERS_PRIMARY_UPPER)
 
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "Where to load the iso from by default in meta.xml")
 set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
+set(LAUNCHER_VERSION "v1.1.0" CACHE STRING
+    "Version shown in the packaged launcher meta.xml")
 
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
 option(ENABLE_SAVESTATE_DBG "Enable savestate debug output" OFF)
@@ -352,6 +354,9 @@ ExternalProject_Add(nintendont_launcher
         "-DSUSAMUNE_MOD_BINS=${_mod_bins_arg}"
         "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
+        "-DLAUNCHER_VERSION=${LAUNCHER_VERSION}"
+        "-DLAUNCHER_TEST_LOG=${CMAKE_SOURCE_DIR}/doc/v1.1.0-test-log.md"
+        "-DLAUNCHER_CHANGELOG=${CMAKE_SOURCE_DIR}/doc/v1.1.0-changelog.md"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
     DEPENDS mod_bins launcher_build_id
     BUILD_ALWAYS ON

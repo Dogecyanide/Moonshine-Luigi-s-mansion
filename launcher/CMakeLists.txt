@@ -29,6 +29,9 @@ endif()
 get_filename_component(_repo_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(LAUNCHER_SCRIPTS_DIR "${_repo_root}/scripts" CACHE PATH "repo scripts/ dir")
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "meta.xml default load source (di/sd/usb)")
+set(LAUNCHER_VERSION "" CACHE STRING "meta.xml version override")
+set(LAUNCHER_TEST_LOG "" CACHE FILEPATH "tester log included in the HBC app")
+set(LAUNCHER_CHANGELOG "" CACHE FILEPATH "changelog included in the HBC app")
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
 
 # mod_<region>.bin files to ship inside the HBC app dir. Empty for a standalone
@@ -106,11 +109,26 @@ if(LAUNCHER_OUTPUT_ZIP)
     if(SUSAMUNE_MOD_BINS)
         set(_mod_bin_args --mod-bins ${SUSAMUNE_MOD_BINS})
     endif()
+    set(_version_args "")
+    if(LAUNCHER_VERSION)
+        set(_version_args --version "${LAUNCHER_VERSION}")
+    endif()
+    set(_test_log_args "")
+    if(LAUNCHER_TEST_LOG)
+        set(_test_log_args --test-log "${LAUNCHER_TEST_LOG}")
+    endif()
+    set(_changelog_args "")
+    if(LAUNCHER_CHANGELOG)
+        set(_changelog_args --changelog "${LAUNCHER_CHANGELOG}")
+    endif()
     add_custom_target(package ALL
         COMMAND "${LAUNCHER_PYTHON}" "${LAUNCHER_SCRIPTS_DIR}/package_launcher.py"
             --boot-dol "${_boot_dol}"
             --out-zip  "${LAUNCHER_OUTPUT_ZIP}"
             --source   "${LAUNCHER_DEFAULT_SOURCE}"
+            ${_version_args}
+            ${_test_log_args}
+            ${_changelog_args}
             ${_mod_bin_args}
         COMMENT "Packaging launcher HBC app zip"
         VERBATIM)

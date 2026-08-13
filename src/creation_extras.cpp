@@ -1,5 +1,6 @@
 #include "susamune/creation_extras.hxx"
 
+#include "Dolphin/mem.h"
 #include "Dolphin/printf.h"
 #include "Dolphin/string.h"
 #include "JSystem/J2D/J2DPicture.hxx"
@@ -8,6 +9,11 @@
 #include "susamune/glyphs.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/packed_text.hxx"
+#include "susamune/settings.hxx"
+
+const char gCreationLettersLower[33] = "abcdefghijklmnopqrstuvwxyz.,!?-_";
+const char gCreationLettersUpper[33] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ.,!?-_";
+const char gCreationSymbols[33] = "0123456789+-*/=()[]<>!?:;'\"_#%&@";
 
 namespace {
 
@@ -78,9 +84,8 @@ static_assert(packedEntries(kTimerNames, sizeof(kTimerNames)) ==
                   SUSAMUNE_CREATION_TIMER_CHAR_COUNT,
               "Sunshine timer colour table changed");
 
-const char kLettersLower[] = "abcdefghijklmnopqrstuvwxyz.,!?-_";
-const char kLettersUpper[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ.,!?-_";
-const char kSymbols[] = "0123456789+-*/=()[]<>!?:;'\"_#%&@";
+const char kWallkickNames[] =
+    "1st\0" "2nd\0" "3rd\0" "4th\0" "5th\0" "6th\0" "Late";
 
 inline int clampi(int value, int lo, int hi) {
     if (value < lo) return lo;
@@ -96,14 +101,124 @@ bool sameRgb(const u8 a[3], const u8 b[3]) {
     return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
 }
 
+void clampStyle(CreationStyle &style) {
+    style.x = (u16)clampi(style.x, 0, 640);
+    style.y = (u16)clampi(style.y, 0, 456);
+    style.scale = (u8)clampi(style.scale, 50, 200);
+    style.textBrightness = (u8)clampi(style.textBrightness, 25, 200);
+    if (style.padding != 0xff)
+        style.padding = (u8)clampi(style.padding, 0, 16);
+}
+
+void loadStyle(CreationStyle &style, const volatile void *source) {
+    memcpy(&style, const_cast<const void *>(source), sizeof(style));
+    clampStyle(style);
+}
+
+void storeStyle(volatile void *destination, const CreationStyle &style) {
+    memcpy(const_cast<void *>(destination), &style, sizeof(style));
+}
+
 }  // namespace
 
 CreationExtras gCreationExtras;
+
+const char *wallkickDisplayLabel(int index) {
+    return PackedText::at(kWallkickNames, index);
+}
+
+void drawCreationKeyboard(Menu *menu, const char *title, const char *text,
+                          u8 pageIndex, bool uppercase, u8 cursor) {
+    menu->fillBox(70, 188, 500, 262, Color(8, 11, 20, 238));
+    menu->drawText(title, 86, 202, 17, 17, Color(255, 255, 255, 255));
+    if (text) {
+        menu->fillBox(86, 220, 468, 24, Color(24, 34, 54, 255));
+        menu->drawText(text, 98, 223, 14, 14, Color(120, 220, 150, 255));
+    }
+    const char *page = pageIndex ? gCreationSymbols
+                       : uppercase ? gCreationLettersUpper
+                                   : gCreationLettersLower;
+    const int count = pageIndex ? (int)sizeof(gCreationSymbols) - 1 : 32;
+    for (int i = 0; i < count; i++) {
+        const int x = 112 + (i % 8) * 46;
+        const int y = 250 + (i / 8) * 37;
+        if (i == cursor)
+            menu->fillBox(x - 9, y - 5, 32, 29, Color(90, 170, 255, 100));
+        char one[2] = {page[i], '\0'};
+        menu->drawText(one, x, y, 18, 18,
+                       i == cursor ? Color(255, 255, 255, 255)
+                                   : Color(200, 206, 220, 255));
+    }
+    menu->drawText("D-pad Select   A Type   B Delete   X Space   Y Case   L/R Page",
+                   86, 401, 10, 10, Color(104, 114, 136, 255));
+    menu->drawText("START: Keep   X+START: Cancel   Z: Clear",
+                   86, 421, 10, 10, Color(104, 114, 136, 255));
+}
+
+bool updateCreationKeyboardText(TMarioGamePad *pad, char *text, u8 &length,
+                                u8 capacity, u8 &pageIndex, bool &uppercase,
+                                u8 &cursor) {
+    const u32 pressed = pad->mButtons.mRapidInput;
+    bool changed = false;
+    const int count = pageIndex ? (int)sizeof(gCreationSymbols) - 1 : 32;
+    if (pressed & TMarioGamePad::DPAD_LEFT)
+        cursor = (u8)((cursor + count - 1) % count);
+    else if (pressed & TMarioGamePad::DPAD_RIGHT)
+        cursor = (u8)((cursor + 1) % count);
+    else if (pressed & TMarioGamePad::DPAD_UP)
+        cursor = (u8)((cursor + count - 8) % count);
+    else if (pressed & TMarioGamePad::DPAD_DOWN)
+        cursor = (u8)((cursor + 8) % count);
+    if (pressed & (TMarioGamePad::L | TMarioGamePad::R)) {
+        pageIndex ^= 1;
+        cursor = 0;
+    }
+    if (pressed & TMarioGamePad::Y) uppercase = !uppercase;
+    if ((pressed & TMarioGamePad::B) && length) {
+        text[--length] = '\0';
+        changed = true;
+    }
+    if ((pressed & TMarioGamePad::X) && length < capacity) {
+        text[length++] = ' ';
+        text[length] = '\0';
+        changed = true;
+    }
+    if ((pressed & TMarioGamePad::A) && length < capacity) {
+        const char *characters = pageIndex ? gCreationSymbols
+                                 : uppercase ? gCreationLettersUpper
+                                             : gCreationLettersLower;
+        text[length++] = characters[cursor];
+        text[length] = '\0';
+        changed = true;
+    }
+    return changed;
+}
 
 CreationStyle CreationExtras::defaultWordStyle(int index) {
     return CreationStyle{
         220, (u16)(80 + index * 42), 100, 255,
         0, 0, 0, 128, 100, 2,
+    };
+}
+
+static CreationStyle defaultRecentIlStyle() {
+    return CreationStyle{
+        382, 92, 100, 255,
+        12, 20, 34, 205, 100, 10,
+    };
+}
+
+static CreationStyle defaultSavestateFeedbackStyle() {
+    return CreationStyle{
+        30, 418, 80, 255,
+        0, 0, 0, 200, 100, 8,
+    };
+}
+
+CreationStyle CreationExtras::defaultWallkickStyle() {
+    return CreationStyle{
+        300, 106, 90, 255,
+        0, 0, 0, 185, 100, 5,
     };
 }
 
@@ -121,6 +236,12 @@ void CreationExtras::resetDefaults() {
         mWordLength[word] = (u8)strlen(mWords[word]);
         mWordVisible[word] = 0;
     }
+    mRecentIlStyle = defaultRecentIlStyle();
+    Creation::fillWhite(mRecentIlRgb, 1);
+    mSavestateFeedbackStyle = defaultSavestateFeedbackStyle();
+    Creation::fillWhite(mSavestateFeedbackRgb, 1);
+    mWallkickStyle = defaultWallkickStyle();
+    Creation::fillWhite(mWallkickRgb, SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT);
     for (u32 i = 0; i < sizeof(mHudPictures) / sizeof(mHudPictures[0]); i++)
         mHudPictures[i] = nullptr;
     mHudScreen = nullptr;
@@ -144,11 +265,7 @@ void CreationExtras::resetDefaults() {
 
 void CreationExtras::clampWord(int index) {
     CreationStyle &s = mWordStyle[index];
-    s.x = (u16)clampi(s.x, 0, 640);
-    s.y = (u16)clampi(s.y, 0, 456);
-    s.scale = (u8)clampi(s.scale, 50, 200);
-    s.textBrightness = (u8)clampi(s.textBrightness, 25, 200);
-    if (s.padding != 0xff) s.padding = (u8)clampi(s.padding, 0, 16);
+    clampStyle(s);
     mWordLength[index] = (u8)clampi(mWordLength[index], 0,
                                     SUSAMUNE_CREATION_WORD_CHARS);
     mWords[index][mWordLength[index]] = '\0';
@@ -169,55 +286,97 @@ void CreationExtras::adopt(const volatile SusamuneCreationCfg *src) {
         ~SUSAMUNE_CREATION_COLOR(SUSAMUNE_CREATION_LEGACY_MARIO_HAT);
     if (src->timerLabelVisiblePresent)
         mTimerLabelVisible = src->timerLabelVisible ? 1 : 0;
+    if (src->recentIlPositionPresent) {
+        mRecentIlStyle.x = src->recentIlX;
+        mRecentIlStyle.y = src->recentIlY;
+        mRecentIlStyle.scale = src->recentIlScale;
+        clampStyle(mRecentIlStyle);
+    }
+    if (src->reserved0 == SUSAMUNE_CREATION_RECENT_STYLE_MAGIC) {
+        for (int c = 0; c < 3; c++)
+            mRecentIlRgb[0][c] = src->recentIlTextRgb[c];
+        mRecentIlStyle.textA = src->recentIlTextA;
+        mRecentIlStyle.bgR = src->recentIlBgR;
+        mRecentIlStyle.bgG = src->recentIlBgG;
+        mRecentIlStyle.bgB = src->recentIlBgB;
+        mRecentIlStyle.bgA = src->recentIlBgA;
+        mRecentIlStyle.textBrightness = src->recentIlTextBrightness;
+        mRecentIlStyle.padding = src->recentIlPadding;
+        clampStyle(mRecentIlStyle);
+    }
+    if (src->savestateStyleMagic ==
+        SUSAMUNE_CREATION_SAVESTATE_STYLE_MAGIC) {
+        loadStyle(mSavestateFeedbackStyle, &src->savestateX);
+        memcpy(mSavestateFeedbackRgb, (const void *)src->savestateTextRgb,
+               sizeof(mSavestateFeedbackRgb));
+    }
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         const volatile SusamuneCreationWordCfg &in = src->words[word];
-        CreationStyle &s = mWordStyle[word];
-        s.x = in.x; s.y = in.y; s.scale = in.scale; s.textA = in.textA;
-        s.bgR = in.bgR; s.bgG = in.bgG; s.bgB = in.bgB; s.bgA = in.bgA;
-        s.textBrightness = in.textBrightness; s.padding = in.padding;
+        loadStyle(mWordStyle[word], &in.x);
         mWordVisible[word] = in.visible;
         mWordLength[word] = in.length;
-        for (int i = 0; i < SUSAMUNE_CREATION_WORD_TEXT_SIZE; i++)
-            mWords[word][i] = in.text[i];
-        for (int i = 0; i < SUSAMUNE_CREATION_WORD_CHARS; i++)
-            for (int c = 0; c < 3; c++) mWordRgb[word][i][c] = in.rgb[i][c];
+        memcpy(mWords[word], (const void *)in.text, sizeof(mWords[word]));
+        memcpy(mWordRgb[word], (const void *)in.rgb, sizeof(mWordRgb[word]));
         clampWord(word);
     }
     mDirty = false;
 }
 
 void CreationExtras::stageInto(volatile SusamuneCreationCfg *dst) const {
+    memset((void *)dst, 0, sizeof(*dst));
     dst->magic = SUSAMUNE_CREATION_CFG_MAGIC;
     dst->version = SUSAMUNE_CREATION_CFG_VERSION;
-    dst->reserved0 = 0;
+    dst->reserved0 = SUSAMUNE_CREATION_RECENT_STYLE_MAGIC;
     dst->colorPresent = mColorPresent;
-    dst->timerScale = 100;
-    dst->timerX = 0xffff;
-    dst->timerY = 0xffff;
-    dst->timerPositionPresent = 0;
+    dst->recentIlScale = mRecentIlStyle.scale;
+    dst->recentIlX = mRecentIlStyle.x;
+    dst->recentIlY = mRecentIlStyle.y;
+    dst->recentIlPositionPresent = 1;
     dst->timerLabelVisible = mTimerLabelVisible;
     dst->timerLabelVisiblePresent = 1;
-    for (int i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
-        for (int c = 0; c < 3; c++) dst->rgb[i][c] = mColors[i][c];
-    dst->reserved1 = 0;
+    memcpy((void *)dst->rgb, mColors, sizeof(mColors));
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         volatile SusamuneCreationWordCfg &out = dst->words[word];
-        const CreationStyle &s = mWordStyle[word];
-        out.x = s.x; out.y = s.y; out.scale = s.scale; out.textA = s.textA;
-        out.bgR = s.bgR; out.bgG = s.bgG; out.bgB = s.bgB; out.bgA = s.bgA;
-        out.textBrightness = s.textBrightness; out.padding = s.padding;
+        storeStyle(&out.x, mWordStyle[word]);
         out.visible = mWordVisible[word]; out.length = mWordLength[word];
-        for (int i = 0; i < SUSAMUNE_CREATION_WORD_TEXT_SIZE; i++)
-            out.text[i] = mWords[word][i];
-        for (int i = 0; i < SUSAMUNE_CREATION_WORD_CHARS; i++)
-            for (int c = 0; c < 3; c++) out.rgb[i][c] = mWordRgb[word][i][c];
-        out.reserved = 0;
+        memcpy((void *)out.text, mWords[word], sizeof(mWords[word]));
+        memcpy((void *)out.rgb, mWordRgb[word], sizeof(mWordRgb[word]));
     }
+    for (int c = 0; c < 3; c++)
+        dst->recentIlTextRgb[c] = mRecentIlRgb[0][c];
+    dst->recentIlTextA = mRecentIlStyle.textA;
+    dst->recentIlBgR = mRecentIlStyle.bgR;
+    dst->recentIlBgG = mRecentIlStyle.bgG;
+    dst->recentIlBgB = mRecentIlStyle.bgB;
+    dst->recentIlBgA = mRecentIlStyle.bgA;
+    dst->recentIlTextBrightness = mRecentIlStyle.textBrightness;
+    dst->recentIlPadding = mRecentIlStyle.padding;
+    dst->savestateStyleMagic = SUSAMUNE_CREATION_SAVESTATE_STYLE_MAGIC;
+    storeStyle(&dst->savestateX, mSavestateFeedbackStyle);
+    memcpy((void *)dst->savestateTextRgb, mSavestateFeedbackRgb,
+           sizeof(mSavestateFeedbackRgb));
+}
+
+void CreationExtras::adoptWallkick(
+    const volatile SusamuneWallkickStyleCfg *src) {
+    if (!src || src->magic != SUSAMUNE_WALLKICK_STYLE_MAGIC ||
+        src->version != SUSAMUNE_WALLKICK_STYLE_VERSION) return;
+    loadStyle(mWallkickStyle, &src->x);
+    memcpy(mWallkickRgb, (const void *)src->rgb, sizeof(mWallkickRgb));
+}
+
+void CreationExtras::stageWallkickInto(
+    volatile SusamuneWallkickStyleCfg *dst) const {
+    dst->magic = SUSAMUNE_WALLKICK_STYLE_MAGIC;
+    dst->version = SUSAMUNE_WALLKICK_STYLE_VERSION;
+    dst->reserved0 = 0;
+    storeStyle(&dst->x, mWallkickStyle);
+    memcpy((void *)dst->rgb, mWallkickRgb, sizeof(mWallkickRgb));
+    memset((void *)dst->reserved1, 0, sizeof(dst->reserved1));
 }
 
 void CreationExtras::onStageSetup() {
-    for (u32 i = 0; i < sizeof(mHudPictures) / sizeof(mHudPictures[0]); i++)
-        mHudPictures[i] = nullptr;
+    memset(mHudPictures, 0, sizeof(mHudPictures));
     mHudScreen = nullptr;
     if (!gpMarDirector || !gpMarDirector->mGCConsole ||
         !gpMarDirector->mGCConsole->mMainScreen) return;
@@ -385,7 +544,8 @@ void CreationExtras::beginColorEditor(int first, int count, const char *title,
     mEditCount = (u8)count;
     mEditTitle = title;
     mEditor.begin(&mColorStyle, mColors + first, mColorBackup + first,
-                  (u16)count, (u16)count, names ? names : title, 0);
+                  (u16)count, (u16)count, names ? names : title,
+                  CreationEditor::CAP_TEXT_COLOR);
     beginHudPreview(first);
 }
 
@@ -395,6 +555,68 @@ void CreationExtras::beginTimerCharacterEditor() {
                      SUSAMUNE_CREATION_TIMER_CHAR_COUNT,
                      "Sunshine timer characters", kTimerNames);
     mEditMode = EDIT_TIMER;
+}
+
+void CreationExtras::restoreHudDefaults() {
+    if (!gpMarDirector || gpMarDirector->_260 == 0 ||
+        !gpMarDirector->mGCConsole ||
+        gpMarDirector->mGCConsole->mMainScreen != mHudScreen) return;
+    memcpy(mColors, mDefaultColors, sizeof(mColors));
+    mColorPresent = (1u << SUSAMUNE_CREATION_COLOR_COUNT) - 1u;
+    mTimerLabelVisible = 1;
+    applyHud();
+    if (mHudPictures[HUD_PANE_COUNT - 1])
+        mHudPictures[HUD_PANE_COUNT - 1]->mIsVisible = true;
+}
+
+void CreationExtras::beginRecentIlEditor() {
+    if (editing()) return;
+    mDirtyBeforeEdit = mDirty;
+    mEditMode = EDIT_RECENT_ILS;
+    mEditFirst = 0;
+    mEditCount = 1;
+    mEditTitle = "Recent IL display";
+    mEditor.begin(&mRecentIlStyle, mRecentIlRgb, mRecentIlBackup, 1, 0,
+                  nullptr, CreationEditor::CAP_ALL);
+}
+
+void CreationExtras::beginSavestateFeedbackEditor() {
+    if (editing()) return;
+    mDirtyBeforeEdit = mDirty;
+    mEditMode = EDIT_SAVESTATE_FEEDBACK;
+    mEditFirst = 0;
+    mEditCount = 1;
+    mEditTitle = Settings::name(SETTING_SAVESTATE_FEEDBACK);
+    mEditor.begin(&mSavestateFeedbackStyle, mSavestateFeedbackRgb,
+                  mSavestateFeedbackBackup, 1, 0, nullptr,
+                  CreationEditor::CAP_ALL);
+}
+
+void CreationExtras::beginWallkickEditor() {
+    if (editing()) return;
+    mDirtyBeforeEdit = mDirty;
+    mEditMode = EDIT_WALLKICK;
+    mEditFirst = 0;
+    mEditCount = SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT;
+    mEditTitle = Settings::name(SETTING_WALLKICK_DISPLAY);
+    mEditor.begin(&mWallkickStyle, mWallkickRgb, mWallkickBackup,
+                  SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT,
+                  SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT, kWallkickNames,
+                  CreationEditor::CAP_ALL);
+}
+
+void CreationExtras::drawSavestateFeedback(Menu *menu,
+                                           const char *message) const {
+    Creation::drawTextBox(menu, mSavestateFeedbackStyle,
+                          mSavestateFeedbackRgb, 1, message);
+}
+
+void CreationExtras::drawWallkickDisplay(Menu *menu, const char *message,
+                                         int color) const {
+    if (!menu || !message) return;
+    color = clampi(color, 0, SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT - 1);
+    Creation::drawTextBox(menu, mWallkickStyle, mWallkickRgb + color, 1,
+                          message);
 }
 
 void CreationExtras::toggleTimerLabel() {
@@ -454,19 +676,26 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
         return;
     }
     if (!mEditor.editing()) return;
+    static const u8 kOverlayDefaults[1][3] = {{255, 255, 255}};
+    const bool overlayStyle = mEditMode == EDIT_RECENT_ILS ||
+                              mEditMode == EDIT_SAVESTATE_FEEDBACK ||
+                              mEditMode == EDIT_WALLKICK;
     const u8 (*defaults)[3] = mEditMode == EDIT_WORD_STYLE
                                   ? mDefaultColors
-                                  : mDefaultColors + mEditFirst;
+        : overlayStyle ? kOverlayDefaults : mDefaultColors + mEditFirst;
     const CreationStyle defaultStyle =
         mEditMode == EDIT_WORD_STYLE ? defaultWordStyle(mEditWord)
-                                     : mColorStyle;
+        : mEditMode == EDIT_RECENT_ILS ? defaultRecentIlStyle()
+        : mEditMode == EDIT_SAVESTATE_FEEDBACK
+              ? defaultSavestateFeedbackStyle()
+        : mEditMode == EDIT_WALLKICK ? defaultWallkickStyle() : mColorStyle;
     const u8 result = mEditor.update(
         pad, defaultStyle, defaults,
-        mEditMode != EDIT_WORD_STYLE ? mEditCount : 1);
+        mEditMode != EDIT_WORD_STYLE && !overlayStyle ? mEditCount : 1);
     if (result & CreationEditor::UPDATE_CHANGED) {
         if (mEditMode == EDIT_WORD_STYLE) {
             clampWord(mEditWord);
-        } else {
+        } else if (!overlayStyle) {
             for (int i = 0; i < mEditCount; i++) {
                 const int slot = mEditFirst + i;
                 mColorPresent |= SUSAMUNE_CREATION_COLOR(slot);
@@ -477,7 +706,7 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
     }
     if (result & CreationEditor::UPDATE_CANCELLED) {
         mDirty = mDirtyBeforeEdit;
-        if (mEditMode != EDIT_WORD_STYLE) {
+        if (mEditMode != EDIT_WORD_STYLE && !overlayStyle) {
             mColorPresent = mColorPresentBeforeEdit;
             const u32 savedPresent = mColorPresent;
             for (int i = 0; i < mEditCount; i++)
@@ -524,71 +753,22 @@ void CreationExtras::updateKeyboard(TMarioGamePad *pad) {
         mKeyboardConfirm = 3;
         return;
     }
-    const int columns = 8;
-    const int count = mKeyboardPage ? (int)sizeof(kSymbols) - 1 : 32;
-    if (pressed & TMarioGamePad::DPAD_LEFT)
-        mKeyboardCursor = (u8)((mKeyboardCursor + count - 1) % count);
-    else if (pressed & TMarioGamePad::DPAD_RIGHT)
-        mKeyboardCursor = (u8)((mKeyboardCursor + 1) % count);
-    else if (pressed & TMarioGamePad::DPAD_UP)
-        mKeyboardCursor = (u8)((mKeyboardCursor + count - columns) % count);
-    else if (pressed & TMarioGamePad::DPAD_DOWN)
-        mKeyboardCursor = (u8)((mKeyboardCursor + columns) % count);
-    if (pressed & (TMarioGamePad::L | TMarioGamePad::R)) {
-        mKeyboardPage ^= 1;
-        mKeyboardCursor = 0;
-    }
-    if (pressed & TMarioGamePad::Y) mUppercase = !mUppercase;
-    if ((pressed & TMarioGamePad::B) && mWordLength[mEditWord]) {
-        mWords[mEditWord][--mWordLength[mEditWord]] = '\0';
+    if (updateCreationKeyboardText(
+            pad, mWords[mEditWord], mWordLength[mEditWord],
+            SUSAMUNE_CREATION_WORD_CHARS, mKeyboardPage, mUppercase,
+            mKeyboardCursor))
         mDirty = true;
-    }
-    if ((pressed & TMarioGamePad::X) &&
-        mWordLength[mEditWord] < SUSAMUNE_CREATION_WORD_CHARS) {
-        mWords[mEditWord][mWordLength[mEditWord]++] = ' ';
-        mWords[mEditWord][mWordLength[mEditWord]] = '\0';
-        mDirty = true;
-    }
-    if ((pressed & TMarioGamePad::A) &&
-        mWordLength[mEditWord] < SUSAMUNE_CREATION_WORD_CHARS) {
-        const char *page = mKeyboardPage ? kSymbols
-                            : (mUppercase ? kLettersUpper : kLettersLower);
-        mWords[mEditWord][mWordLength[mEditWord]++] = page[mKeyboardCursor];
-        mWords[mEditWord][mWordLength[mEditWord]] = '\0';
-        mDirty = true;
-    }
 }
 
 void CreationExtras::drawKeyboard(Menu *menu) const {
     const int word = mEditWord;
     Creation::drawTextBox(menu, mWordStyle[word], mWordRgb[word],
                           SUSAMUNE_CREATION_WORD_CHARS, mWords[word]);
-    menu->fillBox(70, 188, 500, 262, Color(8, 11, 20, 238));
     char status[64];
     snprintf(status, sizeof(status), "Custom text %d   %u/%u", word + 1,
              mWordLength[word], SUSAMUNE_CREATION_WORD_CHARS);
-    menu->drawText(status, 86, 202, 17, 17, Color(255, 255, 255, 255));
-    const char *page = mKeyboardPage ? kSymbols
-                        : (mUppercase ? kLettersUpper : kLettersLower);
-    const int count = mKeyboardPage ? (int)sizeof(kSymbols) - 1 : 32;
-    const int columns = 8;
-    const int cellW = 46;
-    const int startX = 112;
-    const int startY = 246;
-    for (int i = 0; i < count; i++) {
-        const int x = startX + (i % columns) * cellW;
-        const int y = startY + (i / columns) * 37;
-        if (i == mKeyboardCursor)
-            menu->fillBox(x - 9, y - 5, 32, 29, Color(90, 170, 255, 100));
-        char one[2] = {page[i], '\0'};
-        menu->drawText(one, x, y, 18, 18,
-                       i == mKeyboardCursor ? Color(255, 255, 255, 255)
-                                            : Color(190, 200, 220, 255));
-    }
-    menu->drawText("D-pad Select   A Type   B Delete   X Space   Y Case   L/R Page",
-                   86, 401, 10, 10, Color(150, 170, 205, 255));
-    menu->drawText("START: Keep   X+START: Cancel   Z: Clear",
-                   86, 421, 10, 10, Color(150, 170, 205, 255));
+    drawCreationKeyboard(menu, status, nullptr, mKeyboardPage, mUppercase,
+                         mKeyboardCursor);
     if (mKeyboardConfirm) {
         menu->fillBox(128, 272, 384, 78, Color(8, 11, 20, 250));
         const char *prompt = mKeyboardConfirm == 1 ? "Keep this text?"
@@ -620,6 +800,23 @@ void CreationExtras::drawEditor(Menu *menu) const {
     }
     if (mEditMode == EDIT_TIMER) {
         mEditor.draw(menu, mEditTitle, "12:34:567");
+        return;
+    }
+    if (mEditMode == EDIT_RECENT_ILS) {
+        mEditor.draw(menu, mEditTitle, "Recent ILs");
+        return;
+    }
+    if (mEditMode == EDIT_SAVESTATE_FEEDBACK) {
+        drawSavestateFeedback(menu, "Stage layout changed - save again");
+        mEditor.draw(menu, mEditTitle, "Stage layout changed - save again");
+        return;
+    }
+    if (mEditMode == EDIT_WALLKICK) {
+        const u16 target = mEditor.target();
+        const int color = target ? target - 1 : 0;
+        const char *preview = wallkickDisplayLabel(color);
+        drawWallkickDisplay(menu, preview, color);
+        mEditor.draw(menu, mEditTitle, preview);
         return;
     }
     mEditor.draw(menu, mEditTitle, mEditTitle);

@@ -32,7 +32,8 @@ public:
         CAP_BRIGHTNESS = 1 << 3,
         CAP_BACKGROUND = 1 << 4,
         CAP_PADDING    = 1 << 5,
-        CAP_ALL        = 0x3f,
+        CAP_TEXT_COLOR = 1 << 6,
+        CAP_ALL        = 0x7f,
     };
 
     enum UpdateResult {

@@ -197,7 +197,8 @@ void CreationEditor::begin(CreationStyle *style, u8 (*textRgb)[3],
 }
 
 bool CreationEditor::optionEnabled(u8 option) const {
-    if (option <= OPTION_TEXT_B) return true;
+    if (option <= OPTION_TEXT_B)
+        return mCapabilities & CAP_TEXT_COLOR;
     if (option == OPTION_TEXT_A)
         return mCapabilities & CAP_TEXT_ALPHA;
     if (option == OPTION_TEXT_BRIGHTNESS)
@@ -346,10 +347,10 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
     menu->drawText(title, 18, panelY + 9, 16, 16,
                    Color(255, 255, 255, 255));
 
+    char status[128];
     char targetBuf[24];
     const char *target = targetLabel(mTextTarget, preview, mTargetNames,
                                      targetBuf, sizeof(targetBuf));
-    char status[128];
     if (mTextTarget == 0)
         snprintf(status, sizeof(status), mTargetNames ? "All elements"
                                                        : "All characters");
@@ -369,28 +370,31 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
         infoY += 17;
     }
 
-    u8 r, g, b;
-    const bool sameR = textChannel(mTextRgb, mTextSlots, mTextTarget, 0, &r);
-    const bool sameG = textChannel(mTextRgb, mTextSlots, mTextTarget, 1, &g);
-    const bool sameB = textChannel(mTextRgb, mTextSlots, mTextTarget, 2, &b);
-    const char *rgbLabel = mTargetNames ? "Element RGB"
-        : (mTextTarget == 0 ? "Text RGB" : "Character RGB");
-    if (sameR && sameG && sameB && (mCapabilities & CAP_BACKGROUND)) {
-        snprintf(status, sizeof(status),
-                 "%s:%03u,%03u,%03u   Background RGB:%03u,%03u,%03u",
-                 rgbLabel, r, g, b, mStyle->bgR, mStyle->bgG, mStyle->bgB);
-    } else if (mCapabilities & CAP_BACKGROUND) {
-        snprintf(status, sizeof(status),
-                 "%s: Mixed   Background RGB:%03u,%03u,%03u",
-                 rgbLabel, mStyle->bgR, mStyle->bgG, mStyle->bgB);
-    } else if (sameR && sameG && sameB) {
-        snprintf(status, sizeof(status), "%s:%03u,%03u,%03u",
-                 rgbLabel, r, g, b);
-    } else {
-        snprintf(status, sizeof(status), "%s: Mixed", rgbLabel);
+    if (mCapabilities & (CAP_TEXT_COLOR | CAP_BACKGROUND)) {
+        u8 r, g, b;
+        const bool sameR = textChannel(mTextRgb, mTextSlots, mTextTarget, 0, &r);
+        const bool sameG = textChannel(mTextRgb, mTextSlots, mTextTarget, 1, &g);
+        const bool sameB = textChannel(mTextRgb, mTextSlots, mTextTarget, 2, &b);
+        const char *rgbLabel = mTargetNames ? "Element RGB"
+            : (mTextTarget == 0 ? "Text RGB" : "Character RGB");
+        if (sameR && sameG && sameB && (mCapabilities & CAP_BACKGROUND)) {
+            snprintf(status, sizeof(status),
+                     "%s:%03u,%03u,%03u   Background RGB:%03u,%03u,%03u",
+                     rgbLabel, r, g, b, mStyle->bgR, mStyle->bgG, mStyle->bgB);
+        } else if (mCapabilities & CAP_BACKGROUND) {
+            snprintf(status, sizeof(status),
+                     "%s: Mixed   Background RGB:%03u,%03u,%03u",
+                     rgbLabel, mStyle->bgR, mStyle->bgG, mStyle->bgB);
+        } else if (sameR && sameG && sameB) {
+            snprintf(status, sizeof(status), "%s:%03u,%03u,%03u",
+                     rgbLabel, r, g, b);
+        } else {
+            snprintf(status, sizeof(status), "%s: Mixed", rgbLabel);
+        }
+        menu->drawText(status, 18, infoY, 11, 11,
+                       Color(190, 220, 255, 255));
+        infoY += 18;
     }
-    menu->drawText(status, 18, infoY, 11, 11,
-                   Color(190, 220, 255, 255));
 
     int shown = 0;
     for (int i = 0; i < OPTION_COUNT; i++) {
@@ -398,7 +402,7 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
         const int column = shown / 5;
         const int row = shown % 5;
         const int x = 18 + column * 306;
-        const int y = infoY + 18 + row * 14;
+        const int y = infoY + row * 14;
         const bool selected = i == mOption;
         if (selected) {
             menu->fillBox(x - 3, y - 1, 294, 14, Color(90, 170, 255, 60));
@@ -432,11 +436,13 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
         shown++;
     }
 
-    const char *controls = SUSAMUNE_GLYPH_C " U/D Option   " SUSAMUNE_GLYPH_C
-                           " L/R Adjust   START: Next   " SUSAMUNE_GLYPH_X
-                           "+START: Previous";
-    menu->drawText(controls, 18, panelY + panelH - 32, 9, 9,
-                   Color(150, 170, 205, 255));
+    if (optionCount) {
+        const char *controls = SUSAMUNE_GLYPH_C " U/D Option   " SUSAMUNE_GLYPH_C
+                               " L/R Adjust   START: Next   " SUSAMUNE_GLYPH_X
+                               "+START: Previous";
+        menu->drawText(controls, 18, panelY + panelH - 32, 9, 9,
+                       Color(150, 170, 205, 255));
+    }
     if (layoutControls)
         menu->drawText("D-pad Move   L/R Size",
                        18, panelY + panelH - 17, 9, 9,

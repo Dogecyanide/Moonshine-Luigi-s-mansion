@@ -153,6 +153,12 @@ struct SusamuneInputStyleCfg {
 #define SUSAMUNE_CREATION_TIMER_LABEL      22u
 #define SUSAMUNE_CREATION_LEGACY_MARIO_HAT  23u
 #define SUSAMUNE_CREATION_MENU_BG           24u
+#define SUSAMUNE_CREATION_RECENT_STYLE_MAGIC 0x5249u  // 'RI'
+#define SUSAMUNE_CREATION_SAVESTATE_STYLE_MAGIC 0x5353u  // 'SS'
+
+#define SUSAMUNE_WALLKICK_STYLE_MAGIC       0x53574B44u  // 'SWKD'
+#define SUSAMUNE_WALLKICK_STYLE_VERSION     1u
+#define SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT 7u
 
 struct SusamuneCreationWordCfg {
     unsigned short x;
@@ -178,15 +184,58 @@ struct SusamuneCreationCfg {
     unsigned short reserved0;
     unsigned int   colorPresent;
     unsigned char  rgb[SUSAMUNE_CREATION_COLOR_COUNT][3];
-    // Retained at neutral values for compatibility with experimental builds.
-    unsigned char  timerScale;
-    unsigned short timerX;
-    unsigned short timerY;
-    unsigned char  timerPositionPresent;
+    // These established fields now persist the Recent IL overlay layout.
+    unsigned char  recentIlScale;
+    unsigned short recentIlX;
+    unsigned short recentIlY;
+    unsigned char  recentIlPositionPresent;
     unsigned char  timerLabelVisible;
     unsigned char  timerLabelVisiblePresent;
     unsigned char  reserved1;
     struct SusamuneCreationWordCfg words[SUSAMUNE_CREATION_WORD_COUNT];
+    // Optional V1 tail. reserved0 carries RECENT_STYLE_MAGIC, so a new mod can
+    // safely ignore uninitialised tail bytes from an older launcher.
+    unsigned char  recentIlTextRgb[3];
+    unsigned char  recentIlTextA;
+    unsigned char  recentIlBgR;
+    unsigned char  recentIlBgG;
+    unsigned char  recentIlBgB;
+    unsigned char  recentIlBgA;
+    unsigned char  recentIlTextBrightness;
+    unsigned char  recentIlPadding;
+    unsigned char  reserved2[6];
+    // Optional cache-line-sized tail for the savestate feedback overlay.
+    unsigned short savestateStyleMagic;
+    unsigned short savestateX;
+    unsigned short savestateY;
+    unsigned char  savestateScale;
+    unsigned char  savestateTextA;
+    unsigned char  savestateBgR;
+    unsigned char  savestateBgG;
+    unsigned char  savestateBgB;
+    unsigned char  savestateBgA;
+    unsigned char  savestateTextBrightness;
+    unsigned char  savestatePadding;
+    unsigned char  savestateTextRgb[3];
+    unsigned char  reserved3[15];
+};
+
+struct SusamuneWallkickStyleCfg {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short reserved0;
+    unsigned short x;
+    unsigned short y;
+    unsigned char  scale;
+    unsigned char  textA;
+    unsigned char  bgR;
+    unsigned char  bgG;
+    unsigned char  bgB;
+    unsigned char  bgA;
+    unsigned char  textBrightness;
+    unsigned char  padding;
+    unsigned char  rgb[SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT][3];
+    unsigned char  reserved1[23];
 };
 
 // Metadata Display keeps a compact in-game configuration plus an optional
@@ -338,15 +387,19 @@ struct SusamuneMetadataStyleCfg {
 #define SUSAMUNE_CFG_FLAG_INPUT_STYLE 0x40u
 // Kernel/backend understands [creation_<region>] and the appended payload.
 #define SUSAMUNE_CFG_FLAG_CREATION 0x80u
+// Kernel/backend understands the appended Wallkick Display Creation style.
+#define SUSAMUNE_CFG_FLAG_WALLKICK_STYLE 0x100u
+// Kernel/backend understands the appended four-bank IL PB journal.
+#define SUSAMUNE_CFG_FLAG_ILING_PROFILES 0x200u
 
 // IL PBs use stable result slots: ordinary rows use retail Shine ids, while
-// independent Secret and Any% rows occupy otherwise-unused ids through 120.
-// Seven spare values keep the payload cache-line-sized and allow append-only
+// independent Secret, variant and Any% rows occupy otherwise-unused ids through 124.
+// Three spare values keep the payload cache-line-sized and allow append-only
 // additions without moving anything in the handoff block.
 #define SUSAMUNE_ILING_PB_MAGIC          0x53495042u  // 'SIPB'
 #define SUSAMUNE_ILING_PB_FILE_MAGIC     0x53504246u  // 'SPBF'
 #define SUSAMUNE_ILING_PB_VERSION        1u
-#define SUSAMUNE_ILING_PB_SLOT_COUNT     121u
+#define SUSAMUNE_ILING_PB_SLOT_COUNT     125u
 #define SUSAMUNE_ILING_PB_MAX_SLOTS      128u
 #define SUSAMUNE_ILING_PB_UNSET          (-1)
 #define SUSAMUNE_ILING_PB_MAX_QF         0x000AF9B0
@@ -381,6 +434,52 @@ struct SusamuneILingPbFile {
     signed int     values[SUSAMUNE_ILING_PB_MAX_SLOTS];
 };
 
+#define SUSAMUNE_ILING_PROFILE_MAGIC      0x53495052u  // 'SIPR'
+#define SUSAMUNE_ILING_PROFILE_FILE_MAGIC 0x53505246u  // 'SPRF'
+#define SUSAMUNE_ILING_PROFILE_VERSION    1u
+#define SUSAMUNE_ILING_PROFILE_COUNT      4u
+#define SUSAMUNE_ILING_CUSTOM_NAME_COUNT  2u
+#define SUSAMUNE_ILING_PROFILE_NAME_SIZE  16u
+
+struct SusamuneILingProfilesCfg {
+    // --- cache line 0: written by the kernel at boot, by the mod on save ---
+    unsigned int   magic;
+    unsigned short version;
+    unsigned char  profileCount;
+    unsigned char  activeProfile;
+    unsigned short slotCount;
+    unsigned short nameSize;
+    unsigned int   saveSeq;
+    unsigned char  pad0[16];
+
+    // --- cache line 1: written ONLY by the kernel ---
+    unsigned int   ackSeq;
+    unsigned int   status;
+    unsigned char  pad1[24];
+
+    signed int values[SUSAMUNE_ILING_PROFILE_COUNT]
+                     [SUSAMUNE_ILING_PB_MAX_SLOTS];
+    char customNames[SUSAMUNE_ILING_CUSTOM_NAME_COUNT]
+                    [SUSAMUNE_ILING_PROFILE_NAME_SIZE];
+};
+
+struct SusamuneILingProfilesFile {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned char  profileCount;
+    unsigned char  activeProfile;
+    unsigned short slotCount;
+    unsigned short nameSize;
+    unsigned int   gameId;
+    unsigned int   generation;
+    unsigned int   checksum;
+    unsigned char  reserved[8];
+    signed int values[SUSAMUNE_ILING_PROFILE_COUNT]
+                     [SUSAMUNE_ILING_PB_MAX_SLOTS];
+    char customNames[SUSAMUNE_ILING_CUSTOM_NAME_COUNT]
+                    [SUSAMUNE_ILING_PROFILE_NAME_SIZE];
+};
+
 struct SusamuneCfg {
     // --- cache line 0: written by the kernel at boot, by the mod on save ---
     unsigned int   magic;
@@ -411,6 +510,8 @@ struct SusamuneCfg {
     struct SusamuneMetadataStyleCfg metadataStyle;
     struct SusamuneInputStyleCfg inputStyle;
     struct SusamuneCreationCfg creation;
+    struct SusamuneWallkickStyleCfg wallkickStyle;
+    struct SusamuneILingProfilesCfg ilingProfiles;
 };
 
 #define SUSAMUNE_CFG_PPC_PTR  ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PPC_BASE)
@@ -465,7 +566,8 @@ typedef char susamune_metadata_style_cfg_size_check[(sizeof(struct SusamuneMetad
 typedef char susamune_metadata_style_slots_check[(__builtin_offsetof(struct SusamuneMetadataStyleCfg, textRgb) == 64) ? 1 : -1];
 typedef char susamune_input_style_cfg_size_check[(sizeof(struct SusamuneInputStyleCfg) == 64) ? 1 : -1];
 typedef char susamune_creation_word_cfg_size_check[(sizeof(struct SusamuneCreationWordCfg) == 144) ? 1 : -1];
-typedef char susamune_creation_cfg_size_check[(sizeof(struct SusamuneCreationCfg) == 528) ? 1 : -1];
+typedef char susamune_creation_cfg_size_check[(sizeof(struct SusamuneCreationCfg) == 576) ? 1 : -1];
+typedef char susamune_wallkick_style_cfg_size_check[(sizeof(struct SusamuneWallkickStyleCfg) == 64) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_ack_check[(__builtin_offsetof(struct SusamuneILingPbCfg, ackSeq) == 32) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_values_check[(__builtin_offsetof(struct SusamuneILingPbCfg, values) == 64) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_size_check[(sizeof(struct SusamuneILingPbCfg) == 576) ? 1 : -1];
@@ -476,7 +578,15 @@ typedef char susamune_cfg_qft_display_check[(__builtin_offsetof(struct SusamuneC
 typedef char susamune_cfg_metadata_style_check[(__builtin_offsetof(struct SusamuneCfg, metadataStyle) == 1248) ? 1 : -1];
 typedef char susamune_cfg_input_style_check[(__builtin_offsetof(struct SusamuneCfg, inputStyle) == 2080) ? 1 : -1];
 typedef char susamune_cfg_creation_check[(__builtin_offsetof(struct SusamuneCfg, creation) == 2144) ? 1 : -1];
-typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 2672) ? 1 : -1];
+typedef char susamune_cfg_wallkick_style_check[(__builtin_offsetof(struct SusamuneCfg, wallkickStyle) == 2720) ? 1 : -1];
+typedef char susamune_iling_profiles_cfg_values_check[(__builtin_offsetof(struct SusamuneILingProfilesCfg, values) == 64) ? 1 : -1];
+typedef char susamune_iling_profiles_cfg_names_check[(__builtin_offsetof(struct SusamuneILingProfilesCfg, customNames) == 2112) ? 1 : -1];
+typedef char susamune_iling_profiles_cfg_size_check[(sizeof(struct SusamuneILingProfilesCfg) == 2144) ? 1 : -1];
+typedef char susamune_iling_profiles_file_values_check[(__builtin_offsetof(struct SusamuneILingProfilesFile, values) == 32) ? 1 : -1];
+typedef char susamune_iling_profiles_file_names_check[(__builtin_offsetof(struct SusamuneILingProfilesFile, customNames) == 2080) ? 1 : -1];
+typedef char susamune_iling_profiles_file_size_check[(sizeof(struct SusamuneILingProfilesFile) == 2112) ? 1 : -1];
+typedef char susamune_cfg_iling_profiles_check[(__builtin_offsetof(struct SusamuneCfg, ilingProfiles) == 2784) ? 1 : -1];
+typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 4928) ? 1 : -1];
 typedef char susamune_cfg_size_check[
     (sizeof(struct SusamuneCfg) <=
      SUSAMUNE_MEM2_PB_LIVE_PPC_BASE - SUSAMUNE_MEM2_CFG_PPC_BASE) ? 1 : -1];

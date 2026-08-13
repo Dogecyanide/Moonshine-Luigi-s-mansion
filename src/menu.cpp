@@ -18,10 +18,13 @@
 #include "susamune/input_display.hxx"
 #include "susamune/iling.hxx"
 #include "susamune/metadata_display.hxx"
+#include "susamune/packed_text.hxx"
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
 #include "susamune/qft_display.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/susamune_cfg.h"
+#include "susamune/wallkick_display.hxx"
 #if ENABLE_DEBUG_WARPS
 #include "susamune/debug_warp.hxx"
 #endif
@@ -62,8 +65,20 @@ inline Color cValue()      { return col(120, 220, 150, 255); }// setting value
 inline Color cFooter()     { return col(104, 114, 136, 255); }
 
 const char *settingsStorageError(u32 error) {
+#if !IS_EMULATOR
+    static const char kErrors[] =
+        "storage I/O error\0storage internal error\0storage not ready\0"
+        "settings file missing\0settings path missing\0invalid settings filename\0"
+        "storage access denied\0settings file already exists\0invalid settings file\0"
+        "storage is write-protected\0invalid storage device\0storage not mounted\0"
+        "storage has no FAT filesystem\0format aborted\0storage timed out\0"
+        "settings file locked\0not enough memory\0too many open files\0"
+        "invalid storage parameter";
+    return error >= 1 && error <= 19
+               ? PackedText::at(kErrors, error - 1)
+               : nullptr;
+#else
     switch (error) {
-#if IS_EMULATOR
     case 2:   return "wrong device in slot B";
     case 3:   return "no card in slot B";
     case 4:   return "settings file missing";
@@ -79,29 +94,9 @@ const char *settingsStorageError(u32 error) {
     case 14:  return "card operation canceled";
     case 128: return "fatal slot B card error";
     case 256: return "not enough memory";
-#else
-    case 1:  return "storage I/O error";
-    case 2:  return "storage internal error";
-    case 3:  return "storage not ready";
-    case 4:  return "settings file missing";
-    case 5:  return "settings path missing";
-    case 6:  return "invalid settings filename";
-    case 7:  return "storage access denied";
-    case 8:  return "settings file already exists";
-    case 9:  return "invalid settings file";
-    case 10: return "storage is write-protected";
-    case 11: return "invalid storage device";
-    case 12: return "storage not mounted";
-    case 13: return "storage has no FAT filesystem";
-    case 14: return "format aborted";
-    case 15: return "storage timed out";
-    case 16: return "settings file locked";
-    case 17: return "not enough memory";
-    case 18: return "too many open files";
-    case 19: return "invalid storage parameter";
-#endif
     default:  return nullptr;
     }
+#endif
 }
 
 // -------- font metrics ----------------------------------------------------
@@ -127,8 +122,8 @@ const int ROW_SZ    = 16;
 const int ROW_H = ROW_SZ + 8;
 const int FOOT_SZ   = 12;
 
-const int TAB_GAP   = 20;  // space between tabs
-const int TAB_INNER = 12;  // highlight padding around a tab's text
+const int TAB_GAP   = 12;  // space between tabs
+const int TAB_INNER = 10;  // highlight padding around a tab's text
 const int TAB_CHEV  = 16;  // strip margin reserved for the scroll chevrons
 
 const int TAB_STRIP_Y = PANEL_Y + 46;
@@ -155,6 +150,7 @@ public:
     // A live editor can temporarily replace the normal panel while retaining
     // the menu's input grab and stage-freeze behaviour.
     virtual bool fullScreen() const { return false; }
+    virtual bool favoriteHint() const { return false; }
 
 protected:
     void drawScrollHints(Menu *menu, int x, int y, int w, int h, int start, int end,
@@ -248,21 +244,42 @@ void bgmStatsDraw(Menu *menu) {
 
 }  // namespace
 
+static void drawValueRow(Menu *menu, int x, int y, int w, const char *name,
+                         const char *value, bool selected, bool starred,
+                         bool arrow);
+
 // ---------------------------------------------------------------------
 // IL and travel practice
 // ---------------------------------------------------------------------
 class ILingTab : public MenuTab {
 public:
-    ILingTab() : mSel(0), mConfirmDelete(false) {}
+    ILingTab()
+        : mSel(0), mConfirmDelete(false), mEditingName(false),
+          mNameCursor(0), mNamePage(0), mNameLength(0), mNameUpper(false) {
+        mNameBuffer[0] = '\0';
+    }
 
     const char *title() const override { return "ILs"; }
-    bool grabsInput() const override { return mConfirmDelete; }
+    bool grabsInput() const override {
+        return mConfirmDelete || mEditingName || gCreationExtras.editing();
+    }
+    bool fullScreen() const override {
+        return mEditingName || gCreationExtras.editing();
+    }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
+        if (gCreationExtras.editing()) {
+            gCreationExtras.updateEditor(pad);
+            return;
+        }
+        if (mEditingName) {
+            updateNameEditor(pad);
+            return;
+        }
         if (mConfirmDelete) {
             const u32 rapid = pad->mButtons.mRapidInput;
             if (rapid & TMarioGamePad::A) {
-                ILing::clearPB(mSel);
+                ILing::clearPB(selectedEntry());
                 mConfirmDelete = false;
                 menu->toast("PB deleted");
             } else if (rapid & TMarioGamePad::B) {
@@ -273,31 +290,58 @@ public:
 
         const u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
-            mSel = wrap(mSel - 1, ILing::count());
+            mSel = wrap(mSel - 1, OPTION_COUNT + ILing::count());
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
-            mSel = wrap(mSel + 1, ILing::count());
+            mSel = wrap(mSel + 1, OPTION_COUNT + ILing::count());
         } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
-            mSel = ILing::jumpGroup(mSel, -1);
+            if (isOption()) {
+                jumpFromOptions(-1);
+            } else {
+                jumpSection(-1);
+            }
         } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
-            mSel = ILing::jumpGroup(mSel, 1);
+            if (isOption()) {
+                jumpFromOptions(+1);
+            } else {
+                jumpSection(+1);
+            }
+        }
+        if (isOption() && mSel >= 2 && mSel <= 6 &&
+            (rapid & TMarioGamePad::X)) {
+            const SettingId id = optionSetting(mSel);
+            gSettings.toggleFavorite(id);
+            menu->toast(gSettings.favorite(id)
+                            ? "Added to Starred"
+                            : "Removed from Starred");
+            return;
         }
         if (rapid & TMarioGamePad::A) {
-            if (ILing::start(mSel)) {
+            if (isOption()) {
+                activateOption(menu, +1);
+            } else if (ILing::start(selectedEntry())) {
                 menu->hide();
             } else {
                 menu->toast("Warps disabled");
             }
-        } else if ((rapid & TMarioGamePad::X) && ILing::pbQf(mSel) >= 0) {
+        } else if (!isOption() && (rapid & TMarioGamePad::X) &&
+                   ILing::pbQf(selectedEntry()) >= 0) {
             mConfirmDelete = true;
-        } else if (rapid & TMarioGamePad::Z) {
-            gSettings.cycle(SETTING_ILING_FANFARE, +1);
         }
     }
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
+        if (gCreationExtras.editing()) {
+            ILing::drawRecentPreview(menu);
+            gCreationExtras.drawEditor(menu);
+            return;
+        }
+        if (mEditingName) {
+            drawNameEditor(menu);
+            return;
+        }
         if (mConfirmDelete) {
             const char *question = "Delete PB?";
-            const char *entry = ILing::label(mSel);
+            const char *entry = ILing::label(selectedEntry());
             const char *hint = SUSAMUNE_GLYPH_A " Yes    " SUSAMUNE_GLYPH_B " No";
             menu->fillBox(x, y + 34, w, 104, JUtility::TColor(36, 30, 20, 245));
             menu->fillBox(x, y + 34, w, 3, cAccent());
@@ -317,7 +361,7 @@ public:
         const int listH = h - ROW_H;
         const int maxRows = listH / ROW_H;
         const int rows = menuRowCount(entries);
-        const int start = listScrollStart(menuRowForEntry(mSel), rows, maxRows);
+        const int start = listScrollStart(menuRowForSelection(mSel), rows, maxRows);
         int end = start + maxRows;
         if (end > rows) {
             end = rows;
@@ -325,6 +369,63 @@ public:
 
         int ry = y;
         int row = 0;
+
+        if (row >= start && row < end) {
+            drawSectionHeader(menu, x, ry, w, "PB PROFILE");
+            ry += ROW_H;
+        }
+        row++;
+
+        for (int i = 0; i < 2 && row < end; i++, row++) {
+            if (row < start) {
+                continue;
+            }
+
+            const bool selected = i == mSel;
+            const char *value = optionValue(i);
+            drawValueRow(menu, x, ry, w, optionName(i), value, selected,
+                         false, true);
+            ry += ROW_H;
+        }
+
+        if (ILing::pbProfile() == 0) {
+            if (row >= start && row < end) {
+                char theory[24];
+                const char *value = "Incomplete";
+                s32 qf;
+                if (ILing::anyPercentTheoryQf(&qf)) {
+                    const s32 millis = (qf * 1001) / 120;
+                    snprintf(theory, sizeof(theory), "%d:%02d:%02d.%03d",
+                             (int)(millis / 3600000),
+                             (int)((millis / 60000) % 60),
+                             (int)((millis / 1000) % 60),
+                             (int)(millis % 1000));
+                    value = theory;
+                }
+                drawValueRow(menu, x, ry, w, "Theoretical best", value,
+                             false, false, true);
+                ry += ROW_H;
+            }
+            row++;
+        }
+
+        if (row >= start && row < end) {
+            drawSectionHeader(menu, x, ry, w, "PB OPTIONS");
+            ry += ROW_H;
+        }
+        row++;
+
+        for (int i = 2; i < OPTION_COUNT && row < end; i++, row++) {
+            if (row < start) continue;
+            const bool selected = i == mSel;
+            const bool starred = i <= 6 &&
+                gSettings.favorite(optionSetting(i));
+            const char *value = optionValue(i);
+            drawValueRow(menu, x, ry, w, optionName(i), value, selected,
+                         starred, true);
+            ry += ROW_H;
+        }
+
         for (int i = 0; i < entries && row < end; i++) {
             if (ILing::beginsGroup(i)) {
                 if (row >= start) {
@@ -339,44 +440,113 @@ public:
                 continue;
             }
 
-            const bool selected = i == mSel;
-            if (selected) {
-                drawRowHighlight(menu, x, ry, w, ROW_H);
-                menu->drawText(">", x - 2, ry, ROW_SZ, ROW_SZ, cAccent());
-            }
-            menu->drawText(ILing::label(i), x + 12, ry, ROW_SZ, ROW_SZ,
-                           selected ? cRowSel() : cRow());
-
+            const bool selected = !isOption() && i == selectedEntry();
             char pb[24];
             const char *value = "[PB: --]";
             const s32 qf = ILing::pbQf(i);
             if (qf >= 0) {
-                const s32 millis = (qf * 1001) / 120;
-                snprintf(pb, sizeof(pb), "[PB: %d:%02d.%03d]",
-                         (int)(millis / 60000),
-                         (int)((millis / 1000) % 60),
-                         (int)(millis % 1000));
+                ILing::formatTime(qf, pb, sizeof(pb),
+                                  "[PB: %d:%02d.%03d]");
                 value = pb;
             }
-            menu->drawText(value, x + w - Menu::textWidth(value, ROW_SZ) - 8,
-                           ry, ROW_SZ, ROW_SZ, cValue());
+            drawValueRow(menu, x, ry, w, ILing::label(i), value, selected,
+                         false, true);
             ry += ROW_H;
             row++;
         }
 
         drawScrollHints(menu, x, y, w, listH, start, end, rows);
-        menu->drawText(SUSAMUNE_GLYPH_A " Start  " SUSAMUNE_GLYPH_X
-                       " Delete  " SUSAMUNE_GLYPH_C " U/D Scroll L/R Group",
-                       x + 4, y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
-        const char *fanfare = gSettings.getBool(SETTING_ILING_FANFARE)
-                                   ? SUSAMUNE_GLYPH_Z " Fanfare: On"
-                                   : SUSAMUNE_GLYPH_Z " Fanfare: Off";
-        menu->drawText(fanfare,
-                       x + w - Menu::textWidth(fanfare, FOOT_SZ) - 8,
-                       y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+        const char *hint = isOption()
+            ? SUSAMUNE_GLYPH_A " Toggle/Edit  " SUSAMUNE_GLYPH_X " Star  "
+              SUSAMUNE_GLYPH_C
+              " U/D Select L/R Section"
+            : SUSAMUNE_GLYPH_A " Start  " SUSAMUNE_GLYPH_X " Delete  "
+              SUSAMUNE_GLYPH_C " U/D Select L/R Section";
+        menu->drawText(hint, x + 4, y + h - FOOT_SZ,
+                       FOOT_SZ, FOOT_SZ, cFooter());
     }
 
 private:
+    enum { OPTION_COUNT = 8 };
+
+    bool isOption() const { return mSel < OPTION_COUNT; }
+    int selectedEntry() const { return mSel - OPTION_COUNT; }
+
+    static SettingId optionSetting(int option) {
+        static const u8 kSettings[5] = {
+            SETTING_ILING_RECORDING,
+            SETTING_ILING_POPUP,
+            SETTING_ILING_FANFARE,
+            SETTING_ILING_RECENT,
+            SETTING_ILING_SHORT_NAMES,
+        };
+        return (SettingId)kSettings[option - 2];
+    }
+
+    static const char *optionName(int option) {
+        static const char kNames[] =
+            "PB profile\0Profile name\0Record IL PBs\0PB popup\0PB fanfare\0"
+            "Recent IL history\0Recent IL names\0Recent IL display";
+        return PackedText::at(kNames, option);
+    }
+
+    static const char *optionValue(int option) {
+        if (option == 0) return ILing::pbProfileName(ILing::pbProfile());
+        if (option == 1) {
+            return ILing::pbProfileNameEditable(ILing::pbProfile())
+                       ? "Edit"
+                       : "Fixed";
+        }
+        if (option == OPTION_COUNT - 1) {
+            return "Edit";
+        }
+        if (option == OPTION_COUNT - 2) {
+            return gSettings.getBool(SETTING_ILING_SHORT_NAMES)
+                       ? "Short"
+                       : "Long";
+        }
+        if (option == 2 && gSettings.getBool(SETTING_STAGE_INTRO_SKIP)) {
+            return "Off (Intro Skip)";
+        }
+        return gSettings.valueLabel(optionSetting(option));
+    }
+
+    void activateOption(Menu *menu, int direction) {
+        if (mSel == 0) {
+            ILing::cyclePbProfile(direction);
+            menu->toast(ILing::pbProfileName(ILing::pbProfile()));
+        } else if (mSel == 1) {
+            if (ILing::pbProfileNameEditable(ILing::pbProfile())) {
+                beginNameEditor();
+            } else {
+                menu->toast("This profile name is fixed");
+            }
+        } else
+        if (mSel == OPTION_COUNT - 1) {
+            gCreationExtras.beginRecentIlEditor();
+        } else {
+            gSettings.cycle(optionSetting(mSel), direction);
+        }
+    }
+
+    void jumpSection(int direction) {
+        const int entry = selectedEntry();
+        int groupFirst = entry;
+        while (groupFirst > 0 && !ILing::beginsGroup(groupFirst)) groupFirst--;
+        const int destination = ILing::jumpGroup(entry, direction);
+        if ((direction < 0 && groupFirst == 0) ||
+            (direction > 0 && destination == 0)) {
+            mSel = 0;
+            return;
+        }
+        mSel = OPTION_COUNT + destination;
+    }
+
+    void jumpFromOptions(int direction) {
+        const int first = direction > 0 ? 0 : ILing::jumpGroup(0, -1);
+        mSel = OPTION_COUNT + first;
+    }
+
     static int menuRowForEntry(int entry) {
         int row = entry;
         for (int i = 0; i <= entry; i++) {
@@ -386,11 +556,67 @@ private:
     }
 
     static int menuRowCount(int entries) {
-        return menuRowForEntry(entries - 1) + 1;
+        return 2 + OPTION_COUNT + theoryRows() +
+               menuRowForEntry(entries - 1) + 1;
+    }
+
+    static int menuRowForSelection(int selection) {
+        if (selection < 2) return 1 + selection;
+        if (selection < OPTION_COUNT) return 2 + theoryRows() + selection;
+        return 2 + OPTION_COUNT + theoryRows() +
+               menuRowForEntry(selection - OPTION_COUNT);
+    }
+
+    static int theoryRows() { return ILing::pbProfile() == 0 ? 1 : 0; }
+
+    void beginNameEditor() {
+        const char *name = ILing::pbProfileName(ILing::pbProfile());
+        mNameLength = 0;
+        while (mNameLength + 1 < SUSAMUNE_ILING_PROFILE_NAME_SIZE &&
+               name[mNameLength]) {
+            mNameBuffer[mNameLength] = name[mNameLength];
+            mNameLength++;
+        }
+        mNameBuffer[mNameLength] = '\0';
+        mNameCursor = 0;
+        mNamePage = 0;
+        mNameUpper = false;
+        mEditingName = true;
+    }
+
+    void updateNameEditor(TMarioGamePad *pad) {
+        const u32 pressed = pad->mButtons.mRapidInput;
+        if (pressed & TMarioGamePad::START) {
+            if (!(pad->mButtons.mInput & TMarioGamePad::X)) {
+                ILing::setPbProfileName(ILing::pbProfile(), mNameBuffer);
+            }
+            mEditingName = false;
+            return;
+        }
+        if (pressed & TMarioGamePad::Z) {
+            mNameLength = 0;
+            mNameBuffer[0] = '\0';
+            return;
+        }
+        updateCreationKeyboardText(pad, mNameBuffer, mNameLength,
+                                   SUSAMUNE_ILING_PROFILE_NAME_SIZE - 1,
+                                   mNamePage, mNameUpper, mNameCursor);
+    }
+
+    void drawNameEditor(Menu *menu) const {
+        drawCreationKeyboard(menu, "Name PB profile",
+                             mNameBuffer[0] ? mNameBuffer : "(Custom profile)",
+                             mNamePage, mNameUpper, mNameCursor);
     }
 
     int mSel;
     bool mConfirmDelete;
+    bool mEditingName;
+    u8 mNameCursor;
+    u8 mNamePage;
+    u8 mNameLength;
+    bool mNameUpper;
+    char mNameBuffer[SUSAMUNE_ILING_PROFILE_NAME_SIZE];
 };
 
 #if ENABLE_DEBUG_WARPS
@@ -494,34 +720,85 @@ private:
 namespace {
 
 const char kCategoryTitles[] =
-    "QoL\0Savestate\0Misc\0Cosmetic\0UI\0Timer";
+    "Gameplay\0Savestate\0Practice\0Cosmetic\0Display\0Timer\0Starred";
 
 enum CategoryTitleOffset {
     TITLE_QOL       = 0,
-    TITLE_SAVESTATE = TITLE_QOL + sizeof("QoL"),
+    TITLE_SAVESTATE = TITLE_QOL + sizeof("Gameplay"),
     TITLE_MISC      = TITLE_SAVESTATE + sizeof("Savestate"),
-    TITLE_COSMETIC  = TITLE_MISC + sizeof("Misc"),
+    TITLE_COSMETIC  = TITLE_MISC + sizeof("Practice"),
     TITLE_UI        = TITLE_COSMETIC + sizeof("Cosmetic"),
-    TITLE_TIMER     = TITLE_UI + sizeof("UI"),
+    TITLE_TIMER     = TITLE_UI + sizeof("Display"),
+    TITLE_STARRED   = TITLE_TIMER + sizeof("Timer"),
 };
 
-static_assert(sizeof(kCategoryTitles) == 37, "category title offsets changed");
+static_assert(sizeof(kCategoryTitles) == 59, "category title offsets changed");
 static_assert(SETTING_COUNT <= 0x100, "setting ids no longer fit in a byte");
 static_assert(SETTING_CAT_COUNT <= 0x100, "setting categories no longer fit in a byte");
+const u8 kStarredCategory = SETTING_CAT_COUNT;
+
+const u8 kSettingSectionStarts[] = {
+    SETTING_FAST_TEXT,
+    SETTING_FMV_SKIPS,
+    SETTING_FREE_PAUSE,
+    SETTING_YOSHI_NOZZLE_SAVE_PROMPT,
+    SETTING_NOZZLE_LOCK,
+    SETTING_ATTEMPT_COUNTER,
+    SETTING_FORCE_BOX_GAME,
+    SETTING_MUTE_BGM,
+    SETTING_VISIBLE_GOOP,
+    SETTING_SHOW_BGM_SLOTS,
+    SETTING_WALLKICK_DISPLAY,
+    SETTING_TIMER_SUNSHINE_VISIBILITY,
+    SETTING_TIMER_FREEZE_DURATION,
+    SETTING_TIMER_SECTIONS,
+    SETTING_SAVE_RNG_STATE,
+    SETTING_SAVESTATE_FEEDBACK,
+};
+const char kSettingSectionNames[] =
+    "GENERAL\0SKIPS & UNLOCKS\0WORLD RULES\0SAVE PROMPTS\0"
+    "LEVEL RULES\0PRACTICE TOOLS\0BOX GAMES\0PRESENTATION\0WORLD\0"
+    "DIAGNOSTICS\0PRACTICE FEEDBACK\0DISPLAY\0FREEZE EVENTS\0"
+    "SECTION HISTORY\0STATE\0FEEDBACK";
 
 }  // namespace
 
 class CategorySettingsTab : public MenuTab {
 public:
-    CategorySettingsTab(u8 titleOffset, SettingCategory cat)
-        : mSel(0), mCat((u8)cat), mTitleOffset(titleOffset) {}
+    CategorySettingsTab(u8 titleOffset, u8 cat)
+        : mSel(0), mCat(cat), mTitleOffset(titleOffset), mResetConfirm(0) {}
 
     const char *title() const override { return kCategoryTitles + mTitleOffset; }
+    bool favoriteHint() const override { return true; }
+    bool grabsInput() const override {
+        return mResetConfirm ||
+               (hasVisualEditor() && gCreationExtras.editing());
+    }
+    bool fullScreen() const override { return grabsInput(); }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
+        if (mResetConfirm) {
+            const u32 rapid = pad->mButtons.mRapidInput;
+            if (rapid & TMarioGamePad::B) {
+                mResetConfirm = 0;
+            } else if (rapid & TMarioGamePad::A) {
+                if (mResetConfirm == 1) mResetConfirm = 2;
+                else {
+                    mResetConfirm = 0;
+                    menu->factoryReset();
+                }
+            }
+            return;
+        }
+        if (hasVisualEditor() && gCreationExtras.editing()) {
+            gCreationExtras.updateEditor(pad);
+            return;
+        }
         u8  ids[SETTING_COUNT];
-        int n = buildList(ids);
+        const int settings = buildList(ids);
+        const int n = settings + extraRows();
         if (n == 0) {
+            mSel = 0;
             return;
         }
         u32 rapid = menu->navigationInput(pad);
@@ -533,59 +810,188 @@ public:
         if (mSel >= n) {
             mSel = n - 1;
         }
+        if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            jumpSection(ids, settings, n, -1);
+        } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
+            jumpSection(ids, settings, n, +1);
+        }
+        if (mSel >= settings) {
+            if (rapid & TMarioGamePad::A) {
+                if (hasFeedbackEditor())
+                    gCreationExtras.beginSavestateFeedbackEditor();
+                else if (hasWallkickEditor())
+                    gCreationExtras.beginWallkickEditor();
+                else if (hasFactoryReset())
+                    mResetConfirm = 1;
+            }
+            return;
+        }
         SettingId id = (SettingId)ids[mSel];
-        if ((rapid & TMarioGamePad::A) || (rapid & TMarioGamePad::CSTICK_RIGHT)) {
+        if (rapid & TMarioGamePad::X) {
+            gSettings.toggleFavorite(id);
+            menu->toast(gSettings.favorite(id)
+                            ? "Added to Starred"
+                            : "Removed from Starred");
+            if (isStarred() && mSel >= settings - 1 && mSel > 0) mSel--;
+        } else if (rapid & TMarioGamePad::A) {
             gSettings.cycle(id, +1);
-        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
-            gSettings.cycle(id, -1);
         }
     }
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
-        u8  ids[SETTING_COUNT];
-        int n = buildList(ids);
-        if (n == 0) {
-            menu->drawText("(none)", x + 4, y, ROW_SZ, ROW_SZ, cRowDim());
+        if (mResetConfirm) {
+            const char *title = mResetConfirm == 1
+                ? "Reset settings, binds and layouts?"
+                : "PBs stay. Reset everything else now?";
+            const char *detail = mResetConfirm == 1
+                ? "This requires one more confirmation."
+                : "This cannot be undone from the console.";
+            const char *hint = mResetConfirm == 1
+                ? SUSAMUNE_GLYPH_A " Continue    " SUSAMUNE_GLYPH_B " Cancel"
+                : SUSAMUNE_GLYPH_A " Reset    " SUSAMUNE_GLYPH_B " Cancel";
+            menu->fillBox(88, 176, 464, 128, Color(8, 11, 20, 245));
+            menu->fillBox(88, 176, 464, 3, cAccent());
+            menu->drawText(title, 320 - Menu::textWidth(title, 15) / 2,
+                           200, 15, 15, cRowSel());
+            menu->drawText(detail, 320 - Menu::textWidth(detail, 12) / 2,
+                           232, 12, 12, cRow());
+            menu->drawText(hint, 320 - Menu::textWidth(hint, 12) / 2,
+                           270, 12, 12, cFooter());
             return;
         }
-        int maxRows = h / ROW_H;
-        int start   = listScrollStart(mSel, n, maxRows);
-        int end     = start + maxRows;
-        if (end > n) {
-            end = n;
+        if (hasVisualEditor() && gCreationExtras.editing()) {
+            gCreationExtras.drawEditor(menu);
+            return;
         }
+        u8  ids[SETTING_COUNT];
+        const int settings = buildList(ids);
+        const int n = settings + extraRows();
+        if (n == 0) {
+            menu->drawText(isStarred() ? "No starred settings" : "(none)",
+                           x + 4, y, ROW_SZ, ROW_SZ, cRowDim());
+            if (isStarred())
+                menu->drawText("Press X on a setting to add it here.", x + 4,
+                               y + ROW_H, FOOT_SZ, FOOT_SZ, cFooter());
+            return;
+        }
+        const u32 metrics = displayMetrics(ids, settings, n);
+        const int rows = metrics >> 16;
+        const int maxRows = h / ROW_H;
+        const int start = listScrollStart(
+            (u16)metrics, rows, maxRows);
+        int end = start + maxRows;
+        if (end > rows) end = rows;
         int ry = y;
-        for (int i = start; i < end; i++) {
-            SettingId id       = (SettingId)ids[i];
-            bool      selected = (i == mSel);
-            if (selected) {
-                drawRowHighlight(menu, x, ry, w, ROW_H);
+        int row = 0;
+        for (int i = 0; i < n && row < end; i++) {
+            const char *section = sectionName(ids, settings, i);
+            if (section) {
+                if (row >= start) {
+                    drawSectionHeader(menu, x, ry, w, section);
+                    ry += ROW_H;
+                }
+                row++;
+                if (row >= end) break;
             }
-            menu->drawText(Settings::name(id), x + 4, ry, ROW_SZ, ROW_SZ,
-                           selected ? cRowSel() : cRow());
-            const char *val = gSettings.valueLabel(id);
-            int         vx  = x + w - Menu::textWidth(val, ROW_SZ) - 8;
-            menu->drawText(val, vx, ry, ROW_SZ, ROW_SZ, cValue());
+            if (row < start) {
+                row++;
+                continue;
+            }
+            const bool selected = i == mSel;
+            const char *name;
+            const char *val;
+            if (i < settings) {
+                const SettingId id = (SettingId)ids[i];
+                name = Settings::name(id);
+                val = gSettings.valueLabel(id);
+            } else {
+                name = hasFeedbackEditor() ? "Feedback display"
+                     : hasWallkickEditor() ? "Wallkick display style"
+                                           : "Factory reset";
+                val = hasVisualEditor() ? "Edit" : "Reset";
+            }
+            const bool starred = i < settings &&
+                gSettings.favorite((SettingId)ids[i]);
+            drawValueRow(menu, x, ry, w, name, val, selected, starred, false);
             ry += ROW_H;
+            row++;
         }
     
-        drawScrollHints(menu, x, y, w, h, start, end, n);
+        drawScrollHints(menu, x, y, w, h, start, end, rows);
     }
 
 private:
+    bool isStarred() const { return mCat == kStarredCategory; }
+    bool hasFeedbackEditor() const {
+        return mCat == SETTING_CAT_SAVESTATE;
+    }
+    bool hasWallkickEditor() const { return mCat == SETTING_CAT_UI; }
+    bool hasVisualEditor() const {
+        return hasFeedbackEditor() || hasWallkickEditor();
+    }
+    bool hasFactoryReset() const { return mCat == SETTING_CAT_MISC; }
+    int extraRows() const {
+        return hasVisualEditor() || hasFactoryReset() ? 1 : 0;
+    }
+
     int buildList(u8 *out) const {
         int n = 0;
-        for (int i = 0; i < SETTING_COUNT; i++) {
-            if (Settings::category((SettingId)i) == (SettingCategory)mCat) {
+        const int count = isStarred() ? SETTING_FAVORITES_0 : SETTING_COUNT;
+        for (int i = 0; i < count; i++) {
+            const SettingId id = (SettingId)i;
+            if (isStarred()
+                    ? Settings::category(id) != SETTING_CAT_HIDDEN &&
+                          gSettings.favorite(id)
+                    : Settings::category(id) == (SettingCategory)mCat) {
                 out[n++] = (u8)i;
             }
         }
         return n;
     }
 
+    const char *sectionName(const u8 *ids, int settings, int logical) const {
+        if (logical < settings) {
+            if (isStarred()) return nullptr;
+            const SettingId id = (SettingId)ids[logical];
+            for (u32 i = 0; i < sizeof(kSettingSectionStarts); i++) {
+                if (kSettingSectionStarts[i] == id)
+                    return PackedText::at(kSettingSectionNames, i);
+            }
+            return nullptr;
+        }
+        if (hasFeedbackEditor()) return "FEEDBACK STYLE";
+        if (hasWallkickEditor()) return "DISPLAY STYLE";
+        if (hasFactoryReset()) return "RESET";
+        return nullptr;
+    }
+
+    __attribute__((always_inline))
+    u32 displayMetrics(const u8 *ids, int settings, int logicalCount) const {
+        int rows = logicalCount;
+        int selectedRow = mSel;
+        for (int i = 0; i < logicalCount; i++) {
+            if (!sectionName(ids, settings, i)) continue;
+            rows++;
+            if (i <= mSel) selectedRow++;
+        }
+        return ((u32)rows << 16) | (u16)selectedRow;
+    }
+
+    void jumpSection(const u8 *ids, int settings, int n, int direction) {
+        int row = mSel;
+        for (int left = n; left; left--) {
+            row = wrap(row + direction, n);
+            if (sectionName(ids, settings, row)) {
+                mSel = row;
+                return;
+            }
+        }
+    }
+
     u8 mSel;
     u8 mCat;
     u8 mTitleOffset;
+    u8 mResetConfirm;
 };
 
 static_assert(sizeof(CategorySettingsTab) == 8, "category tab must stay one slot");
@@ -627,10 +1033,12 @@ public:
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
             moveSelection(+1);
         }
-        if (rapid & (TMarioGamePad::A | TMarioGamePad::CSTICK_RIGHT)) {
+        if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            jumpSection(-1);
+        } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
+            jumpSection(+1);
+        } else if (rapid & TMarioGamePad::A) {
             activate(+1);
-        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
-            activate(-1);
         }
     }
 
@@ -670,19 +1078,14 @@ public:
                 drawSectionHeader(menu, x, ry, w, label);
             } else {
                 const bool selected = row == mSel;
-                if (selected) drawRowHighlight(menu, x, ry, w, ROW_H);
-                const char *name = rowName(row);
-                const char *value = rowValue(row);
-                menu->drawText(name, x + 4, ry, ROW_SZ, ROW_SZ,
-                               selected ? cRowSel() : cRow());
-                menu->drawText(value,
-                               x + w - Menu::textWidth(value, ROW_SZ) - 8,
-                               ry, ROW_SZ, ROW_SZ, cValue());
+                drawValueRow(menu, x, ry, w, rowName(row), rowValue(row),
+                             selected, false, false);
             }
             ry += ROW_H;
         }
         drawScrollHints(menu, x, y, w, h, start, end, count);
-        menu->drawText(SUSAMUNE_GLYPH_A " Open/Change   Saved when menu closes",
+        menu->drawText(SUSAMUNE_GLYPH_A " Open/Change   " SUSAMUNE_GLYPH_C
+                       " L/R Section   Saved on close",
                        x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
     }
 
@@ -716,6 +1119,45 @@ private:
         do {
             mSel = (u8)wrap(mSel + dir, ROW_COUNT);
         } while (isSeparator(mSel));
+    }
+
+    void jumpSection(int dir) {
+        if (dir > 0) {
+            for (int row = mSel + 1; row < ROW_COUNT; row++) {
+                if (isSeparator(row)) {
+                    mSel = (u8)row;
+                    moveSelection(+1);
+                    return;
+                }
+            }
+            mSel = 0;
+            moveSelection(+1);
+            return;
+        }
+
+        int current = -1;
+        for (int row = 0; row < mSel; row++) {
+            if (isSeparator(row)) current = row;
+        }
+        if (current >= 0 && mSel > current + 1) {
+            mSel = (u8)current;
+            moveSelection(+1);
+            return;
+        }
+        for (int row = current - 1; row >= 0; row--) {
+            if (isSeparator(row)) {
+                mSel = (u8)row;
+                moveSelection(+1);
+                return;
+            }
+        }
+        for (int row = ROW_COUNT - 1; row >= 0; row--) {
+            if (isSeparator(row)) {
+                mSel = (u8)row;
+                moveSelection(+1);
+                return;
+            }
+        }
     }
 
     void activate(int dir) {
@@ -907,6 +1349,7 @@ namespace {
 u8 sPresetsBuf[sizeof(WarpPresetsTab)] __attribute__((aligned(8)));
 u8 sStagesBuf[sizeof(WarpStagesTab)]   __attribute__((aligned(8)));
 #endif
+u8 sStarredBuf[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
 u8 sQolBuf[sizeof(CategorySettingsTab)]        __attribute__((aligned(8)));
 u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
 u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
@@ -963,16 +1406,18 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sPresetsBuf) WarpPresetsTab();
     mTabs[mNumTabs++] = new (sStagesBuf) WarpStagesTab();
 #endif
-    mTabs[mNumTabs++] = new (sQolBuf) CategorySettingsTab(TITLE_QOL, SETTING_CAT_QOL);
     mTabs[mNumTabs++] =
-        new (sCosmeticBuf) CategorySettingsTab(TITLE_COSMETIC, SETTING_CAT_COSMETIC);
+        new (sStarredBuf) CategorySettingsTab(TITLE_STARRED, kStarredCategory);
     mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab(TITLE_MISC, SETTING_CAT_MISC);
+    mTabs[mNumTabs++] = new (sILingBuf) ILingTab();
+    mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab(TITLE_TIMER, SETTING_CAT_TIMER);
     mTabs[mNumTabs++] =
         new (sSavestateBuf) CategorySettingsTab(TITLE_SAVESTATE, SETTING_CAT_SAVESTATE);
+    mTabs[mNumTabs++] = new (sQolBuf) CategorySettingsTab(TITLE_QOL, SETTING_CAT_QOL);
     mTabs[mNumTabs++] = new (sUiBuf) CategorySettingsTab(TITLE_UI, SETTING_CAT_UI);
-    mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab(TITLE_TIMER, SETTING_CAT_TIMER);
+    mTabs[mNumTabs++] =
+        new (sCosmeticBuf) CategorySettingsTab(TITLE_COSMETIC, SETTING_CAT_COSMETIC);
     mTabs[mNumTabs++] = new (sCreationBuf) CreationTab();
-    mTabs[mNumTabs++] = new (sILingBuf) ILingTab();
     mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
 }
 
@@ -1146,6 +1591,29 @@ void Menu::requestSettingsSave() {
     toast("Saving settings...");
 }
 
+__attribute__((noinline)) static void drawValueRow(
+    Menu *menu, int x, int y, int w, const char *name, const char *value,
+    bool selected, bool starred, bool arrow) {
+    if (selected) drawRowHighlight(menu, x, y, w, ROW_H);
+    if (selected && arrow)
+        menu->drawText(">", x - 2, y, ROW_SZ, ROW_SZ, cAccent());
+    if (starred)
+        menu->drawText("*", x + (arrow ? 8 : 4), y,
+                       ROW_SZ, ROW_SZ, cAccent());
+    menu->drawText(name, x + (arrow ? 12 : 4) +
+                         (starred ? (arrow ? 12 : 16) : 0), y,
+                   ROW_SZ, ROW_SZ, selected ? cRowSel() : cRow());
+    if (value)
+        menu->drawText(value, x + w - Menu::textWidth(value, ROW_SZ) - 8,
+                       y, ROW_SZ, ROW_SZ, cValue());
+}
+
+void Menu::factoryReset() {
+    gCreationExtras.restoreHudDefaults();
+    gSettings.resetDefaults();
+    requestSettingsSave();
+}
+
 void Menu::hide() {
     mShown = false;
     if (gSettings.dirty() || gBinds.dirty() || gInputDisplay.dirty() ||
@@ -1300,6 +1768,7 @@ void Menu::draw(J2DOrthoGraph *ortho) {
         gQFTTimer.draw(this);
         gAttemptCounter.draw(this);
         gCreationExtras.draw(this);
+        WallkickDisplay::draw(this);
         drawToast();  // still visible with the menu closed
         bgmStatsDraw(this);
         return;
@@ -1332,9 +1801,13 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     // The close hint names the live menu bind rather than a fixed combo, since
     // it is user-configurable (and re-bindable to something unguessable).
     {
-        const char *hint = SUSAMUNE_GLYPH_L "/" SUSAMUNE_GLYPH_R " Tabs    "
-                           SUSAMUNE_GLYPH_C " Move    "
-                           SUSAMUNE_GLYPH_A " Select    ";
+        const char *hint = mTabs[mCurTab]->favoriteHint()
+            ? SUSAMUNE_GLYPH_L "/" SUSAMUNE_GLYPH_R " Tabs  "
+              SUSAMUNE_GLYPH_C " Move  " SUSAMUNE_GLYPH_A " Select  "
+              SUSAMUNE_GLYPH_X " Star  "
+            : SUSAMUNE_GLYPH_L "/" SUSAMUNE_GLYPH_R " Tabs    "
+              SUSAMUNE_GLYPH_C " Move    "
+              SUSAMUNE_GLYPH_A " Select    ";
         int hx = PANEL_X + PAD;
         drawText(hint, hx, FOOTER_Y, FOOT_SZ, FOOT_SZ, cFooter());
         hx += textWidth(hint, FOOT_SZ);

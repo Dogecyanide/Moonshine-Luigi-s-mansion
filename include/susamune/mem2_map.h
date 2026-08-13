@@ -65,10 +65,10 @@
 #define SUSAMUNE_MEM2_CFG_PPC_BASE           0x92EF0000u
 #define SUSAMUNE_MEM2_CFG_SIZE               0x00010000u
 
-// PPC-only live PB mirror. The ARM doorbell payload remains immutable while a
-// save is in flight; later PB changes queue here for the next write.
-#define SUSAMUNE_MEM2_PB_LIVE_PPC_BASE       0x92EFFE00u
-#define SUSAMUNE_MEM2_PB_LIVE_SIZE           0x00000200u
+// PPC-only live PB profiles. The ARM doorbell payload remains immutable while
+// a save is in flight; later PB changes queue here for the next write.
+#define SUSAMUNE_MEM2_PB_LIVE_PPC_BASE       0x92EFF800u
+#define SUSAMUNE_MEM2_PB_LIVE_SIZE           0x00000800u
 
 #define NIN_MEM2_KERNEL_PHYS_BASE            0x12F00000u
 #define NIN_MEM2_KERNEL_PPC_BASE             0x92F00000u

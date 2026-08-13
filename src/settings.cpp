@@ -10,6 +10,7 @@
 
 #include "susamune/settings.hxx"
 
+#include "Dolphin/mem.h"
 #include "Dolphin/OS.h"  // DCInvalidateRange, DCStoreRange
 #include "susamune/binds.hxx"
 #include "susamune/creation_extras.hxx"
@@ -29,6 +30,7 @@ enum ChoiceSet {
     CHOICES_QFT_VISIBILITY,
     CHOICES_FREEZE_DURATION,
     CHOICES_BOX_GAME,
+    CHOICES_PIANTISSIMO,
     CHOICES_COUNT,
 };
 
@@ -51,7 +53,8 @@ const char kSettingNames[] =
 const char kChoiceLabels[] =
     "Off\0On\0Completed\0No FLUDD\0All secrets\0Unlocked\0Rocket\0Turbo\0Hover\0"
     "Always\0Shine only\0Hidden\0On freeze\0"
-    "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0" "1\0" "2\0";
+    "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0" "1\0" "2\0"
+    "Slowest\0Fastest";
 
 const u8 kChoiceMap[] = {
     0, 1,              // bool
@@ -61,8 +64,9 @@ const u8 kChoiceMap[] = {
     9, 12, 11,         // QFT visibility
     0, 13, 14, 15, 16, 17,  // freeze duration
     0, 18, 19,          // box game
+    0, 20, 21,          // Piantissimo pattern
 };
-const u8 kChoiceFirst[CHOICES_COUNT + 1] = {0, 2, 5, 9, 12, 15, 21, 24};
+const u8 kChoiceFirst[CHOICES_COUNT + 1] = {0, 2, 5, 9, 12, 15, 21, 24, 27};
 
 u8 choiceCount(const SettingDesc &desc) {
     return kChoiceFirst[desc.choices + 1] - kChoiceFirst[desc.choices];
@@ -177,7 +181,8 @@ void Settings::save() {
                  sizeof(cfg->metadataDisplay));
     DCStoreRange((void *)&cfg->qftDisplay,
                  sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle) +
-                 sizeof(cfg->inputStyle) + sizeof(cfg->creation));
+                 sizeof(cfg->inputStyle) + sizeof(cfg->creation) +
+                 sizeof(cfg->wallkickStyle));
 
     mSaveSeq     = cfg->saveSeq + 1;
     cfg->saveSeq = mSaveSeq;
@@ -262,6 +267,9 @@ void Settings::adopt(const volatile SusamuneCfg *cfg) {
     if (cfg->flags & SUSAMUNE_CFG_FLAG_CREATION) {
         gCreationExtras.adopt(&cfg->creation);
     }
+    if (cfg->flags & SUSAMUNE_CFG_FLAG_WALLKICK_STYLE) {
+        gCreationExtras.adoptWallkick(&cfg->wallkickStyle);
+    }
 
     // set() marks dirty; adopting persisted values is not a user edit.
     mDirty     = false;
@@ -269,16 +277,10 @@ void Settings::adopt(const volatile SusamuneCfg *cfg) {
 }
 
 void Settings::stageInto(volatile SusamuneCfg *cfg) {
-    for (int i = 0; i < SETTING_COUNT; i++) {
-        cfg->values[i] = mValues[i];
-    }
+    memcpy((void *)cfg->values, mValues, sizeof(mValues));
     cfg->count = SETTING_COUNT;
 
-    u16 staged[BIND_COUNT];
-    gBinds.stageInto(staged);
-    for (int i = 0; i < BIND_COUNT; i++) {
-        cfg->binds[i] = staged[i];
-    }
+    gBinds.stageInto(cfg->binds);
     cfg->bindCount = BIND_COUNT;
     gBinds.clearDirty();
 
@@ -291,15 +293,37 @@ void Settings::stageInto(volatile SusamuneCfg *cfg) {
     gQftDisplay.stageInto(&cfg->qftDisplay);
     gQftDisplay.clearDirty();
     gCreationExtras.stageInto(&cfg->creation);
+    gCreationExtras.stageWallkickInto(&cfg->wallkickStyle);
     gCreationExtras.clearDirty();
 }
 
 void Settings::set(SettingId id, u8 value) {
-    value = value % choiceCount(kSettingDescs[id]);
+    if (id >= SETTING_FAVORITES_0 && id <= SETTING_FAVORITES_10) {
+        value &= 0x7F;
+    } else {
+        value = value % choiceCount(kSettingDescs[id]);
+    }
     if (mValues[id] != value) {
         mDirty = true;
     }
     mValues[id] = value;
+}
+
+bool Settings::favorite(SettingId id) const {
+    if (id < 0 || id >= SETTING_FAVORITES_0) return false;
+    const int index = (int)id;
+    const SettingId storage =
+        (SettingId)(SETTING_FAVORITES_0 + index / 7);
+    return (mValues[storage] & (1u << (index % 7))) != 0;
+}
+
+void Settings::toggleFavorite(SettingId id) {
+    if (id < 0 || id >= SETTING_FAVORITES_0) return;
+    const int index = (int)id;
+    const SettingId storage =
+        (SettingId)(SETTING_FAVORITES_0 + index / 7);
+    mValues[storage] ^= (u8)(1u << (index % 7));
+    mDirty = true;
 }
 
 void Settings::cycle(SettingId id, int dir) {

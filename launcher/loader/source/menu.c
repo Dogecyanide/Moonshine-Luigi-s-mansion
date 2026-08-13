@@ -195,14 +195,14 @@ void PrintInfo(void)
 
 void PrintSusamuneBuild(void)
 {
-	static const char JoyTitle[] = "V1.0.0 \"The Joy of Creation\".";
-	static const char JoyChecksum[] = "[" SUSAMUNE_BUILD_CHECKSUM "].";
+	static const char BuildTitle[] = "V1.1.0 \"Happy Shine Happy Life\".";
+	static const char BuildChecksum[] = "[" SUSAMUNE_BUILD_CHECKSUM "].";
 	PrintFormat(DEFAULT_SIZE, BLACK,
-	            640 - MENU_POS_X - ((int)sizeof(JoyTitle) - 1) * 10,
-	            426, "%s", JoyTitle);
+	            640 - MENU_POS_X - ((int)sizeof(BuildTitle) - 1) * 10,
+	            426, "%s", BuildTitle);
 	PrintFormat(DEFAULT_SIZE, BLACK,
-	            640 - MENU_POS_X - ((int)sizeof(JoyChecksum) - 1) * 10,
-	            446, "%s", JoyChecksum);
+	            640 - MENU_POS_X - ((int)sizeof(BuildChecksum) - 1) * 10,
+	            446, "%s", BuildChecksum);
 }
 
 /**

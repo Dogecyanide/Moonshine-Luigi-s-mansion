@@ -258,13 +258,120 @@ static enum PbReadResult ReadPbFile(const char *path,
 	return PB_READ_VALID;
 }
 
+static u32 PbProfilesChecksum(const struct SusamuneILingProfilesFile *file)
+{
+	u32 hash = 2166136261u;
+	u32 p;
+	u32 i;
+
+	hash = PbHashWord(hash, ((u32)file->version << 16) |
+	                         ((u32)file->profileCount << 8) |
+	                         file->activeProfile);
+	hash = PbHashWord(hash, ((u32)file->slotCount << 16) | file->nameSize);
+	hash = PbHashWord(hash, file->gameId);
+	hash = PbHashWord(hash, file->generation);
+	for (p = 0; p < SUSAMUNE_ILING_PROFILE_COUNT; p++)
+		for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+			hash = PbHashWord(hash, (u32)file->values[p][i]);
+	for (p = 0; p < SUSAMUNE_ILING_CUSTOM_NAME_COUNT; p++)
+		for (i = 0; i < SUSAMUNE_ILING_PROFILE_NAME_SIZE; i++)
+			hash = (hash ^ (u8)file->customNames[p][i]) * 16777619u;
+	return hash;
+}
+
+static bool PbProfileNameIsValid(const char *name)
+{
+	u32 i;
+	for (i = 0; i < SUSAMUNE_ILING_PROFILE_NAME_SIZE; i++)
+	{
+		const u8 c = (u8)name[i];
+		if (c == 0)
+			return true;
+		if (c < 0x20 || c > 0x7E)
+			return false;
+	}
+	return false;
+}
+
+static enum PbReadResult ReadPbProfilesFile(
+	const char *path, struct SusamuneILingProfilesFile *file)
+{
+	FIL f;
+	UINT read = 0;
+	u32 p;
+	u32 i;
+	int ret;
+	int closeRet;
+
+	ret = f_open_char(&f, path, FA_READ | FA_OPEN_EXISTING);
+	if (ret == FR_NO_FILE || ret == FR_NO_PATH)
+		return PB_READ_INVALID;
+	if (ret != FR_OK)
+		return PB_READ_UNSAFE;
+	if (f_size(&f) != sizeof(*file))
+	{
+		closeRet = f_close(&f);
+		return closeRet == FR_OK ? PB_READ_INVALID : PB_READ_UNSAFE;
+	}
+	ret = f_read(&f, file, sizeof(*file), &read);
+	closeRet = f_close(&f);
+	if (ret != FR_OK || read != sizeof(*file) || closeRet != FR_OK)
+		return PB_READ_UNSAFE;
+
+	if (file->magic == SUSAMUNE_ILING_PROFILE_FILE_MAGIC &&
+	    file->version != SUSAMUNE_ILING_PROFILE_VERSION)
+		return PB_READ_UNSAFE;
+	if (file->magic != SUSAMUNE_ILING_PROFILE_FILE_MAGIC ||
+	    file->profileCount != SUSAMUNE_ILING_PROFILE_COUNT ||
+	    file->activeProfile >= SUSAMUNE_ILING_PROFILE_COUNT ||
+	    file->slotCount == 0 ||
+	    file->slotCount > SUSAMUNE_ILING_PB_MAX_SLOTS ||
+	    file->nameSize != SUSAMUNE_ILING_PROFILE_NAME_SIZE ||
+	    file->gameId != GAME_ID ||
+	    file->checksum != PbProfilesChecksum(file))
+		return PB_READ_INVALID;
+
+	for (p = 0; p < SUSAMUNE_ILING_PROFILE_COUNT; p++)
+		for (i = 0; i < file->slotCount; i++)
+			if (!PbValueIsValid(file->values[p][i]))
+				return PB_READ_INVALID;
+	for (p = 0; p < SUSAMUNE_ILING_CUSTOM_NAME_COUNT; p++)
+		if (!PbProfileNameIsValid(file->customNames[p]))
+			return PB_READ_INVALID;
+	return PB_READ_VALID;
+}
+
+static void InitPbProfileDefaults(struct SusamuneILingProfilesCfg *profiles)
+{
+	u32 p;
+	u32 i;
+	memset(profiles, 0, sizeof(*profiles));
+	profiles->magic = SUSAMUNE_ILING_PROFILE_MAGIC;
+	profiles->version = SUSAMUNE_ILING_PROFILE_VERSION;
+	profiles->profileCount = SUSAMUNE_ILING_PROFILE_COUNT;
+	profiles->activeProfile = 0;
+	profiles->slotCount = SUSAMUNE_ILING_PB_SLOT_COUNT;
+	profiles->nameSize = SUSAMUNE_ILING_PROFILE_NAME_SIZE;
+	for (p = 0; p < SUSAMUNE_ILING_PROFILE_COUNT; p++)
+		for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+			profiles->values[p][i] = SUSAMUNE_ILING_PB_UNSET;
+	strcpy(profiles->customNames[0], "Custom 1");
+	strcpy(profiles->customNames[1], "Custom 2");
+}
+
 static bool InitPbFiles(struct SusamuneCfg *cfg, const char *region)
 {
 	struct SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
-	struct SusamuneILingPbFile file;
+	struct SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
+	struct SusamuneILingPbFile legacyFile;
+	struct SusamuneILingProfilesFile file;
 	u32 i;
+	u32 p;
 	u32 fileIndex;
+	bool legacySafe = true;
 	bool safe = true;
+	s32 legacyActive = -1;
+	u32 legacyGeneration = 0;
 
 	pbs->magic   = SUSAMUNE_ILING_PB_MAGIC;
 	pbs->version = SUSAMUNE_ILING_PB_VERSION;
@@ -277,11 +384,41 @@ static bool InitPbFiles(struct SusamuneCfg *cfg, const char *region)
 	_sprintf(PbPaths[1], "%s/susamune_pbs_v1_%s_b.bin",
 	         SusamuneCfgStoragePrefix(), region);
 
+	for (fileIndex = 0; fileIndex < SUSAMUNE_PB_FILE_COUNT; fileIndex++)
+	{
+		enum PbReadResult readResult = ReadPbFile(PbPaths[fileIndex], &legacyFile);
+		if (readResult == PB_READ_UNSAFE)
+		{
+			legacySafe = false;
+			continue;
+		}
+		if (readResult != PB_READ_VALID)
+			continue;
+		if (legacyActive >= 0 &&
+		    !PbGenerationIsNewer(legacyFile.generation, legacyGeneration))
+			continue;
+
+		for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+			pbs->values[i] = SUSAMUNE_ILING_PB_UNSET;
+		for (i = 0; i < legacyFile.count; i++)
+			pbs->values[i] = legacyFile.values[i];
+		pbs->count = legacyFile.count > SUSAMUNE_ILING_PB_SLOT_COUNT
+		                 ? legacyFile.count : SUSAMUNE_ILING_PB_SLOT_COUNT;
+		legacyGeneration = legacyFile.generation;
+		legacyActive = (s32)fileIndex;
+	}
+
+	InitPbProfileDefaults(profiles);
+	_sprintf(PbPaths[0], "%s/susamune_pbs_v2_%s_a.bin",
+	         SusamuneCfgStoragePrefix(), region);
+	_sprintf(PbPaths[1], "%s/susamune_pbs_v2_%s_b.bin",
+	         SusamuneCfgStoragePrefix(), region);
 	PbGeneration = 0;
 	PbActiveFile = -1;
 	for (fileIndex = 0; fileIndex < SUSAMUNE_PB_FILE_COUNT; fileIndex++)
 	{
-		enum PbReadResult readResult = ReadPbFile(PbPaths[fileIndex], &file);
+		enum PbReadResult readResult =
+			ReadPbProfilesFile(PbPaths[fileIndex], &file);
 		if (readResult == PB_READ_UNSAFE)
 		{
 			safe = false;
@@ -293,14 +430,29 @@ static bool InitPbFiles(struct SusamuneCfg *cfg, const char *region)
 		    !PbGenerationIsNewer(file.generation, PbGeneration))
 			continue;
 
-		for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
-			pbs->values[i] = SUSAMUNE_ILING_PB_UNSET;
-		for (i = 0; i < file.count; i++)
-			pbs->values[i] = file.values[i];
-		pbs->count = file.count > SUSAMUNE_ILING_PB_SLOT_COUNT
-		                 ? file.count : SUSAMUNE_ILING_PB_SLOT_COUNT;
+		profiles->activeProfile = file.activeProfile;
+		profiles->slotCount = file.slotCount > SUSAMUNE_ILING_PB_SLOT_COUNT
+			? file.slotCount : SUSAMUNE_ILING_PB_SLOT_COUNT;
+		for (p = 0; p < SUSAMUNE_ILING_PROFILE_COUNT; p++)
+			for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+				profiles->values[p][i] = file.values[p][i];
+		for (p = 0; p < SUSAMUNE_ILING_CUSTOM_NAME_COUNT; p++)
+			memcpy(profiles->customNames[p], file.customNames[p],
+			       SUSAMUNE_ILING_PROFILE_NAME_SIZE);
 		PbGeneration = file.generation;
 		PbActiveFile = (s32)fileIndex;
+	}
+
+	if (PbActiveFile < 0)
+	{
+		if (!legacySafe)
+			safe = false;
+		else if (legacyActive >= 0)
+		{
+			for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+				profiles->values[0][i] = pbs->values[i];
+			profiles->saveSeq = 1;
+		}
 	}
 
 	PbAckSeq = 0;
@@ -310,33 +462,47 @@ static bool InitPbFiles(struct SusamuneCfg *cfg, const char *region)
 	return safe;
 }
 
-static int WritePbFile(const struct SusamuneILingPbCfg *pbs)
+static int WritePbProfilesFile(const struct SusamuneILingProfilesCfg *profiles)
 {
-	struct SusamuneILingPbFile file;
+	struct SusamuneILingProfilesFile file;
 	FIL f;
 	UINT wrote = 0;
 	u32 i;
+	u32 p;
 	u32 target = PbActiveFile == 0 ? 1u : 0u;
 	int ret;
 	int closeRet;
 
-	if (pbs->count == 0 || pbs->count > SUSAMUNE_ILING_PB_MAX_SLOTS)
+	if (profiles->profileCount != SUSAMUNE_ILING_PROFILE_COUNT ||
+	    profiles->activeProfile >= SUSAMUNE_ILING_PROFILE_COUNT ||
+	    profiles->slotCount == 0 ||
+	    profiles->slotCount > SUSAMUNE_ILING_PB_MAX_SLOTS ||
+	    profiles->nameSize != SUSAMUNE_ILING_PROFILE_NAME_SIZE)
 		return FR_INVALID_PARAMETER;
-	for (i = 0; i < pbs->count; i++)
-	{
-		if (!PbValueIsValid(pbs->values[i]))
+	for (p = 0; p < SUSAMUNE_ILING_PROFILE_COUNT; p++)
+		for (i = 0; i < profiles->slotCount; i++)
+			if (!PbValueIsValid(profiles->values[p][i]))
+				return FR_INVALID_PARAMETER;
+	for (p = 0; p < SUSAMUNE_ILING_CUSTOM_NAME_COUNT; p++)
+		if (!PbProfileNameIsValid(profiles->customNames[p]))
 			return FR_INVALID_PARAMETER;
-	}
 
 	memset(&file, 0, sizeof(file));
-	file.magic      = SUSAMUNE_ILING_PB_FILE_MAGIC;
-	file.version    = SUSAMUNE_ILING_PB_VERSION;
-	file.count      = pbs->count;
+	file.magic      = SUSAMUNE_ILING_PROFILE_FILE_MAGIC;
+	file.version    = SUSAMUNE_ILING_PROFILE_VERSION;
+	file.profileCount = SUSAMUNE_ILING_PROFILE_COUNT;
+	file.activeProfile = profiles->activeProfile;
+	file.slotCount = profiles->slotCount;
+	file.nameSize = SUSAMUNE_ILING_PROFILE_NAME_SIZE;
 	file.gameId     = GAME_ID;
 	file.generation = PbGeneration + 1;
-	for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
-		file.values[i] = pbs->values[i];
-	file.checksum = PbChecksum(&file);
+	for (p = 0; p < SUSAMUNE_ILING_PROFILE_COUNT; p++)
+		for (i = 0; i < SUSAMUNE_ILING_PB_MAX_SLOTS; i++)
+			file.values[p][i] = profiles->values[p][i];
+	for (p = 0; p < SUSAMUNE_ILING_CUSTOM_NAME_COUNT; p++)
+		memcpy(file.customNames[p], profiles->customNames[p],
+		       SUSAMUNE_ILING_PROFILE_NAME_SIZE);
+	file.checksum = PbProfilesChecksum(&file);
 
 	ret = f_open_char(&f, PbPaths[target], FA_WRITE | FA_CREATE_ALWAYS);
 	if (ret != FR_OK)
@@ -944,6 +1110,116 @@ static void ApplyCreationKey(struct SusamuneCreationCfg *cfg,
 		cfg->timerLabelVisiblePresent = 1;
 		return;
 	}
+	if (strcmp(key, "recent_ils_x") == 0 && ParseU16(text, &v16))
+	{
+		cfg->recentIlX = v16;
+		cfg->recentIlPositionPresent = 1;
+		return;
+	}
+	if (strcmp(key, "recent_ils_y") == 0 && ParseU16(text, &v16))
+	{
+		cfg->recentIlY = v16;
+		cfg->recentIlPositionPresent = 1;
+		return;
+	}
+	if (strcmp(key, "recent_ils_scale") == 0 && ParseQftU8(text, &v8))
+	{
+		cfg->recentIlScale = v8;
+		cfg->recentIlPositionPresent = 1;
+		return;
+	}
+	if (strcmp(key, "recent_ils_text_rgb") == 0 && ParseQftRgb(text, rgb))
+	{
+		cfg->recentIlTextRgb[0] = rgb[0];
+		cfg->recentIlTextRgb[1] = rgb[1];
+		cfg->recentIlTextRgb[2] = rgb[2];
+		return;
+	}
+	if (strcmp(key, "recent_ils_background_rgb") == 0 && ParseQftRgb(text, rgb))
+	{
+		cfg->recentIlBgR = rgb[0];
+		cfg->recentIlBgG = rgb[1];
+		cfg->recentIlBgB = rgb[2];
+		return;
+	}
+	if (strcmp(key, "recent_ils_text_alpha") == 0 && ParseQftU8(text, &v8))
+	{
+		cfg->recentIlTextA = v8;
+		return;
+	}
+	if (strcmp(key, "recent_ils_background_alpha") == 0 &&
+	    ParseQftU8(text, &v8))
+	{
+		cfg->recentIlBgA = v8;
+		return;
+	}
+	if (strcmp(key, "recent_ils_text_brightness") == 0 &&
+	    ParseQftU8(text, &v8))
+	{
+		cfg->recentIlTextBrightness = v8;
+		return;
+	}
+	if (strcmp(key, "recent_ils_padding") == 0 && ParseQftU8(text, &v8))
+	{
+		cfg->recentIlPadding = v8;
+		return;
+	}
+	if (strcmp(key, "savestate_feedback_x") == 0 && ParseU16(text, &v16))
+	{
+		cfg->savestateX = v16;
+		return;
+	}
+	if (strcmp(key, "savestate_feedback_y") == 0 && ParseU16(text, &v16))
+	{
+		cfg->savestateY = v16;
+		return;
+	}
+	if (strcmp(key, "savestate_feedback_scale") == 0 &&
+	    ParseQftU8(text, &v8))
+	{
+		cfg->savestateScale = v8;
+		return;
+	}
+	if (strcmp(key, "savestate_feedback_text_rgb") == 0 &&
+	    ParseQftRgb(text, rgb))
+	{
+		cfg->savestateTextRgb[0] = rgb[0];
+		cfg->savestateTextRgb[1] = rgb[1];
+		cfg->savestateTextRgb[2] = rgb[2];
+		return;
+	}
+	if (strcmp(key, "savestate_feedback_text_alpha") == 0 &&
+	    ParseQftU8(text, &v8))
+	{
+		cfg->savestateTextA = v8;
+		return;
+	}
+	if (strcmp(key, "savestate_feedback_background_rgb") == 0 &&
+	    ParseQftRgb(text, rgb))
+	{
+		cfg->savestateBgR = rgb[0];
+		cfg->savestateBgG = rgb[1];
+		cfg->savestateBgB = rgb[2];
+		return;
+	}
+	if (strcmp(key, "savestate_feedback_background_alpha") == 0 &&
+	    ParseQftU8(text, &v8))
+	{
+		cfg->savestateBgA = v8;
+		return;
+	}
+	if (strcmp(key, "savestate_feedback_text_brightness") == 0 &&
+	    ParseQftU8(text, &v8))
+	{
+		cfg->savestateTextBrightness = v8;
+		return;
+	}
+	if (strcmp(key, "savestate_feedback_padding") == 0 &&
+	    ParseQftU8(text, &v8))
+	{
+		cfg->savestatePadding = v8;
+		return;
+	}
 	if (!ParseCreationWordKey(key, &word, &field))
 		return;
 	if (strcmp(field, "text") == 0)
@@ -991,6 +1267,42 @@ static void ApplyCreationKey(struct SusamuneCreationCfg *cfg,
 	else if (strcmp(field, "text_brightness") == 0) cfg->words[word].textBrightness = v8;
 	else if (strcmp(field, "padding") == 0) cfg->words[word].padding = v8;
 	else if (strcmp(field, "visible") == 0) cfg->words[word].visible = v8;
+}
+
+static void ApplyWallkickStyleKey(struct SusamuneWallkickStyleCfg *cfg,
+	                              const char *key, const char *text)
+{
+	u8 rgb[3];
+	u8 v8;
+	u16 v16;
+	u32 i;
+	char expected[24];
+
+	if (strcmp(key, "wallkick_x") == 0 && ParseU16(text, &v16)) cfg->x = v16;
+	else if (strcmp(key, "wallkick_y") == 0 && ParseU16(text, &v16)) cfg->y = v16;
+	else if (strcmp(key, "wallkick_scale") == 0 && ParseQftU8(text, &v8)) cfg->scale = v8;
+	else if (strcmp(key, "wallkick_text_alpha") == 0 && ParseQftU8(text, &v8)) cfg->textA = v8;
+	else if (strcmp(key, "wallkick_background_rgb") == 0 && ParseQftRgb(text, rgb))
+	{
+		cfg->bgR = rgb[0]; cfg->bgG = rgb[1]; cfg->bgB = rgb[2];
+	}
+	else if (strcmp(key, "wallkick_background_alpha") == 0 && ParseQftU8(text, &v8)) cfg->bgA = v8;
+	else if (strcmp(key, "wallkick_text_brightness") == 0 && ParseQftU8(text, &v8)) cfg->textBrightness = v8;
+	else if (strcmp(key, "wallkick_padding") == 0 && ParseQftU8(text, &v8)) cfg->padding = v8;
+	else
+	{
+		for (i = 0; i < SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT; i++)
+		{
+			_sprintf(expected, "wallkick_%u_rgb", i + 1);
+			if (strcmp(key, expected) == 0 && ParseQftRgb(text, rgb))
+			{
+				cfg->rgb[i][0] = rgb[0];
+				cfg->rgb[i][1] = rgb[1];
+				cfg->rgb[i][2] = rgb[2];
+				return;
+			}
+		}
+	}
 }
 
 // Whether the file already carries settings for this game version. When it does
@@ -1080,6 +1392,7 @@ static void ParseIni(char *text, struct SusamuneCfg *cfg)
 		else if (section == SECTION_CREATION)
 		{
 			ApplyCreationKey(&cfg->creation, Trim(line), Trim(eq + 1));
+			ApplyWallkickStyleKey(&cfg->wallkickStyle, Trim(line), Trim(eq + 1));
 		}
 
 		line = next;
@@ -1399,6 +1712,81 @@ static void EmitCreationSection(FIL *f, int *err,
 	if (d->timerLabelVisiblePresent)
 		Emit(f, err, line, (u32)_sprintf(line, "show_timer_label = %u\r\n",
 			d->timerLabelVisible));
+	if (d->recentIlPositionPresent)
+	{
+		Emit(f, err, line, (u32)_sprintf(line, "recent_ils_x = %u\r\n",
+			d->recentIlX));
+		Emit(f, err, line, (u32)_sprintf(line, "recent_ils_y = %u\r\n",
+			d->recentIlY));
+		Emit(f, err, line, (u32)_sprintf(line, "recent_ils_scale = %u\r\n",
+			d->recentIlScale));
+	}
+	if (d->reserved0 == SUSAMUNE_CREATION_RECENT_STYLE_MAGIC)
+	{
+		Emit(f, err, line, (u32)_sprintf(
+			line, "recent_ils_text_rgb = %u,%u,%u\r\n",
+			d->recentIlTextRgb[0], d->recentIlTextRgb[1], d->recentIlTextRgb[2]));
+		Emit(f, err, line, (u32)_sprintf(line, "recent_ils_text_alpha = %u\r\n",
+			d->recentIlTextA));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "recent_ils_background_rgb = %u,%u,%u\r\n",
+			d->recentIlBgR, d->recentIlBgG, d->recentIlBgB));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "recent_ils_background_alpha = %u\r\n", d->recentIlBgA));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "recent_ils_text_brightness = %u\r\n",
+			d->recentIlTextBrightness));
+		Emit(f, err, line, (u32)_sprintf(line, "recent_ils_padding = %u\r\n",
+			d->recentIlPadding));
+	}
+	if (d->savestateStyleMagic ==
+	    SUSAMUNE_CREATION_SAVESTATE_STYLE_MAGIC)
+	{
+		Emit(f, err, line, (u32)_sprintf(
+			line, "savestate_feedback_x = %u\r\n", d->savestateX));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "savestate_feedback_y = %u\r\n", d->savestateY));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "savestate_feedback_scale = %u\r\n", d->savestateScale));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "savestate_feedback_text_rgb = %u,%u,%u\r\n",
+			d->savestateTextRgb[0], d->savestateTextRgb[1],
+			d->savestateTextRgb[2]));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "savestate_feedback_text_alpha = %u\r\n",
+			d->savestateTextA));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "savestate_feedback_background_rgb = %u,%u,%u\r\n",
+			d->savestateBgR, d->savestateBgG, d->savestateBgB));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "savestate_feedback_background_alpha = %u\r\n",
+			d->savestateBgA));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "savestate_feedback_text_brightness = %u\r\n",
+			d->savestateTextBrightness));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "savestate_feedback_padding = %u\r\n",
+			d->savestatePadding));
+	}
+	{
+		const struct SusamuneWallkickStyleCfg *w = &cfg->wallkickStyle;
+		Emit(f, err, line, (u32)_sprintf(line, "wallkick_x = %u\r\n", w->x));
+		Emit(f, err, line, (u32)_sprintf(line, "wallkick_y = %u\r\n", w->y));
+		Emit(f, err, line, (u32)_sprintf(line, "wallkick_scale = %u\r\n", w->scale));
+		Emit(f, err, line, (u32)_sprintf(line, "wallkick_text_alpha = %u\r\n", w->textA));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "wallkick_background_rgb = %u,%u,%u\r\n",
+			w->bgR, w->bgG, w->bgB));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "wallkick_background_alpha = %u\r\n", w->bgA));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "wallkick_text_brightness = %u\r\n", w->textBrightness));
+		Emit(f, err, line, (u32)_sprintf(line, "wallkick_padding = %u\r\n", w->padding));
+		for (i = 0; i < SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT; i++)
+			Emit(f, err, line, (u32)_sprintf(
+				line, "wallkick_%u_rgb = %u,%u,%u\r\n", i + 1,
+				w->rgb[i][0], w->rgb[i][1], w->rgb[i][2]));
+	}
 	for (word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++)
 	{
 		const struct SusamuneCreationWordCfg *w = &d->words[word];
@@ -1629,14 +2017,41 @@ static void InitCreationDefaults(struct SusamuneCreationCfg *cfg)
 
 	cfg->magic = SUSAMUNE_CREATION_CFG_MAGIC;
 	cfg->version = SUSAMUNE_CREATION_CFG_VERSION;
+	cfg->reserved0 = SUSAMUNE_CREATION_RECENT_STYLE_MAGIC;
 	cfg->colorPresent = 0;
-	cfg->timerScale = 100;
-	cfg->timerX = 0xffff;
-	cfg->timerY = 0xffff;
-	cfg->timerPositionPresent = 0;
+	cfg->recentIlScale = 100;
+	cfg->recentIlX = 382;
+	cfg->recentIlY = 92;
+	cfg->recentIlPositionPresent = 0;
 	cfg->timerLabelVisible = 1;
 	cfg->timerLabelVisiblePresent = 0;
 	cfg->reserved1 = 0;
+	cfg->recentIlTextRgb[0] = 255;
+	cfg->recentIlTextRgb[1] = 255;
+	cfg->recentIlTextRgb[2] = 255;
+	cfg->recentIlTextA = 255;
+	cfg->recentIlBgR = 12;
+	cfg->recentIlBgG = 20;
+	cfg->recentIlBgB = 34;
+	cfg->recentIlBgA = 205;
+	cfg->recentIlTextBrightness = 100;
+	cfg->recentIlPadding = 10;
+	memset(cfg->reserved2, 0, sizeof(cfg->reserved2));
+	cfg->savestateStyleMagic = SUSAMUNE_CREATION_SAVESTATE_STYLE_MAGIC;
+	cfg->savestateX = 30;
+	cfg->savestateY = 418;
+	cfg->savestateScale = 80;
+	cfg->savestateTextA = 255;
+	cfg->savestateBgR = 0;
+	cfg->savestateBgG = 0;
+	cfg->savestateBgB = 0;
+	cfg->savestateBgA = 200;
+	cfg->savestateTextBrightness = 100;
+	cfg->savestatePadding = 8;
+	cfg->savestateTextRgb[0] = 255;
+	cfg->savestateTextRgb[1] = 255;
+	cfg->savestateTextRgb[2] = 255;
+	memset(cfg->reserved3, 0, sizeof(cfg->reserved3));
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
 		cfg->rgb[i][0] = 255;
@@ -1662,6 +2077,23 @@ static void InitCreationDefaults(struct SusamuneCreationCfg *cfg)
 		for (i = 0; i < SUSAMUNE_CREATION_WORD_CHARS; i++)
 			w->rgb[i][0] = w->rgb[i][1] = w->rgb[i][2] = 255;
 	}
+}
+
+static void InitWallkickStyleDefaults(struct SusamuneWallkickStyleCfg *cfg)
+{
+	u32 i;
+	memset(cfg, 0, sizeof(*cfg));
+	cfg->magic = SUSAMUNE_WALLKICK_STYLE_MAGIC;
+	cfg->version = SUSAMUNE_WALLKICK_STYLE_VERSION;
+	cfg->x = 300;
+	cfg->y = 106;
+	cfg->scale = 90;
+	cfg->textA = 255;
+	cfg->bgA = 185;
+	cfg->textBrightness = 100;
+	cfg->padding = 5;
+	for (i = 0; i < SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT; i++)
+		cfg->rgb[i][0] = cfg->rgb[i][1] = cfg->rgb[i][2] = 255;
 }
 
 void SusamuneCfgInit(void)
@@ -1747,6 +2179,7 @@ void SusamuneCfgInit(void)
 	cfg->inputStyle.version = SUSAMUNE_INPUT_STYLE_VERSION;
 	cfg->inputStyle.present = 0;
 	InitCreationDefaults(&cfg->creation);
+	InitWallkickStyleDefaults(&cfg->wallkickStyle);
 
 	cfg->magic     = SUSAMUNE_CFG_MAGIC;
 	cfg->version   = SUSAMUNE_CFG_VERSION;
@@ -1757,9 +2190,11 @@ void SusamuneCfgInit(void)
 	                 SUSAMUNE_CFG_FLAG_QFT_DISPLAY |
 	                 SUSAMUNE_CFG_FLAG_METADATA_STYLE |
 	                 SUSAMUNE_CFG_FLAG_INPUT_STYLE |
-	                 SUSAMUNE_CFG_FLAG_CREATION;
+	                 SUSAMUNE_CFG_FLAG_CREATION |
+	                 SUSAMUNE_CFG_FLAG_WALLKICK_STYLE;
 	if (InitPbFiles(cfg, region))
-		cfg->flags |= SUSAMUNE_CFG_FLAG_ILING_PBS;
+		cfg->flags |= SUSAMUNE_CFG_FLAG_ILING_PBS |
+		              SUSAMUNE_CFG_FLAG_ILING_PROFILES;
 
 	ret = f_open_char(&f, SusamuneCfgIniPath(), FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)
@@ -1822,7 +2257,8 @@ void SusamuneCfgService(void)
 	                 sizeof(cfg->inputDisplay) + sizeof(cfg->metadataDisplay));
 	sync_before_read(&cfg->qftDisplay,
 	                 sizeof(cfg->qftDisplay) + sizeof(cfg->metadataStyle) +
-	                 sizeof(cfg->inputStyle) + sizeof(cfg->creation));
+	                 sizeof(cfg->inputStyle) + sizeof(cfg->creation) +
+	                 sizeof(cfg->wallkickStyle));
 	seq = cfg->saveSeq;
 
 	ret = WriteIniFile(cfg);
@@ -1842,40 +2278,41 @@ void SusamuneCfgService(void)
 bool SusamunePbPending(void)
 {
 	struct SusamuneCfg *cfg = CfgBlock();
-	struct SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
+	struct SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
 
 	if (!CfgReady || !PbReady)
 		return false;
 
-	sync_before_read(pbs, 32);
-	if (pbs->magic != SUSAMUNE_ILING_PB_MAGIC ||
-	    pbs->version != SUSAMUNE_ILING_PB_VERSION)
+	sync_before_read(profiles, 32);
+	if (profiles->magic != SUSAMUNE_ILING_PROFILE_MAGIC ||
+	    profiles->version != SUSAMUNE_ILING_PROFILE_VERSION)
 		return false;
-	return pbs->saveSeq != PbAckSeq;
+	return profiles->saveSeq != PbAckSeq;
 }
 
 void SusamunePbService(void)
 {
 	struct SusamuneCfg *cfg = CfgBlock();
-	struct SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
+	struct SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
 	u32 seq;
 	int ret;
 
 	if (!PbReady)
 		return;
 
-	sync_before_read(pbs, 32);
-	seq = pbs->saveSeq;
-	sync_before_read(pbs->values, sizeof(pbs->values));
+	sync_before_read(profiles, 32);
+	seq = profiles->saveSeq;
+	sync_before_read(profiles->values,
+	                 sizeof(profiles->values) + sizeof(profiles->customNames));
 
-	ret = WritePbFile(pbs);
+	ret = WritePbProfilesFile(profiles);
 	if (ret != FR_OK)
 		dbgprintf("Susamune: failed to write ILing PBs (%d)\r\n", ret);
 
-	pbs->status = (u32)ret;
-	pbs->ackSeq = seq;
+	profiles->status = (u32)ret;
+	profiles->ackSeq = seq;
 	PbAckSeq = seq;
 
 	// The PPC owns the control and payload lines after boot.
-	sync_after_write(&pbs->ackSeq, 32);
+	sync_after_write(&profiles->ackSeq, 32);
 }

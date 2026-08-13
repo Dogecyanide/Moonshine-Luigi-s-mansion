@@ -45,6 +45,7 @@ enum SettingCategory {
     SETTING_CAT_UI,
     SETTING_CAT_TIMER,
     SETTING_CAT_CUSTOM,
+    SETTING_CAT_HIDDEN,
     SETTING_CAT_COUNT
 };
 
@@ -104,6 +105,11 @@ public:
     // Advance a setting's value by dir (+1 / -1), wrapping. Toggles a bool,
     // steps a choice. Used by the menu for both A-press and left/right.
     void cycle(SettingId id, int dir);
+
+    // The Starred tab covers the visible generic settings that predate the
+    // hidden packed storage at SETTING_FAVORITES_0.
+    bool favorite(SettingId id) const;
+    void toggleFavorite(SettingId id);
 
     // Human-readable label for the current value ("On"/"Off" or a choice).
     const char *valueLabel(SettingId id) const;

@@ -37,6 +37,12 @@ patches = [
     # Sunscript without changing the actual save data.
     {'jp': 0x800e64e8, 'us': 0x80292fa0, 'pal': 0x8028ad2c,
      'sym': 'susamuneGetSystemFlag', 'type': PatchType.BL},
+    # TYoshi::ride and TItemNozzle::touchPlayer: preserve the retail event,
+    # then optionally request the same save UI for repeat pickups.
+    {'jp': 0x8014f818, 'us': 0x802704bc, 'pal': 0x80268248,
+     'sym': 'susamuneFireRideYoshi', 'type': PatchType.BL},
+    {'jp': 0x80193e68, 'us': 0x801bbe80, 'pal': 0x801b3d38,
+     'sym': 'susamuneFireGetNozzle', 'type': PatchType.BL},
 #   {'jp': 0x800fa110, 'us': ..., 'pal': ..., 'sym': 'onFinishAppState', 'type': PatchType.BL},
     # insert NOPs to speed up boot process
     # initialize__12TApplicationFv + 0x2c / +0x40.

@@ -6,6 +6,8 @@
 #include "J2D/J2DTextBox.hxx"
 #endif
 
+class Menu;
+
 class SavestateManager {
 public:
     SavestateManager();
@@ -20,21 +22,24 @@ public:
     // for the current frame has finished.
     void processPendingLoad();
 
-#if ENABLE_SAVESTATE_DBG
-    // Drawn after the scene each frame, shows "saved" / "loaded" / error.
-    void draw(J2DOrthoGraph *ortho);
-#endif
+    // Drawn after the scene each frame; the production prompt uses the
+    // configurable Creation style and the optional debug label stays separate.
+    void draw(Menu *menu);
 
     // Public so callers can trigger from elsewhere (e.g. a debug menu).
     bool saveState();
     bool loadState();
 
 private:
+    void feedback(const char *debug, const char *message);
+
 #if ENABLE_SAVESTATE_DBG
     void setStatus(const char *msg);
 
     J2DTextBox *mInfoText;
 #endif
+    char mFeedback[48];
+    int  mFeedbackFrames;
     bool mLoadPending;
 };
 

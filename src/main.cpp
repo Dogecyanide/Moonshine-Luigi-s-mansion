@@ -37,6 +37,8 @@
 #include "SMS/Manager/FlagManager.hxx"
 #include "SMS/Manager/PollutionManager.hxx"
 #include "susamune/nintendont_cfg.h"
+#include "susamune/wallkick_display.hxx"
+#include "susamune/gameplay_polish.hxx"
 
 SavestateManager* gSavestateMgr = nullptr;
 
@@ -136,6 +138,7 @@ extern "C" void onSetup(TMarDirector* director) {
     gQFTTimer.onStageSetup(director);
     gAttemptCounter.onStageSetup(director);
     gCreationExtras.onStageSetup();
+    WallkickDisplay::onStageSetup();
 #if ENABLE_MEM_DIAGNOSTICS
     memDiagnosticsOnStageSetup();
 #endif
@@ -194,6 +197,11 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     const bool freeze = gpMarDirector &&
                         gpMarDirector->mCurState == TMarDirector::STATE_NORMAL &&
                         ((gMenu && gMenu->shown()) || WarpWheel::shown());
+    const bool marioActive = gpMarDirector &&
+                             gpMarDirector->mCurState == TMarDirector::STATE_NORMAL &&
+                             !freeze;
+    WallkickDisplay::beforeDirect(marioActive);
+    GameplayPolish::beforeDirect();
     if (freeze) {
         gpMarDirector->mCurState = TMarDirector::STATE_STAGE_EXIT_2;
     }
@@ -202,6 +210,8 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
         gpMarDirector->mCurState = TMarDirector::STATE_NORMAL;
         state = 0;
     }
+    WallkickDisplay::afterDirect(marioActive);
+    GameplayPolish::afterDirect();
     if (!gSettings.getBool(SETTING_DISABLE_WARPS))
         state = LevelWarp::onDirected(state);
 
@@ -261,6 +271,9 @@ extern "C" void afterDraw() {
         
         if (gMenu)
             gMenu->draw(&ortho);
+        GameplayPolish::draw(gMenu);
+        if (gSavestateMgr)
+            gSavestateMgr->draw(gMenu);
 #if ENABLE_MEM_DIAGNOSTICS
         memDiagnosticsDraw(gMenu);
 #endif
@@ -269,9 +282,5 @@ extern "C" void afterDraw() {
             PatternSelector::draw(gMenu);
         if (!gSettings.getBool(SETTING_DISABLE_WARPS))
             WarpWheel::draw();
-#if ENABLE_SAVESTATE_DBG
-        if (gSavestateMgr)
-            gSavestateMgr->draw(&ortho);
-#endif
     }
 }

@@ -107,7 +107,7 @@ public:
 
     // --- persistence (see settings.cpp, which owns the MEM2 handoff) ---
     void adopt(u16 mask, BindId id);  // like set(), but not a user edit
-    void stageInto(u16 *dst) const;
+    void stageInto(volatile u16 *dst) const;
 
 private:
     enum RecState {
