@@ -114,7 +114,35 @@
     X(SETTING_TIMER_FREEZE_DIVE_ROLLOUT, "timer_freeze_dive_rollout")       \
     X(SETTING_TIMER_FREEZE_DIVE_GETUP,   "timer_freeze_dive_getup")          \
     /* -- Box game override (append-only persisted id) -- */                  \
-    X(SETTING_FORCE_BOX_GAME,            "force_box_game")
+    X(SETTING_FORCE_BOX_GAME,            "force_box_game")                  \
+    /* -- IL PB controls (append-only persisted ids) -- */                    \
+    X(SETTING_ILING_RECORDING,           "iling_recording")                 \
+    X(SETTING_ILING_POPUP,               "iling_popup")                     \
+    /* -- QFT section history (append-only persisted id) -- */                \
+    X(SETTING_TIMER_SECTIONS,            "timer_sections")                  \
+    /* -- Recent IL name format (append-only persisted id) -- */              \
+    X(SETTING_ILING_SHORT_NAMES,         "iling_short_names")                \
+    /* -- Savestate feedback (append-only persisted id) -- */                 \
+    X(SETTING_SAVESTATE_FEEDBACK,        "savestate_feedback")               \
+    /* -- Wallkick display (append-only persisted id) -- */                   \
+    X(SETTING_WALLKICK_DISPLAY,          "wallkick_display")                \
+    /* -- Restart queue feedback (append-only persisted id) -- */             \
+    X(SETTING_RESTART_QUEUED_FEEDBACK,   "restart_queued_feedback")           \
+    /* -- Pre-release 6 polish (append-only persisted ids) -- */               \
+    X(SETTING_YOSHI_NOZZLE_SAVE_PROMPT,  "yoshi_nozzle_save_prompt")          \
+    X(SETTING_HIDE_HUD_WHEN_PAUSED,      "hide_hud_when_paused")              \
+    /* -- Starred-menu bit storage, seven setting ids per byte -- */           \
+    X(SETTING_FAVORITES_0,               "favorites_0")                       \
+    X(SETTING_FAVORITES_1,               "favorites_1")                       \
+    X(SETTING_FAVORITES_2,               "favorites_2")                       \
+    X(SETTING_FAVORITES_3,               "favorites_3")                       \
+    X(SETTING_FAVORITES_4,               "favorites_4")                       \
+    X(SETTING_FAVORITES_5,               "favorites_5")                       \
+    X(SETTING_FAVORITES_6,               "favorites_6")                       \
+    X(SETTING_FAVORITES_7,               "favorites_7")                       \
+    X(SETTING_FAVORITES_8,               "favorites_8")                       \
+    X(SETTING_FAVORITES_9,               "favorites_9")                       \
+    X(SETTING_FAVORITES_10,              "favorites_10")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

@@ -16,6 +16,7 @@
 #include <SMS/Player/Yoshi.hxx>
 
 #include <SMS/GC2D/GCConsole2.hxx>
+#include <SMS/GC2D/PauseMenu2.hxx>
 #include <SMS/GC2D/ShineFader.hxx>
 #include <SMS/MoveBG/DemoCannon.hxx>
 #include <SMS/NPC/NpcBase.hxx>
@@ -25,6 +26,8 @@
 
 #include <SMS/Player/MarioGamePad.hxx>
 
+class TItemNozzle;
+
 class TMarDirector : public JDrama::TDirector {
 public:
     enum Status {
@@ -33,6 +36,8 @@ public:
         STATE_GAME_STARTING = 2,
         STATE_NORMAL        = 4,
         STATE_PAUSE_MENU    = 5,
+        // Mario's miss animation and the fade into the retry/save path.
+        STATE_DEATH         = 7,
         // Entered after moveStage(): fades out, then direct() reports the
         // next app state instead of returning 0.
         STATE_STAGE_EXIT    = 9,
@@ -66,7 +71,7 @@ public:
     void movement();
     void fireRideYoshi(TYoshi *);
     void fireGetStar(TShine *);
-    void fireGetNozzle(u32 *);  // TItemNozzle
+    void fireGetNozzle(TItemNozzle *);
     void fireGetBlueCoin(TCoin *);
     void movement_game();
     u32 *findNearestTalkNPC();
@@ -116,7 +121,7 @@ public:
     u32 _88[0x18 / 4];
     TBaseNPC *mTalkingNPC;  // 0x00A0
     u32 _A4[2];
-    u32 *mpNextState;                     // 0x00AC
+    TPauseMenu2 *mPauseMenu;              // 0x00AC
     u32 _11;                              // 0x00B0
     u8 mNextState;                        // 0x00B4
     JKRMemArchive *mCurrentStageArchive;  // 0x00B8
@@ -136,7 +141,9 @@ public:
     TDemoCannon *mCannonObj;              // 0x0254
     u32 _16;                              // 0x0258
     TShine *mCollectedShine;              // 0x025C
-    u32 _260;
+    u8 _260;
+    u8 mSavePromptType;
+    u8 _262[2];
     u32 _264;
 };
 

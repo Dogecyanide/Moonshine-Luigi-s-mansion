@@ -9,6 +9,7 @@
 
 #include "SMS/Manager/FlagManager.hxx"
 #include "SMS/System/Application.hxx"
+#include "SMS/System/CardManager.hxx"
 #include "SMS/System/MarDirector.hxx"
 #include "susamune/addresses.hxx"
 #include "susamune/binds.hxx"
@@ -25,6 +26,7 @@ typedef JUtility::TColor Color;
 
 const u8 kAreaHotel  = 7;
 const u8 kAreaCasino = 14;
+const u32 kPostCoronaFlag = 0x103AE;
 
 constexpr u8 kParentAreas[] = {
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 6,  // 0x00
@@ -72,8 +74,31 @@ LevelWarp::Dest  sLast;
 bool             sLastValid;
 bool             sTailPending;
 bool             sClassicInstantHeld;
+bool             sClassicInstantPending;
+bool             sDeathSequence;
+bool             sWaitForSave;
+u8               sSaveIdleFrames;
 
-u8 currentGameInt3() { return (u8)TFlagManager::smInstance->getFlag(0x40003); }
+bool saveFlowActive() {
+    if (!gpMarDirector) return false;
+    if (gpMarDirector->mCurState == TMarDirector::STATE_SAVE_CARD) return true;
+    if (gpMarDirector->mCurState == TMarDirector::STATE_PAUSE_MENU &&
+        gpMarDirector->mPauseMenu &&
+        gpMarDirector->mPauseMenu->mState == TPauseMenu2::MENU_SAVING) {
+        return true;
+    }
+    return gpCardManager &&
+        gpCardManager->getLastStatus() == CARD_ERROR_BUSY;
+}
+
+u8 currentGameInt3() {
+    u8 value = (u8)TFlagManager::smInstance->getFlag(0x40003);
+    if (gpApplication.mCurrentScene.mAreaID == TGameSequence::AREA_DOLPIC &&
+        TFlagManager::smInstance->getBool(kPostCoronaFlag)) {
+        value |= LevelWarp::Dest::POST_CORONA;
+    }
+    return value;
+}
 
 enum ClassicCommand {
     CLASSIC_NONE,
@@ -269,7 +294,15 @@ LevelWarp::Dest currentDest(bool parent) {
     const u8 parentArea = LevelWarp::parentArea(cur.mAreaID);
     if (parentArea == 0xFF) return dest;
     dest.area = parentArea;
-    dest.episode = dest.gameInt3;
+    const TGameSequence &prev = gpApplication.mPrevScene;
+    const int ilEpisode = ILing::activeParentEpisode(parentArea);
+    const u8 parentEpisode = ilEpisode >= 0
+        ? (u8)ilEpisode
+        : prev.mAreaID == parentArea
+              ? prev.mEpisodeID
+              : (u8)(dest.gameInt3 & ~LevelWarp::Dest::POST_CORONA);
+    dest.episode = parentEpisode;
+    dest.gameInt3 = parentEpisode;
     return dest;
 }
 
@@ -278,18 +311,29 @@ bool updateClassicInstant(TMarioGamePad *pad) {
     const bool held = (buttons & kInstantBase) == kInstantBase;
     if (!held) {
         sClassicInstantHeld = false;
+        sClassicInstantPending = false;
         return false;
     }
     if (sClassicInstantHeld) {
         return false;
     }
-    sClassicInstantHeld = true;
 
     LevelWarp::Dest dest;
-    switch (resolveClassicSelector(pad, true, &dest)) {
+    const ClassicCommand command = resolveClassicSelector(pad, true, &dest);
+    if (command == CLASSIC_RESTART_KEEP && !sClassicInstantPending) {
+        // Give Z/Y and the C-stick one frame to join a staggered B+D-Up chord.
+        // Otherwise the current-area restart departs before the larger command
+        // can be observed.
+        sClassicInstantPending = true;
+        return true;
+    }
+    sClassicInstantHeld = true;
+    sClassicInstantPending = false;
+
+    switch (command) {
     case CLASSIC_WARP:            LevelWarp::warpTo(dest); return true;
     case CLASSIC_RESTART_KEEP:    LevelWarp::restart(true); return true;
-    case CLASSIC_RESTART_DEFAULT: LevelWarp::restart(false); return true;
+    case CLASSIC_RESTART_DEFAULT: LevelWarp::restartFull(); return true;
     case CLASSIC_WARP_LAST:       LevelWarp::warpToLast(); return true;
     default: return false;
     }
@@ -306,11 +350,15 @@ void markQuickFreezeReset() {
 // destination is entered with. Runs on the frame the exit fade finishes.
 void applyDest(const LevelWarp::Dest &dest) {
     TFlagManager *flags = TFlagManager::smInstance;
-    flags->setFlag(0x40003, dest.gameInt3);
+    flags->setFlag(0x40003, dest.gameInt3 & ~LevelWarp::Dest::POST_CORONA);
     flags->setFlag(0x40002, 0);      // coin count
     flags->setBool(true, 0x30006);   // got a shine in the previous stage --
     flags->setBool(false, 0x30004);  // together these suppress the death and
                                      // Peach-kidnapped openings
+    if (dest.area == TGameSequence::AREA_DOLPIC) {
+        flags->setBool((dest.gameInt3 & LevelWarp::Dest::POST_CORONA) != 0,
+                       kPostCoronaFlag);
+    }
 
     gpApplication.mNextScene.mAreaID    = dest.area;
     gpApplication.mNextScene.mEpisodeID = dest.episode;
@@ -324,17 +372,51 @@ void applyDest(const LevelWarp::Dest &dest) {
     markQuickFreezeReset();
 }
 
+void overrideSourceForDefaultSpawn(const LevelWarp::Dest &source) {
+    // Airstrip's only spawn ignores mPrevScene. Its special load path needs the
+    // live source sequence rather than the synthetic self-source courses use.
+    if (source.area == TGameSequence::AREA_AIRPORT) return;
+    gpApplication.mCurrentScene.mAreaID    = source.area;
+    gpApplication.mCurrentScene.mEpisodeID = source.episode;
+    gpApplication.mCurrentScene.mFlag      = 0;
+}
+
+void prepareArmedDeparture() {
+    sArmed       = false;
+    sTailPending = true;
+
+    if (sKeepSpawn) {
+        sKeepSpawn = false;
+        // decideMarioPosIdx() picks Mario's entry point from mPrevScene, which
+        // TApplication fills from mCurrentScene as it loads -- so naming the
+        // area he arrived from leaves the entry point where it was and he comes
+        // back out of the same pipe. applyDest() rewrites mNextScene later.
+        TGameSequence &cur = gpApplication.mCurrentScene;
+        cur.mAreaID        = gpApplication.mPrevScene.mAreaID;
+        cur.mEpisodeID     = gpApplication.mPrevScene.mEpisodeID;
+    }
+
+    gpApplication.mNextScene.mAreaID    = sDest.area;
+    gpApplication.mNextScene.mEpisodeID = sDest.episode;
+}
+
+__attribute__((noinline)) void armWarp(const LevelWarp::Dest &dest,
+                                       bool keepSpawn, bool overrideSource) {
+    sDest = dest;
+    sArmed = true;
+    sKeepSpawn = keepSpawn;
+    sOverrideSource = overrideSource;
+    sWaitForSave = false;
+}
+
 }  // namespace
 
 namespace LevelWarp {
 
 void warpTo(const Dest &dest) {
-    sDest      = dest;
+    armWarp(dest, false, false);
     sLast      = dest;
     sLastValid = true;
-    sArmed     = true;
-    sKeepSpawn = false;
-    sOverrideSource = false;
 }
 
 void warpFrom(const Dest &source, const Dest &dest) {
@@ -344,46 +426,44 @@ void warpFrom(const Dest &source, const Dest &dest) {
 }
 
 void warpToLast() {
-    if (sLastValid) {
-        sDest      = sLast;
-        sArmed     = true;
-        sKeepSpawn = false;
-        sOverrideSource = false;
-    }
+    if (sLastValid) armWarp(sLast, false, false);
 }
 
 void restart(bool keepSpawn) {
     const TGameSequence &cur = gpApplication.mCurrentScene;
-    sDest.area               = cur.mAreaID;
-    sDest.episode            = cur.mEpisodeID;
-    sDest.gameInt3           = currentGameInt3();
-    sArmed                   = true;
-    sKeepSpawn               = keepSpawn;
-    sOverrideSource          = false;
+    const Dest dest = { cur.mAreaID, cur.mEpisodeID, currentGameInt3() };
+    armWarp(dest, keepSpawn, false);
+}
+
+void restartFull() {
+    const Dest dest = currentDest(true);
+    armWarp(dest, false, true);
+    sSource = dest;
+    // Entering from the destination itself selects the level's default spawn.
+}
+
+void restartAfterSave(bool keepSpawn) {
+    restart(keepSpawn);
+    sWaitForSave = true;
+    sSaveIdleFrames = 0;
 }
 
 u8 kick(TMarDirector *director, u8 state) {
     if (!sArmed) {
         return state;
     }
-    sArmed       = false;
-    sTailPending = true;
-
-    if (sKeepSpawn) {
-        sKeepSpawn = false;
-        // decideMarioPosIdx() picks Mario's entry point from mPrevScene, which
-        // TApplication fills from mCurrentScene as it loads -- so naming the
-        // area he arrived from leaves the entry point where it was and he comes
-        // back out of the same pipe. Safe only because applyDest() rewrites
-        // mNextScene at the end of the transition: the destination follows
-        // mCurrentScene too, and would otherwise be dragged along with it.
-        TGameSequence &cur = gpApplication.mCurrentScene;
-        cur.mAreaID        = gpApplication.mPrevScene.mAreaID;
-        cur.mEpisodeID     = gpApplication.mPrevScene.mEpisodeID;
+    if (sWaitForSave) {
+        if (saveFlowActive()) {
+            sSaveIdleFrames = 0;
+            return state;
+        }
+        if (++sSaveIdleFrames < 2) return state;
+        sWaitForSave = false;
     }
-
-    gpApplication.mNextScene.mAreaID    = sDest.area;
-    gpApplication.mNextScene.mEpisodeID = sDest.episode;
+    if (gpCardManager && gpCardManager->getLastStatus() == CARD_ERROR_BUSY) {
+        return state;
+    }
+    prepareArmedDeparture();
 
     director->moveStage();
     return TMarDirector::STATE_STAGE_EXIT;
@@ -396,13 +476,23 @@ s32 onDirected(s32 appState) {
         return appState;
     }
 
+    // If the director reaches an app-state handoff before another game-mode
+    // tick, the card becoming idle is sufficient to release the queued exit.
+    if (sArmed && sWaitForSave) {
+        if (saveFlowActive()) return 0;
+        sWaitForSave = false;
+    }
+    if (sArmed) {
+        sWaitForSave = false;
+        prepareArmedDeparture();
+    }
+    sDeathSequence = false;
+
     if (sTailPending) {
         sTailPending = false;
         applyDest(sDest);
         if (sOverrideSource) {
-            gpApplication.mCurrentScene.mAreaID    = sSource.area;
-            gpApplication.mCurrentScene.mEpisodeID = sSource.episode;
-            gpApplication.mCurrentScene.mFlag      = 0;
+            overrideSourceForDefaultSpawn(sSource);
             sOverrideSource = false;
         }
         ILing::onWarpTail();
@@ -420,15 +510,20 @@ s32 onDirected(s32 appState) {
         Dest selected;
         ClassicCommand command =
             resolveClassicSelector(gpApplication.mGamePads[0], false, &selected);
+        bool parentRestart = false;
         if (command == CLASSIC_RESTART_DEFAULT) {
             selected = currentDest(false);
             command = CLASSIC_WARP;
         } else if (command == CLASSIC_RESTART_PARENT) {
             selected = currentDest(true);
             command = CLASSIC_WARP;
+            parentRestart = true;
         }
         if (command == CLASSIC_WARP) {
             applyDest(selected);
+            if (parentRestart) {
+                overrideSourceForDefaultSpawn(selected);
+            }
             return TApplication::CONTEXT_DIRECT_STAGE;
         }
     }
@@ -513,6 +608,7 @@ constexpr char kSlotLabels[] =
     "Pinna Cut\0"
     "Yoshi\0"
     "Flooded\0"
+    "Post-Corona\0"
     "Beach Pipe\0"
     "Pachinko\0"
     "Grass Pipe\0"
@@ -571,6 +667,7 @@ constexpr Slot kSlots[] = {
     { 4, 1, 7, 0 },
     { 5, 1, 8, 0 },
     { 6, 1, 9, 0 },
+    { 7, 1, 2, LevelWarp::Dest::POST_CORONA },
     // Delfino secrets
     { 0, 0x15, 0, 0 },
     { 1, 0x16, 0, 0 },
@@ -615,8 +712,8 @@ constexpr Wheel kWheels[] = {
     { 15, 1 },
     { 16, 4 },
     { 20, 8 },
-    { 28, 7 },
-    { 35, 9 },
+    { 28, 8 },
+    { 36, 9 },
 };
 
 constexpr int kNumWheels = sizeof(kWheels) / sizeof(kWheels[0]);
@@ -869,21 +966,60 @@ void close() {
 namespace WarpWheel {
 
 void update(TMarioGamePad *pad) {
-    // Only normal gameplay reaches the game-mode hook that starts a warp.
-    if (!gpMarDirector || gpMarDirector->mCurState != TMarDirector::STATE_NORMAL) {
+    if (!gpMarDirector) {
         close();
         return;
     }
 
+    const u8 state = gpMarDirector->mCurState;
+    if (state == TMarDirector::STATE_DEATH) {
+        sDeathSequence = true;
+    }
+    if (state != TMarDirector::STATE_NORMAL) {
+        close();
+        sClassicInstantHeld = false;
+        sClassicInstantPending = false;
+        const bool deathExit = sDeathSequence &&
+            (state == TMarDirector::STATE_DEATH ||
+             state == TMarDirector::STATE_STAGE_EXIT ||
+             state == TMarDirector::STATE_STAGE_EXIT_2);
+        const bool saveDialog = state == TMarDirector::STATE_SAVE_CARD ||
+            (state == TMarDirector::STATE_PAUSE_MENU &&
+             gpMarDirector->mPauseMenu &&
+             gpMarDirector->mPauseMenu->mState == TPauseMenu2::MENU_SAVING);
+        // The save dialog owns the director, so that path waits for an idle tick.
+        if ((deathExit || saveDialog) &&
+            gBinds.wasPressed(BIND_INSTANT_RESTART)) {
+            if (saveDialog)
+                LevelWarp::restartAfterSave(true);
+            else
+                LevelWarp::restart(true);
+            if (gMenu && gSettings.getBool(SETTING_RESTART_QUEUED_FEEDBACK))
+                gMenu->toast("Restart queued");
+        }
+        return;
+    }
+    sDeathSequence = false;
+
+    bool closeForCommand = false;
     if (updateClassicInstant(pad)) {
         // The chart combo owns this press. In particular, C-up+B+D-up means
         // Bianco 1 rather than the bare B+D-up restart bind.
+        closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_INSTANT_RESTART)) {
         LevelWarp::restart(true);
+        closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_FULL_RESTART)) {
-        LevelWarp::restart(false);
+        LevelWarp::restartFull();
+        closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_WARP_LAST)) {
         LevelWarp::warpToLast();
+        closeForCommand = true;
+    }
+    if (closeForCommand) {
+        // Z may have opened the wheel one frame before a larger chord
+        // completed. Do not let that overlay freeze an already-armed warp.
+        close();
     }
 
     if (gMenu && gMenu->shown()) {

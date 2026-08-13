@@ -23,11 +23,15 @@ class TMarDirector;
 namespace LevelWarp {
 
 struct Dest {
+    enum { POST_CORONA = 0x80 };
+
     u8 area;
     u8 episode;
     // TFlagManager flag 0x40003. For a secret/boss area it is the parent
     // episode index; areas with several scenarios behind one id (the Sirena
     // hotel and casino) are picked apart by it too.
+    // The high bit is an internal Plaza variant marker and is masked before
+    // flag 0x40003 is written.
     u8 gameInt3;
 };
 
@@ -44,6 +48,12 @@ void warpToLast();
 // brings Mario back out of the entrance he arrived through instead of the
 // area's default spawn.
 void restart(bool keepSpawn);
+// Return an internal scene to its parent episode's default start; main stages
+// restart at their own default start.
+void restartFull();
+// Queue a restart from Sunshine's save UI. It cannot leave until the dialog
+// has closed and the card worker has remained idle across a game-mode tick.
+void restartAfterSave(bool keepSpawn);
 
 // From onUpdateGameMode. Starts the exit transition when a warp is armed,
 // returning the director state to enter; otherwise returns `state` as-is.

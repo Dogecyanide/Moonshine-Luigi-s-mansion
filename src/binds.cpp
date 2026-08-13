@@ -139,7 +139,7 @@ void Binds::adopt(u16 mask, BindId id) {
     }
 }
 
-void Binds::stageInto(u16 *dst) const {
+void Binds::stageInto(volatile u16 *dst) const {
     for (int i = 0; i < BIND_COUNT; i++) {
         dst[i] = mMask[i];
     }

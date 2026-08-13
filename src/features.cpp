@@ -412,7 +412,7 @@ enum AsmCaveOffset {
 
 // The caves tile this pool in hook order. Each final zero becomes b->site+4.
 u32 gAsmCaves[] = {
-    // Fast Piantissimo.
+    // Fastest Piantissimo pattern.
     0x8BFA007Cu, 0x23FF000Cu, 0x57FFFFBEu, 0x00000000u,
 
     // TFireWanwan::isFindMario: instance 1 is the far-right Chomplet.
@@ -490,6 +490,12 @@ u32 gAsmCaves[] = {
     // Stage Intro Skip: changeState+0x1CC.
     0x807F0074u, 0x80630094u, 0x80630000u | SIS_CONSOLE_OFF,
     0x2C830000u, 0x70000061u, 0x4C423102u, 0x00000000u,
+};
+
+// Keep the alternate pattern in a separate cave. Re-pointing the hook is more
+// reliable on console than rewriting an instruction in a live cave.
+u32 gPiantissimoSlowCave[] = {
+    0x8BFA007Cu, 0x1FFF0005u, 0x57FFFFBEu, 0x00000000u,
 };
 
 static_assert(sizeof(gAsmCaves) / sizeof(gAsmCaves[0]) == ASM_CAVE_END,
@@ -631,6 +637,7 @@ static_assert(kNumHooks == 14, "asm hook count changed");
 
 u32  gHookOrig[kNumHooks];  // retail word at each site (captured)
 bool gHooksInited;
+u8 gPiantissimoMode;
 
 constexpr u8 kHookIdMask = 0x7Fu;
 constexpr u8 kHookOn     = 0x80u;
@@ -731,6 +738,17 @@ void applyHooks() {
     bool init = !gHooksInited;
     for (int k = 0; k < kNumHooks; k++) {
         AsmHook &h = kAsmHooks[k];
+        const SettingId id = (SettingId)(h.idState & kHookIdMask);
+
+        u8 piantissimoMode = 0;
+        bool piantissimoChanged = false;
+        u32 *hookCave = h.cave;
+        if (id == SETTING_FAST_PIANTISSIMO) {
+            piantissimoMode = gSettings.get(id);
+            if (piantissimoMode > 2) piantissimoMode = 0;
+            piantissimoChanged = piantissimoMode != gPiantissimoMode;
+            hookCave = piantissimoMode == 1 ? gPiantissimoSlowCave : h.cave;
+        }
 
         if (init) {
             // The cave already holds the asm (loaded with the blob); patch its
@@ -743,17 +761,35 @@ void applyHooks() {
             ICInvalidateRange(h.cave, h.n * 4);
 
             gHookOrig[k] = *reinterpret_cast<volatile u32 *>(h.site);
+
+            if (id == SETTING_FAST_PIANTISSIMO) {
+                const int slowWords = sizeof(gPiantissimoSlowCave) /
+                                      sizeof(gPiantissimoSlowCave[0]);
+                u32 backAddr = reinterpret_cast<u32>(
+                    &gPiantissimoSlowCave[slowWords - 1]);
+                gPiantissimoSlowCave[slowWords - 1] =
+                    branchWord(backAddr, h.site + 4);
+                DCFlushRange(gPiantissimoSlowCave,
+                             sizeof(gPiantissimoSlowCave));
+                ICInvalidateRange(gPiantissimoSlowCave,
+                                  sizeof(gPiantissimoSlowCave));
+            }
         }
 
         u8 state = h.idState;
-        bool on = gSettings.getBool((SettingId)(state & kHookIdMask));
-        if (on == ((state & kHookOn) != 0)) {
+        bool on = id == SETTING_FAST_PIANTISSIMO
+                      ? piantissimoMode != 0
+                      : gSettings.getBool(id);
+        if (on == ((state & kHookOn) != 0) && !piantissimoChanged) {
             continue;
         }
         writeGameCode(h.site,
-                      on ? branchWord(h.site, reinterpret_cast<u32>(&h.cave[0]))
+                      on ? branchWord(h.site, reinterpret_cast<u32>(hookCave))
                          : gHookOrig[k]);
         h.idState = on ? state | kHookOn : state & ~kHookOn;
+        if (id == SETTING_FAST_PIANTISSIMO) {
+            gPiantissimoMode = piantissimoMode;
+        }
     }
     if (init) {
         gHooksInited = true;

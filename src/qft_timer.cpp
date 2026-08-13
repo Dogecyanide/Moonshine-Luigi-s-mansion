@@ -11,6 +11,7 @@
 #include "Dolphin/OS.h"
 #include "Dolphin/printf.h"
 #include "SMS/GC2D/GCConsole2.hxx"
+#include "SMS/Player/Mario.hxx"
 #include "SMS/System/Application.hxx"
 #include "SMS/System/MarDirector.hxx"
 #include "susamune/addresses.hxx"
@@ -70,6 +71,7 @@ namespace {
 
   const s32 kMaxQf          = SUSAMUNE_ILING_PB_MAX_QF;
   const u8 kFreezeFrames[] = {0, 15, 30, 60, 90, 150};
+  const int kSectionHistoryCount = 16;
 
   bool sStageReady;
   bool sStagePending;
@@ -84,6 +86,14 @@ namespace {
   bool sSavedFinalConsumed;
   bool sSavedRetailTimerOwned;
   u32 sSavedAttemptSerial;
+  s32 sSectionQf[kSectionHistoryCount];
+  s32 sSavedSectionQf[kSectionHistoryCount];
+  s32 sLastSectionQf;
+  s32 sSavedLastSectionQf;
+  u8 sSectionCount;
+  u8 sSectionNext;
+  u8 sSavedSectionCount;
+  u8 sSavedSectionNext;
 
 // PowerPC address materialisation for fixed scratch. D-form offsets are
 // signed, so use @ha/@l rather than a plain high half.
@@ -171,16 +181,6 @@ namespace {
     0x60000000u,          0x00000000u,
   };
 
-  u32 sCaveDeath[] = {
-    kLoadDirectorR12,
-    0x800C005Cu,  // lwz r0,0x5c(r12)
-    0x3D800000u | PPC_HA(SUSAMUNE_ADDR_QFT_DEATH_QF),
-    0x900C0000u | PPC_LO(SUSAMUNE_ADDR_QFT_DEATH_QF),
-    0x38000000u,  // r0 is live: the next retail instruction stores health
-    0x907F0118u,  // displaced stw r3,0x118(r31)
-    0x00000000u,
-  };
-
   u32 sCavePlant[] = {
     0x80040020u,  // lwz r0,0x20(r4): nerve timer
     0x2C000000u,
@@ -210,7 +210,6 @@ namespace {
     CORE(0x800EBD78u, 0x8029880Cu, 0x802906A4u, sCaveRestartFromInit),
     CORE(0x800EC72Cu, 0x802991A8u, 0x80291040u, sCaveFreezeTransitionA),
     CORE(0x800ED8F0u, 0x8029A36Cu, 0x80292204u, sCaveFreezeTransitionB),
-    CORE(0x801222D8u, 0x80243148u, 0x8023AED4u, sCaveDeath),
     CORE(0x8030AD28u, 0x800F9198u, 0x800F2838u, sCavePlant),
   };
 
@@ -299,6 +298,7 @@ namespace {
     CAVE(SETTING_TIMER_FREEZE_BLUE_COIN, 0x80196128u, 0x801BE288u, 0x801B6140u, 0x7C030378u,
          sBlueCoinCave),
     DIRECT(SETTING_TIMER_FREEZE_ITEM, 0x80197208u, 0x801BF3C4u, 0x801B727Cu),
+    DIRECT(SETTING_TIMER_FREEZE_ITEM, 0x801D5E54u, 0x801FE290u, 0x801F6174u),
     DIRECT(SETTING_TIMER_FREEZE_TALK, 0x80214F00u, 0x80153A34u, 0x801489B4u),
     DIRECT(SETTING_TIMER_FREEZE_DEMO, 0x800ED89Cu, 0x8029A318u, 0x802921B0u),
     DIRECT(SETTING_TIMER_FREEZE_CLEANED, 0x8017A3D4u, 0x80215C6Cu, 0x8020DB50u),
@@ -408,6 +408,24 @@ namespace {
     cave[words - 1] = branchWord(back, site + 4);
     flushCode(cave, words * 4);
     writeGameCode(site, branchWord(site, reinterpret_cast<u32>(&cave[0])));
+  }
+
+  void installSpecialHook(u32 *cave, int words) {
+    for (int i = 0; i < kNumFreezeHooks; i++) {
+      if (kFreezeHooks[i].cave == cave) {
+        installCave(kFreezeHooks[i].site, cave, words);
+        return;
+      }
+    }
+  }
+
+  void restoreSpecialHook(u32 *cave) {
+    for (int i = 0; i < kNumFreezeHooks; i++) {
+      if (kFreezeHooks[i].cave == cave) {
+        writeGameCode(kFreezeHooks[i].site, kFreezeHooks[i].original);
+        return;
+      }
+    }
   }
 
   void ensureWord(u32 addr, u32 word) {
@@ -572,6 +590,25 @@ namespace {
 
   s32 qfToMillis(s32 qf) { return (qf * 1001) / 120; }
 
+  void resetSections() {
+    sLastSectionQf = 0;
+    sSectionCount = 0;
+    sSectionNext = 0;
+  }
+
+  void captureSection() {
+    if (!sStageReady || sState->freezeFrames == 0)
+      return;
+    const s32 current = clampQf(sState->offsetQf + sState->freezeQf);
+    if (current <= sLastSectionQf)
+      return;
+    sSectionQf[sSectionNext] = current - sLastSectionQf;
+    sLastSectionQf = current;
+    sSectionNext = (u8)((sSectionNext + 1) % kSectionHistoryCount);
+    if (sSectionCount < kSectionHistoryCount)
+      sSectionCount++;
+  }
+
   s32 qfToRoundedCentis(s32 qf) {
     // One QF is 1001/120 ms. Add half a centisecond before dividing so the
     // Sunshine HUD's last digit rounds instead of truncating QFT precision.
@@ -649,6 +686,7 @@ void QFTTimer::init() {
   sAttemptSerial  = 0;
   sStageDirector  = nullptr;
   sHaveSavedState = false;
+  resetSections();
 
   for (u32 i = 0; i < sizeof(kCoreHooks) / sizeof(kCoreHooks[0]); i++) {
     const CoreHook &hook = kCoreHooks[i];
@@ -660,10 +698,10 @@ void QFTTimer::init() {
   pointAtFreezer(sPeteyWakeupCave);
   pointAtFreezer(sEelActivateCave);
   pointAtFreezer(sEelToothCave);
-  installCave(kFreezeHooks[9].site, sTakeCave, sizeof(sTakeCave) / sizeof(sTakeCave[0]));
-  installCave(kFreezeHooks[10].site, sDropCave, sizeof(sDropCave) / sizeof(sDropCave[0]));
-  installCave(kFreezeHooks[2].site, sBlueCoinCave,
-              sizeof(sBlueCoinCave) / sizeof(sBlueCoinCave[0]));
+  installSpecialHook(sTakeCave, sizeof(sTakeCave) / sizeof(sTakeCave[0]));
+  installSpecialHook(sDropCave, sizeof(sDropCave) / sizeof(sDropCave[0]));
+  installSpecialHook(sBlueCoinCave,
+                     sizeof(sBlueCoinCave) / sizeof(sBlueCoinCave[0]));
 
   sGuardedHookMask = 0;
   for (int i = 0; i < kNumFreezeHooks; i++) {
@@ -679,9 +717,9 @@ void QFTTimer::init() {
 
   // installCave writes the special-hook sites. Restore retail until their
   // individual settings are applied below.
-  writeGameCode(kFreezeHooks[9].site, kFreezeHooks[9].original);
-  writeGameCode(kFreezeHooks[10].site, kFreezeHooks[10].original);
-  writeGameCode(kFreezeHooks[2].site, kFreezeHooks[2].original);
+  restoreSpecialHook(sTakeCave);
+  restoreSpecialHook(sDropCave);
+  restoreSpecialHook(sBlueCoinCave);
 
   sStatusSignature = 0;
   sDuration        = -1;
@@ -705,6 +743,7 @@ void QFTTimer::beginFrame() {
 
   ensureCoreHooks();
   applyFreezeConfig();
+  captureSection();
   if (sState->freezeFrames > 0) {
     sState->freezeFrames--;
   }
@@ -730,6 +769,11 @@ void QFTTimer::onStageSetup(TMarDirector *director) {
   sBigShown      = false;
   sRetailTimerOwned = false;
   sStageDirector = director;
+  // Cross-area continuation proved unreliable. Start a fresh section list at
+  // every loaded area while leaving the underlying full-level QFT untouched.
+  resetSections();
+  if (!sResetRequested && !sState->stopped)
+    sLastSectionQf = clampQf(sState->offsetQf);
 }
 
 void QFTTimer::update() { updateBigTimer(); }
@@ -737,6 +781,30 @@ void QFTTimer::update() { updateBigTimer(); }
 void QFTTimer::draw(Menu *menu) const {
   if (!menu || !sStageReady || !gpMarDirector || gpMarDirector != sStageDirector) {
     return;
+  }
+
+  if (gSettings.getBool(SETTING_TIMER_SECTIONS) && sSectionCount) {
+    const int lineH = 13;
+    const int w = 132;
+    const int h = 20 + lineH * sSectionCount;
+    const int x = 16;
+    const int y = 408 - h;
+    menu->fillBox(x, y, w, h, JUtility::TColor(0, 0, 0, 175));
+    menu->fillBox(x, y, 3, h, JUtility::TColor(80, 180, 255, 255));
+    menu->drawText("QF Sections", x + 9, y + 4, 11, 11,
+                   JUtility::TColor(160, 220, 255, 255));
+    const int first = (sSectionNext + kSectionHistoryCount -
+                       sSectionCount) % kSectionHistoryCount;
+    for (int row = 0; row < sSectionCount; row++) {
+      const int index = (first + row) % kSectionHistoryCount;
+      const s32 millis = qfToMillis(sSectionQf[index]);
+      char line[24];
+      snprintf(line, sizeof(line), "%2d  %d:%02d.%03d", row + 1,
+               (int)(millis / 60000), (int)((millis / 1000) % 60),
+               (int)(millis % 1000));
+      menu->drawText(line, x + 9, y + 19 + row * lineH, 10, 10,
+                     JUtility::TColor(245, 248, 255, 255));
+    }
   }
 
   u8 mode = gSettings.get(SETTING_TIMER_QFT_VISIBILITY);
@@ -781,6 +849,7 @@ void QFTTimer::requestReset() {
   *sDeathQf            = -1;
   *sPlantQf            = -1;
   *sTransitionTarget   = 0xFFFF;
+  resetSections();
 }
 
 u32 QFTTimer::attemptSerial() const { return sAttemptSerial; }
@@ -830,6 +899,12 @@ static bool consumeCustomEvent(volatile s32 *eventQf, s32 *qf) {
 }
 
 bool QFTTimer::consumeCustom(bool death, s32 *qf) {
+  if (death && *sDeathQf < 0 && gpMarioOriginal && gpMarDirector &&
+      gpMarioOriginal->mAttributes.mIsGameOver) {
+    // Poll after direct(): hooking loserExec clobbered live retail state and
+    // suppressed health-based deaths. The director QF is still the death tick.
+    *sDeathQf = gpMarDirector->unk5C;
+  }
   return consumeCustomEvent(death ? sDeathQf : sPlantQf, qf);
 }
 
@@ -844,6 +919,11 @@ void QFTTimer::onSavestateSaved() {
   sSavedFinalConsumed      = sFinalConsumed;
   sSavedRetailTimerOwned    = sRetailTimerOwned;
   sSavedAttemptSerial      = sAttemptSerial;
+  sSavedLastSectionQf      = sLastSectionQf;
+  sSavedSectionCount       = sSectionCount;
+  sSavedSectionNext        = sSectionNext;
+  for (int i = 0; i < kSectionHistoryCount; i++)
+    sSavedSectionQf[i] = sSectionQf[i];
   sHaveSavedState          = true;
 }
 
@@ -860,6 +940,11 @@ void QFTTimer::onSavestateLoaded() {
   sFinalConsumed       = sSavedFinalConsumed;
   sRetailTimerOwned     = sSavedRetailTimerOwned;
   sAttemptSerial       = sSavedAttemptSerial;
+  sLastSectionQf       = sSavedLastSectionQf;
+  sSectionCount        = sSavedSectionCount;
+  sSectionNext         = sSavedSectionNext;
+  for (int i = 0; i < kSectionHistoryCount; i++)
+    sSectionQf[i] = sSavedSectionQf[i];
   // Hook scratch is outside the snapshot. Drop events from the abandoned
   // future so a pre-finish state waits for the endpoint again.
   *sDeathQf            = -1;

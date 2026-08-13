@@ -1,14 +1,18 @@
 #include "susamune/iling.hxx"
 
 #include "Dolphin/OS.h"
+#include "Dolphin/mem.h"
 #include "Dolphin/printf.h"
 #include "Dolphin/string.h"
 #include "SMS/MSound/MSBGM.hxx"
 #include "SMS/Manager/FlagManager.hxx"
 #include "SMS/Manager/ItemManager.hxx"
 #include "SMS/MapObj/MapObjBase.hxx"
+#include "SMS/Player/Mario.hxx"
+#include "SMS/Player/Watergun.hxx"
 #include "SMS/System/Application.hxx"
 #include "susamune/addresses.hxx"
+#include "susamune/creation_extras.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/packed_text.hxx"
 #include "susamune/qft_timer.hxx"
@@ -20,6 +24,8 @@
 #include "susamune/warp_wheel.hxx"
 
 namespace {
+
+typedef JUtility::TColor Color;
 
 enum FinishKind {
     FINISH_SHINE,
@@ -92,6 +98,12 @@ const u8 kNoShine = 0xFF;
 #define SHINE_FULL(label, area, episode, parent, id, group) \
     RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
         ENTRY_CLEAR_RESULT | ENTRY_CARRY_OVERLAY, kNoShine)
+#define PINNA_EYG(label, slot) \
+    RAW(label, 5, 2, 2, FINISH_SHINE, 35, GROUP_PINNA, \
+        ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE | ENTRY_CARRY_OVERLAY, slot)
+#define SHINE_INSIDE(label, area, episode, parent, id, group, slot) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE, slot)
 #define SHINE_SECRET(label, area, episode, parent, id, group, slot) \
     RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
         ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE | ENTRY_CARRY_OVERLAY, slot)
@@ -102,7 +114,7 @@ const u8 kNoShine = 0xFF;
 // The display order is also the menu's group order. Shine ids are retail
 // TShine event ids; unlike scene ids they distinguish episode, bonus and
 // 100-coin Shines that can all be collected in the same stage.
-const Entry kEntries[] = {
+constexpr Entry kEntries[] = {
 #include "iling_entries.inc"
 };
 
@@ -112,18 +124,25 @@ const Entry kEntries[] = {
 #undef SHINE_CLEAR
 #undef SHINE_CLEAR_SET
 #undef SHINE_FULL
+#undef PINNA_EYG
+#undef SHINE_INSIDE
 #undef SHINE_SECRET
 #undef PLAZA
 #undef RAW
 #undef ENTRY_STATE
 
 const int kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);
-constexpr u8 kGroupFirst[GROUP_COUNT] = {0, 13, 25, 37, 50, 63, 75, 87, 89, 90, 106};
-const int kGeneratedLabelCount = 87;
+constexpr u8 kGroupFirst[GROUP_COUNT] = {
+    0, 13, 25, 38, 52, 65, 78, 90, 92, 94, 110
+};
+const int kGeneratedLabelCount = 90;
 const int kRegularLabelSize = 18;
 // Fixed-width names and computed suffix offsets cost less than lookup tables.
 constexpr char kRegularGroupNames[] =
     "Bianco\0Ricco\0\0Gelato\0Pinna\0\0Sirena\0Noki\0\0\0Pianta";
+constexpr char kRegularShortGroupNames[] =
+    "BH\0RH\0GB\0PP\0SB\0NB\0PV";
+constexpr char kHundredGroupLetters[] = "BRGPSNV";
 constexpr char kMenuGroupNames[] =
     "BIANCO\0RICCO\0GELATO\0PINNA\0SIRENA\0NOKI\0PIANTA\0"
     "AIRSTRIP\0CORONA\0DELFINO\0ANY%";
@@ -139,7 +158,6 @@ enum LabelFormatOffset {
     LABEL_FORMAT_HUNDRED = 8,
     LABEL_FORMAT_HIDDEN = 21,
 };
-
 constexpr char *appendLabel(char *out, const char *text) {
     while (*text) {
         *out++ = *text++;
@@ -220,6 +238,12 @@ constexpr bool verifyRegularLabel(const char *expected, int parent, int result,
 #define SHINE_FULL(label, area, episode, parent, id, group) \
     RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
         ENTRY_CLEAR_RESULT | ENTRY_CARRY_OVERLAY, kNoShine)
+#define PINNA_EYG(label, slot) \
+    static_assert(sameLabel(label, "Pinna Park EYG"), \
+                  "Pinna EYG label changed");
+#define SHINE_INSIDE(label, area, episode, parent, id, group, slot) \
+    static_assert((slot) == 52 || (slot) == 122 || (slot) == 123, \
+                  "inside IL slot changed");
 #define SHINE_SECRET(label, area, episode, parent, id, group, slot) \
     RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
         ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE | ENTRY_CARRY_OVERLAY, slot)
@@ -235,6 +259,8 @@ constexpr bool verifyRegularLabel(const char *expected, int parent, int result,
 #undef SHINE_CLEAR
 #undef SHINE_CLEAR_SET
 #undef SHINE_FULL
+#undef PINNA_EYG
+#undef SHINE_INSIDE
 #undef SHINE_SECRET
 #undef PLAZA
 #undef RAW
@@ -258,6 +284,9 @@ constexpr bool verifyRegularLabel(const char *expected, int parent, int result,
 #define SHINE_CLEAR(label, area, episode, parent, id, group) ENTRY_LABEL(group, label)
 #define SHINE_CLEAR_SET(label, area, episode, parent, id, group, required) ENTRY_LABEL(group, label)
 #define SHINE_FULL(label, area, episode, parent, id, group) ENTRY_LABEL(group, label)
+#define PINNA_EYG(label, slot) ENTRY_LABEL(GROUP_PINNA, label)
+#define SHINE_INSIDE(label, area, episode, parent, id, group, slot) \
+    ENTRY_LABEL(group, label)
 #define SHINE_SECRET(label, area, episode, parent, id, group, slot) ENTRY_LABEL(group, label)
 #define PLAZA(label, source, scenario, finish, result, slot) label "\0"
 #define RAW(label, area, episode, parent, finish, result, group, flags, prerequisite) \
@@ -267,12 +296,27 @@ const char kLiteralEntryLabels[] =
 #include "iling_entries.inc"
     ;
 
+constexpr char kLiteralShortLabels[] =
+    "AS1\0ASR\0CM\0BOW\0DCS\0PAC\0DSL\0LIL\0GRS\0LHS\0BG1\0BG2\0LB\0RB\0"
+    "CHK\0SG\0D100\0UB\0BS\0GB\0BP\0DSM\0TS\0GP\0PE\0HS\0RE\0B2E\0"
+    "SE\0NE\0CE";
+
+constexpr int packedLabelCount(const char *pool, u32 bytes) {
+    int count = 1;
+    for (u32 i = 0; i + 1 < bytes; i++) {
+        if (!pool[i]) count++;
+    }
+    return count;
+}
+
 #undef SHINE
 #undef SHINE_SET
 #undef SHINE_SET_ALIAS
 #undef SHINE_CLEAR
 #undef SHINE_CLEAR_SET
 #undef SHINE_FULL
+#undef PINNA_EYG
+#undef SHINE_INSIDE
 #undef SHINE_SECRET
 #undef PLAZA
 #undef RAW
@@ -292,7 +336,37 @@ const char kLiteralEntryLabels[] =
 
 const u8 kPlazaStoryHigh[10] = {0x00, 0x10, 0xF0, 0xF0, 0xF0,
                                 0x30, 0xF0, 0xF0, 0xF0, 0xF0};
-const int kPbSlotCount = 121;
+const int kPbSlotCount = 125;
+const int kEntryGelato4Inside = 31;
+const int kEntryPinnaEyg = 46;
+const int kEntryNoki3Inside = 67;
+const int kEntryNoki4Eel = 69;
+const int kEntryCorona = 92;
+const int kEntryBowser = 93;
+static_assert(kEntries[kEntryGelato4Inside].prerequisite == 123,
+              "Gelato 4 Inside entry moved");
+static_assert(kEntries[kEntryPinnaEyg].prerequisite == 121,
+              "Pinna EYG entry moved");
+static_assert(kEntries[kEntryNoki3Inside].start.area == 0x2C &&
+              kEntries[kEntryNoki3Inside].result == 52,
+              "Noki 3 Inside entry moved");
+static_assert(kEntries[kEntryNoki4Eel].prerequisite == 122,
+              "Noki 4 Eel entry moved");
+static_assert(kEntries[kEntryCorona].result == 119 &&
+              kEntries[kEntryBowser].result == 124,
+              "Corona entries moved");
+const u8 kAnyPercentTheorySlots[] = {
+    1, 2, 3, 4, 5, 6,                  // Bianco 2-7
+    27, 26,                            // Gelato 8, 7
+    10, 11, 12, 13, 14, 15, 16,       // Ricco 1-7
+    60, 65, 62, 61, 64, 63, 66,       // Pianta 1-7
+    30, 31, 32, 33, 121, 36,           // Pinna 1-4, EYG, 7
+    40, 41, 42, 43, 44, 45, 46,       // Sirena 1-7
+    50, 51, 52, 53, 54, 55, 56,       // Noki 1-7
+    119,                               // Corona
+    80, 81, 82, 83, 84, 85, 108, 109, 120, 110, 111,
+    86,                                // Airstrip 1
+};
 const u32 kPinnaUnlockFlag = 0x10389;
 const u32 kYoshiUnlockedFlag = 0x1038F;
 const u32 kPostCoronaFlag = 0x103AE;
@@ -305,10 +379,16 @@ const u32 kPbSaveTimeoutFrames = 300;
 const u32 kPbRetryDelayFrames = 300;
 
 static_assert(sizeof(Entry) == 6, "ILing entry layout changed");
-static_assert(kEntryCount == 117, "ILing entry count changed");
+static_assert(kEntryCount == 121, "ILing entry count changed");
 static_assert(kEntryCount <= 0x100, "recent IL entry index exceeds u8");
+static_assert(sizeof(kAnyPercentTheorySlots) == 55,
+              "Any% theory route changed");
 static_assert(kGroupFirst[GROUP_AIRSTRIP] == kGeneratedLabelCount,
               "generated IL label range changed");
+static_assert(packedLabelCount(kLiteralShortLabels,
+                              sizeof(kLiteralShortLabels)) ==
+                  kEntryCount - kGeneratedLabelCount,
+              "short IL label table changed");
 
 struct AttemptState {
     bool running;
@@ -340,34 +420,113 @@ AttemptState sSavedAttemptState;
 #define sSelectedEntry sAttemptState.selectedEntry
 #define sAttemptSerial sAttemptState.serial
 
-bool sHaveSetupShineCount;
-u8 sSetupShineCount;
-bool sHaveSetupMovieFlag;
-bool sSetupMovieFlag;
 #if IS_EMULATOR
-s32 sPbQf[kPbSlotCount];
+s32 sPbProfiles[SUSAMUNE_ILING_PROFILE_COUNT]
+               [SUSAMUNE_ILING_PB_MAX_SLOTS];
 #else
-#define sPbQf reinterpret_cast<s32 *>(SUSAMUNE_MEM2_PB_LIVE_PPC_BASE)
-static_assert(kPbSlotCount * sizeof(s32) <= SUSAMUNE_MEM2_PB_LIVE_SIZE,
+#define sPbProfiles (*reinterpret_cast<s32 (*)[SUSAMUNE_ILING_PROFILE_COUNT] \
+                                            [SUSAMUNE_ILING_PB_MAX_SLOTS]>( \
+    SUSAMUNE_MEM2_PB_LIVE_PPC_BASE))
+static_assert(SUSAMUNE_ILING_PROFILE_COUNT * SUSAMUNE_ILING_PB_MAX_SLOTS *
+                  sizeof(s32) <= SUSAMUNE_MEM2_PB_LIVE_SIZE,
               "live PB mirror exceeds its MEM2 window");
 #endif
-int sBannerFrames;
-int sFanfareDelay;
-char sBannerText[32];
-s32 sRecentQf[kRecentCount];
-u8 sRecentEntry[kRecentCount];
-u8 sRecentCount;
-u8 sRecentNext;
 
-bool sPbBackend;
-bool sPbDirty;
-bool sPbPending;
-bool sPbTimeoutNotified;
-u32 sPbSaveSeq;
-u32 sPbSaveWaitFrames;
-u32 sPbRetryFrames;
+struct RuntimeState {
+    char customProfileNames[SUSAMUNE_ILING_CUSTOM_NAME_COUNT]
+                           [SUSAMUNE_ILING_PROFILE_NAME_SIZE];
+    char bannerText[32];
+    s32 recentQf[kRecentCount];
+    u32 pbSaveSeq;
+    u32 pbSaveWaitFrames;
+    u32 pbRetryFrames;
+    int bannerFrames;
+    int fanfareDelay;
+    u8 recentEntry[kRecentCount];
+    u8 activePbProfile;
+    u8 recentCount;
+    u8 recentNext;
+    bool haveSetupShineCount;
+    u8 setupShineCount;
+    bool haveSetupMovieFlag;
+    bool setupMovieFlag;
+    bool rocketEquipPending;
+    bool temporaryRocketActive;
+    bool bowserNozzleShieldPending;
+    bool bowserNozzleShieldActive;
+    u8 savedSecondNozzle;
+    s32 savedSecondNozzleFlag;
+    s32 savedBowserNozzleFlag;
+    bool pbBackend;
+    bool pbDirty;
+    bool pbPending;
+    bool pbTimeoutNotified;
+    bool haveSavedAttempt;
+};
 
-bool sHaveSavedAttempt;
+RuntimeState sRuntime;
+#define sCustomPbProfileNames sRuntime.customProfileNames
+#define sBannerText sRuntime.bannerText
+#define sRecentQf sRuntime.recentQf
+#define sPbSaveSeq sRuntime.pbSaveSeq
+#define sPbSaveWaitFrames sRuntime.pbSaveWaitFrames
+#define sPbRetryFrames sRuntime.pbRetryFrames
+#define sBannerFrames sRuntime.bannerFrames
+#define sFanfareDelay sRuntime.fanfareDelay
+#define sRecentEntry sRuntime.recentEntry
+#define sActivePbProfile sRuntime.activePbProfile
+#define sRecentCount sRuntime.recentCount
+#define sRecentNext sRuntime.recentNext
+#define sHaveSetupShineCount sRuntime.haveSetupShineCount
+#define sSetupShineCount sRuntime.setupShineCount
+#define sHaveSetupMovieFlag sRuntime.haveSetupMovieFlag
+#define sSetupMovieFlag sRuntime.setupMovieFlag
+#define sRocketEquipPending sRuntime.rocketEquipPending
+#define sTemporaryRocketActive sRuntime.temporaryRocketActive
+#define sBowserNozzleShieldPending sRuntime.bowserNozzleShieldPending
+#define sBowserNozzleShieldActive sRuntime.bowserNozzleShieldActive
+#define sSavedSecondNozzle sRuntime.savedSecondNozzle
+#define sSavedSecondNozzleFlag sRuntime.savedSecondNozzleFlag
+#define sSavedBowserNozzleFlag sRuntime.savedBowserNozzleFlag
+#define sPbBackend sRuntime.pbBackend
+#define sPbDirty sRuntime.pbDirty
+#define sPbPending sRuntime.pbPending
+#define sPbTimeoutNotified sRuntime.pbTimeoutNotified
+#define sHaveSavedAttempt sRuntime.haveSavedAttempt
+
+const char *defaultCustomProfileName(int index) {
+    return index == 0 ? "Custom 1" : "Custom 2";
+}
+
+void copyProfileName(char *out, const char *name, const char *fallback) {
+    int n = 0;
+    if (name) {
+        while (n + 1 < SUSAMUNE_ILING_PROFILE_NAME_SIZE && name[n] >= ' ' &&
+               name[n] <= '~') {
+            out[n] = name[n];
+            n++;
+        }
+    }
+    if (n == 0) {
+        while (n + 1 < SUSAMUNE_ILING_PROFILE_NAME_SIZE && fallback[n]) {
+            out[n] = fallback[n];
+            n++;
+        }
+    }
+    out[n] = '\0';
+    for (n++; n < SUSAMUNE_ILING_PROFILE_NAME_SIZE; n++) out[n] = '\0';
+}
+
+s32 *activePBs() { return sPbProfiles[sActivePbProfile]; }
+
+void resetPBProfiles() {
+    sActivePbProfile = 0;
+    memset(sPbProfiles, 0xff, sizeof(sPbProfiles));
+    for (int i = 0; i < SUSAMUNE_ILING_CUSTOM_NAME_COUNT; i++) {
+        copyProfileName(sCustomPbProfileNames[i], nullptr,
+                        defaultCustomProfileName(i));
+    }
+}
 
 void resetPBBackend() {
     sPbBackend = false;
@@ -380,28 +539,55 @@ void resetPBBackend() {
 }
 
 void adoptPBs(const volatile SusamuneCfg *cfg) {
-    volatile const SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
     if (cfg->magic != SUSAMUNE_CFG_MAGIC ||
-        cfg->version != SUSAMUNE_CFG_VERSION ||
-        !(cfg->flags & SUSAMUNE_CFG_FLAG_ILING_PBS) ||
-        pbs->magic != SUSAMUNE_ILING_PB_MAGIC ||
-        pbs->version != SUSAMUNE_ILING_PB_VERSION ||
-        pbs->count > SUSAMUNE_ILING_PB_MAX_SLOTS) {
+        cfg->version != SUSAMUNE_CFG_VERSION) {
         return;
     }
 
-    u16 count = pbs->count;
-    if (count > kPbSlotCount) {
-        count = kPbSlotCount;
-    }
-    for (u16 i = 0; i < count; i++) {
-        if (pbs->values[i] >= 0 &&
-            pbs->values[i] <= SUSAMUNE_ILING_PB_MAX_QF) {
-            sPbQf[i] = pbs->values[i];
+    volatile const SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
+    if ((cfg->flags & SUSAMUNE_CFG_FLAG_ILING_PROFILES) &&
+        profiles->magic == SUSAMUNE_ILING_PROFILE_MAGIC &&
+        profiles->version == SUSAMUNE_ILING_PROFILE_VERSION &&
+        profiles->profileCount == SUSAMUNE_ILING_PROFILE_COUNT &&
+        profiles->slotCount <= SUSAMUNE_ILING_PB_MAX_SLOTS &&
+        profiles->nameSize == SUSAMUNE_ILING_PROFILE_NAME_SIZE &&
+        profiles->activeProfile < SUSAMUNE_ILING_PROFILE_COUNT) {
+        for (int profile = 0; profile < SUSAMUNE_ILING_PROFILE_COUNT;
+             profile++) {
+            for (u16 slot = 0; slot < profiles->slotCount; slot++) {
+                const s32 value = profiles->values[profile][slot];
+                if (value >= 0 && value <= SUSAMUNE_ILING_PB_MAX_QF) {
+                    sPbProfiles[profile][slot] = value;
+                }
+            }
         }
+        for (int i = 0; i < SUSAMUNE_ILING_CUSTOM_NAME_COUNT; i++) {
+            const volatile char *name = profiles->customNames[i];
+            copyProfileName(sCustomPbProfileNames[i],
+                            const_cast<const char *>(name),
+                            defaultCustomProfileName(i));
+        }
+        sActivePbProfile = profiles->activeProfile;
+        sPbSaveSeq = profiles->saveSeq;
+        sPbBackend = true;
+        return;
     }
-    sPbSaveSeq = pbs->saveSeq;
-    sPbBackend = true;
+
+    volatile const SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
+    if ((cfg->flags & SUSAMUNE_CFG_FLAG_ILING_PBS) &&
+        pbs->magic == SUSAMUNE_ILING_PB_MAGIC &&
+        pbs->version == SUSAMUNE_ILING_PB_VERSION &&
+        pbs->count <= SUSAMUNE_ILING_PB_MAX_SLOTS) {
+        for (u16 slot = 0; slot < pbs->count; slot++) {
+            const s32 value = pbs->values[slot];
+            if (value >= 0 && value <= SUSAMUNE_ILING_PB_MAX_QF) {
+                sPbProfiles[0][slot] = value;
+            }
+        }
+        sPbSaveSeq = pbs->saveSeq;
+        sPbBackend = true;
+        sPbDirty = true;
+    }
 }
 
 void loadPBs() {
@@ -416,6 +602,8 @@ void loadPBs() {
     volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
     DCInvalidateRange((void *)cfg, 32);
     DCInvalidateRange((void *)&cfg->ilingPbs, sizeof(SusamuneILingPbCfg));
+    DCInvalidateRange((void *)&cfg->ilingProfiles,
+                      sizeof(SusamuneILingProfilesCfg));
     adoptPBs(cfg);
 #endif
 }
@@ -437,27 +625,29 @@ void stagePBSave() {
         sPbBackend = false;
         return;
     }
-    volatile SusamuneILingPbCfg *pbs = &cfg->ilingPbs;
+    volatile SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
 #else
-    volatile SusamuneILingPbCfg *pbs = &SUSAMUNE_CFG_PPC_PTR->ilingPbs;
+    volatile SusamuneILingProfilesCfg *profiles =
+        &SUSAMUNE_CFG_PPC_PTR->ilingProfiles;
 #endif
-    for (int i = 0; i < kPbSlotCount; i++) {
-        pbs->values[i] = sPbQf[i];
-    }
-    pbs->magic = SUSAMUNE_ILING_PB_MAGIC;
-    pbs->version = SUSAMUNE_ILING_PB_VERSION;
-    if (pbs->count < kPbSlotCount ||
-        pbs->count > SUSAMUNE_ILING_PB_MAX_SLOTS) {
-        pbs->count = kPbSlotCount;
-    }
+    memcpy((void *)profiles->values, sPbProfiles, sizeof(profiles->values));
+    memcpy((void *)profiles->customNames, sCustomPbProfileNames,
+           sizeof(profiles->customNames));
+    profiles->magic = SUSAMUNE_ILING_PROFILE_MAGIC;
+    profiles->version = SUSAMUNE_ILING_PROFILE_VERSION;
+    profiles->profileCount = SUSAMUNE_ILING_PROFILE_COUNT;
+    profiles->activeProfile = sActivePbProfile;
+    profiles->slotCount = SUSAMUNE_ILING_PB_MAX_SLOTS;
+    profiles->nameSize = SUSAMUNE_ILING_PROFILE_NAME_SIZE;
 #if IS_EMULATOR
     sPbSaveSeq = EmulatorPersistence::commit();
 #else
-    DCStoreRange((void *)pbs->values, sizeof(pbs->values));
+    DCStoreRange((void *)profiles->values,
+                 sizeof(profiles->values) + sizeof(profiles->customNames));
 
     sPbSaveSeq++;
-    pbs->saveSeq = sPbSaveSeq;
-    DCStoreRange((void *)pbs, 32);
+    profiles->saveSeq = sPbSaveSeq;
+    DCStoreRange((void *)profiles, 32);
 #endif
 
     sPbDirty = false;
@@ -494,19 +684,20 @@ void servicePBSave() {
             if (gMenu) gMenu->toast("PB card save timed out");
         }
 #else
-        volatile SusamuneILingPbCfg *pbs = &SUSAMUNE_CFG_PPC_PTR->ilingPbs;
-        DCInvalidateRange((void *)&pbs->ackSeq, 32);
-        if (pbs->ackSeq == sPbSaveSeq) {
+        volatile SusamuneILingProfilesCfg *profiles =
+            &SUSAMUNE_CFG_PPC_PTR->ilingProfiles;
+        DCInvalidateRange((void *)&profiles->ackSeq, 32);
+        if (profiles->ackSeq == sPbSaveSeq) {
             sPbPending = false;
             sPbTimeoutNotified = false;
             sPbSaveWaitFrames = 0;
-            if (pbs->status != 0 && gMenu) {
+            if (profiles->status != 0 && gMenu) {
                 char error[40];
                 snprintf(error, sizeof(error), "PB save failed: %u",
-                         pbs->status);
+                         profiles->status);
                 gMenu->toast(error);
             }
-            if (pbs->status != 0) {
+            if (profiles->status != 0) {
                 sPbDirty = true;
                 sPbRetryFrames = kPbRetryDelayFrames;
             }
@@ -532,12 +723,18 @@ bool isPlazaEntry(int entry) {
 }
 
 u8 entryFinish(const Entry &entry) {
-    return entry.result == 119 ? FINISH_BOWSER : entry.flags >> 6;
+    return entry.result == 119 || entry.result == 124
+               ? FINISH_BOWSER
+               : entry.flags >> 6;
 }
 
 int pbSlot(int entry) {
     const Entry &item = kEntries[entry];
     return item.flags & ENTRY_PB_OVERRIDE ? item.prerequisite : item.result;
+}
+
+bool acceptsAnySelectedOrigin(const Entry &item) {
+    return item.result == 30 || item.result == 86;
 }
 
 bool sameDest(const LevelWarp::Dest &a, const LevelWarp::Dest &b) {
@@ -555,9 +752,8 @@ bool acceptsSkipOrigin(const Entry &item) {
     if (item.result == 27 && item.start.area == 4 && item.start.episode == 7) {
         return sAttemptStart.area == 4 && sAttemptStart.episode == 0;
     }
-    if (item.result == 35 && item.start.area == 5 && item.start.episode == 5) {
-        return sAttemptStart.area == 5 &&
-               (sAttemptStart.episode == 2 || sAttemptStart.episode == 4);
+    if (item.result == 1 && item.start.area == 2 && item.start.episode == 1) {
+        return sAttemptStart.area == 2 && sAttemptStart.episode == 0;
     }
     return false;
 }
@@ -624,6 +820,14 @@ int entryForChildMode(const TGameSequence &scene, int active) {
 }
 
 int entryForResult(u8 result) {
+    if (validEntry(sSelectedEntry)) {
+        const Entry &selected = kEntries[sSelectedEntry];
+        if (acceptsAnySelectedOrigin(selected) &&
+            entryFinish(selected) == FINISH_SHINE &&
+            selected.result == result) {
+            return sSelectedEntry;
+        }
+    }
     for (int i = 0; i < kEntryCount; i++) {
         const Entry &item = kEntries[i];
         // A completed file makes Ricco 2's race award the replay Shine even
@@ -820,10 +1024,23 @@ void clearAttempt() {
     restorePlazaSetupState();
     restorePlazaStoryFlags();
     restoreOverlayFlags(isPlazaEntry(sSelectedEntry));
+    if (sTemporaryRocketActive) {
+        if (TFlagManager::smInstance) {
+            TFlagManager::smInstance->setFlag(0x40004,
+                                              sSavedSecondNozzleFlag);
+        }
+        if (gpMarDirector &&
+            gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING &&
+            gpMarioOriginal && gpMarioOriginal->mFludd) {
+            gpMarioOriginal->mFludd->mSecondNozzle = sSavedSecondNozzle;
+        }
+        sTemporaryRocketActive = false;
+    }
     sRunning = false;
     sAttemptReady = false;
     sTransitionPending = false;
     sSelectedEntry = -1;
+    sRocketEquipPending = false;
 }
 
 void armAttempt(const Entry &entry, int selected) {
@@ -834,12 +1051,6 @@ void armAttempt(const Entry &entry, int selected) {
     sFinishKind = entryFinish(entry);
     sSelectedEntry = selected;
     sAttemptSerial = gQFTTimer.attemptSerial();
-}
-
-void formatTime(s32 qf, char *out, u32 size) {
-    const s32 millis = (qf * 1001) / 120;
-    snprintf(out, size, "%d:%02d.%03d", (int)(millis / 60000),
-             (int)((millis / 1000) % 60), (int)(millis % 1000));
 }
 
 void formatDelta(s32 qf, char *out, u32 size) {
@@ -860,25 +1071,39 @@ void startPbFanfare() {
     }
 }
 
+bool pbRecordingEnabled() {
+    return gSettings.getBool(SETTING_ILING_RECORDING) &&
+           !gSettings.getBool(SETTING_STAGE_INTRO_SKIP);
+}
+
 void recordPB(int entry, s32 qf) {
-    const int slot = pbSlot(entry);
-    if (sPbQf[slot] >= 0 && qf >= sPbQf[slot]) {
+    if (!pbRecordingEnabled()) {
         return;
     }
 
-    const s32 previous = sPbQf[slot];
-    sPbQf[slot] = qf;
-    markPBsDirty();
-    char time[20];
-    char delta[20];
-    formatTime(qf, time, sizeof(time));
-    if (previous < 0) {
-        snprintf(sBannerText, sizeof(sBannerText), "NEW PB: %s --", time);
-    } else {
-        formatDelta(previous - qf, delta, sizeof(delta));
-        snprintf(sBannerText, sizeof(sBannerText), "NEW PB: %s %s", time, delta);
+    const int slot = pbSlot(entry);
+    s32 *pbs = activePBs();
+    if (pbs[slot] >= 0 && qf >= pbs[slot]) {
+        return;
     }
-    sBannerFrames = kBannerFrames;
+
+    const s32 previous = pbs[slot];
+    pbs[slot] = qf;
+    markPBsDirty();
+    if (gSettings.getBool(SETTING_ILING_POPUP)) {
+        char time[20];
+        char delta[20];
+        ILing::formatTime(qf, time, sizeof(time));
+        if (previous < 0) {
+            snprintf(sBannerText, sizeof(sBannerText), "NEW PB: %s --", time);
+        } else {
+            formatDelta(previous - qf, delta, sizeof(delta));
+            snprintf(sBannerText, sizeof(sBannerText), "NEW PB: %s %s", time, delta);
+        }
+        sBannerFrames = kBannerFrames;
+    } else {
+        sBannerFrames = 0;
+    }
 
     if (!gSettings.getBool(SETTING_ILING_FANFARE)) {
         sFanfareDelay = 0;
@@ -906,25 +1131,15 @@ void recordResult(int entry, s32 qf) {
 
 namespace ILing {
 
+void formatTime(s32 qf, char *out, u32 size, const char *format) {
+    const s32 millis = (qf * 1001) / 120;
+    snprintf(out, size, format, (int)(millis / 60000),
+             (int)((millis / 1000) % 60), (int)(millis % 1000));
+}
+
 void init() {
-    for (int i = 0; i < kPbSlotCount; i++) {
-        sPbQf[i] = -1;
-    }
-    sRunning = false;
-    sAttemptReady = false;
-    sCarryRestorePending = false;
-    sTransitionPending = false;
-    sHaveSetupShineCount = false;
-    sHaveSetupMovieFlag = false;
-    sHavePlazaStoryFlags = false;
-    sOverlayCount = 0;
+    resetPBProfiles();
     sSelectedEntry = -1;
-    sAttemptSerial = 0;
-    sBannerFrames = 0;
-    sFanfareDelay = 0;
-    sRecentCount = 0;
-    sRecentNext = 0;
-    sHaveSavedAttempt = false;
     loadPBs();
 }
 
@@ -939,6 +1154,10 @@ int count() { return kEntryCount; }
 const char *label(int entry) {
     if (entry < kGeneratedLabelCount) {
         const Entry &item = kEntries[entry];
+        if (entry == kEntryPinnaEyg) return "Pinna Park EYG";
+        if (entry == kEntryNoki3Inside) return "Noki 3";
+        if (entry == kEntryNoki4Eel) return "Noki 4 (Eel Only)";
+        if (entry == kEntryGelato4Inside) return "Gelato 4 (Inside)";
         const bool hundred = item.result >= 100;
         const int group = hundred ? item.result - 100 : item.result / 10;
         const u8 flags = item.flags & ENTRY_FLAG_MASK;
@@ -951,16 +1170,97 @@ const char *label(int entry) {
         }
         static char generated[kRegularLabelSize];
         sprintf(generated, kRegularLabelFormats + formatOffset,
-                regularGroupName(group),
-                item.start.gameInt3 + 1, suffix);
+                regularGroupName(group), item.start.gameInt3 + 1, suffix);
         return generated;
     }
 
     return PackedText::at(kLiteralEntryLabels, entry - kGeneratedLabelCount);
 }
 
+const char *shortLabel(int entry) {
+    if (entry >= kGeneratedLabelCount) {
+        return PackedText::at(kLiteralShortLabels,
+                              entry - kGeneratedLabelCount);
+    }
+
+    const Entry &item = kEntries[entry];
+    if (entry == kEntryPinnaEyg) return "PEYG";
+    if (entry == kEntryNoki3Inside) return "NB3";
+    if (entry == kEntryNoki4Eel) return "NB4i";
+    if (entry == kEntryGelato4Inside) return "GB4i";
+    const bool hundred = item.result >= 100;
+    const int group = hundred ? item.result - 100 : item.result / 10;
+    const char *prefix = kRegularShortGroupNames + group * 3;
+    const u8 flags = item.flags & ENTRY_FLAG_MASK;
+    static char generated[6];
+    if (hundred) {
+        const bool longPrefix = group == GROUP_PINNA || group == GROUP_PIANTA;
+        generated[0] = longPrefix ? prefix[0] : kHundredGroupLetters[group];
+        generated[1] = longPrefix ? prefix[1] : '1';
+        generated[2] = longPrefix ? '1' : '0';
+        generated[3] = '0';
+        generated[4] = longPrefix ? '0' : '\0';
+        generated[5] = '\0';
+    } else if (flags == ENTRY_NONE && item.result - group * 10 == 9) {
+        generated[0] = prefix[0];
+        generated[1] = 'H';
+        generated[2] = '\0';
+    } else {
+        generated[0] = prefix[0];
+        generated[1] = prefix[1];
+        generated[2] = '1' + item.start.gameInt3;
+        const int suffix = regularSuffixType(flags);
+        generated[3] = suffix == 2 ? 'F' : suffix == 3 ? 'S'
+                               : suffix ? 'R' : '\0';
+        generated[4] = '\0';
+    }
+    return generated;
+}
+
 s32 pbQf(int entry) {
-    return sPbQf[pbSlot(entry)];
+    return activePBs()[pbSlot(entry)];
+}
+
+bool anyPercentTheoryQf(s32 *out) {
+    if (!out || sActivePbProfile != 0) return false;
+    s32 total = 0;
+    for (u32 i = 0; i < sizeof(kAnyPercentTheorySlots); i++) {
+        const s32 qf = activePBs()[kAnyPercentTheorySlots[i]];
+        if (qf < 0) return false;
+        total += qf;
+    }
+    *out = total;
+    return true;
+}
+
+int pbProfile() { return sActivePbProfile; }
+
+const char *pbProfileName(int profile) {
+    if (profile == 0) return "Any%";
+    if (profile == 1) return "120 Shines";
+    if (profile >= 2 && profile < SUSAMUNE_ILING_PROFILE_COUNT) {
+        return sCustomPbProfileNames[profile - 2];
+    }
+    return "";
+}
+
+bool pbProfileNameEditable(int profile) {
+    return profile >= 2 && profile < SUSAMUNE_ILING_PROFILE_COUNT;
+}
+
+void cyclePbProfile(int direction) {
+    sActivePbProfile = (u8)((sActivePbProfile +
+        SUSAMUNE_ILING_PROFILE_COUNT + direction) %
+        SUSAMUNE_ILING_PROFILE_COUNT);
+    sBannerFrames = 0;
+    markPBsDirty();
+}
+
+void setPbProfileName(int profile, const char *name) {
+    if (!pbProfileNameEditable(profile)) return;
+    copyProfileName(sCustomPbProfileNames[profile - 2], name,
+                    defaultCustomProfileName(profile - 2));
+    markPBsDirty();
 }
 
 int jumpGroup(int entry, int direction) {
@@ -990,6 +1290,14 @@ const char *groupName(int entry) {
     int group = 0;
     while (group + 1 < GROUP_COUNT && entry >= kGroupFirst[group + 1]) group++;
     return kMenuGroupNames + kMenuGroupOffsets[group];
+}
+
+int activeParentEpisode(u8 parentArea) {
+    if (!sRunning) return -1;
+    const u8 startParent = LevelWarp::parentArea(sAttemptStart.area);
+    if (sAttemptStart.area != parentArea && startParent != parentArea)
+        return -1;
+    return sAttemptStart.gameInt3;
 }
 
 bool start(int entry) {
@@ -1024,7 +1332,7 @@ bool start(int entry) {
 
 void clearPB(int entry) {
     const int slot = pbSlot(entry);
-    sPbQf[slot] = -1;
+    activePBs()[slot] = -1;
     markPBsDirty();
     sBannerFrames = 0;
 }
@@ -1043,6 +1351,15 @@ void onWarpTail() {
 void beforeStageSetup() {
     const TGameSequence &scene = gpApplication.mCurrentScene;
 
+    if (sBowserNozzleShieldActive) {
+        if (TFlagManager::smInstance) {
+            TFlagManager::smInstance->setFlag(0x40004,
+                                              sSavedBowserNozzleFlag);
+        }
+        sBowserNozzleShieldActive = false;
+    }
+    sBowserNozzleShieldPending = false;
+
     if (sRunning && sTransitionPending && validEntry(sSelectedEntry) &&
         sFinishKind == FINISH_TRANSITION) {
         clearAttempt();
@@ -1057,6 +1374,14 @@ void beforeStageSetup() {
             } else if (sSelectedEntry >= 0) {
                 applyEntryOverlay(sSelectedEntry);
             }
+            return;
+        }
+        if (validEntry(sSelectedEntry) &&
+            acceptsAnySelectedOrigin(kEntries[sSelectedEntry])) {
+            // Their cutscene hops do not restart QFT, so keep the selected
+            // attempt eligible across every intermediate scene.
+            sAttemptReady = true;
+            sAttemptSerial = gQFTTimer.attemptSerial();
             return;
         }
         if (!isPlazaEntry(sSelectedEntry) &&
@@ -1113,10 +1438,52 @@ void onStageSetup() {
     } else {
         restoreOverlayFlags();
     }
+
+    sRocketEquipPending = atStart && validEntry(sSelectedEntry) &&
+        sSelectedEntry == kEntryGelato4Inside;
+    sBowserNozzleShieldPending = atStart && validEntry(sSelectedEntry) &&
+        sSelectedEntry == kEntryBowser;
 }
 
 void update() {
     servicePBSave();
+
+    if (sBowserNozzleShieldPending && gpMarDirector &&
+        gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING &&
+        TFlagManager::smInstance) {
+        sSavedBowserNozzleFlag =
+            TFlagManager::smInstance->getFlag(0x40004);
+        sBowserNozzleShieldActive = true;
+        sBowserNozzleShieldPending = false;
+    }
+
+    if (sRocketEquipPending && gpMarDirector &&
+        gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING &&
+        gpMarioOriginal && gpMarioOriginal->mFludd &&
+        TFlagManager::smInstance) {
+        TWaterGun *fludd = gpMarioOriginal->mFludd;
+        sSavedSecondNozzle = fludd->mSecondNozzle;
+        sSavedSecondNozzleFlag =
+            TFlagManager::smInstance->getFlag(0x40004);
+        sTemporaryRocketActive = true;
+
+        fludd->changeNozzle(TWaterGun::Spray, true);
+        fludd->mSecondNozzle = TWaterGun::Rocket;
+        fludd->mCurrentWater =
+            fludd->mNozzleList[TWaterGun::Spray]->mEmitParams.mAmountMax.get();
+        sRocketEquipPending = false;
+    }
+
+    // Sunshine saves the live backup nozzle into 0x40004 while departing.
+    // Keep the IL-only Rocket from escaping into the next stage.
+    if (sTemporaryRocketActive && TFlagManager::smInstance) {
+        TFlagManager::smInstance->setFlag(0x40004,
+                                          sSavedSecondNozzleFlag);
+    }
+    if (sBowserNozzleShieldActive && TFlagManager::smInstance) {
+        TFlagManager::smInstance->setFlag(0x40004,
+                                          sSavedBowserNozzleFlag);
+    }
 
     if (sRunning && !sTransitionPending && validEntry(sSelectedEntry) &&
         sFinishKind == FINISH_TRANSITION) {
@@ -1140,6 +1507,13 @@ void update() {
         // An aborted intermediate movie must not carry practice flags into
         // file select or another save file.
         clearAttempt();
+    }
+
+    if (!pbRecordingEnabled()) {
+        sFanfareDelay = 0;
+        sBannerFrames = 0;
+    } else if (!gSettings.getBool(SETTING_ILING_POPUP)) {
+        sBannerFrames = 0;
     }
 
     if (sFanfareDelay > 0 && --sFanfareDelay == 0 &&
@@ -1170,7 +1544,9 @@ void update() {
     const u32 serial = gQFTTimer.attemptSerial();
     if (sAttemptReady && serial != sAttemptSerial) {
         const TGameSequence &scene = gpApplication.mCurrentScene;
-        if (sceneMatches(scene, sAttemptStart)) {
+        if (sceneMatches(scene, sAttemptStart) ||
+            (validEntry(sSelectedEntry) &&
+             acceptsAnySelectedOrigin(kEntries[sSelectedEntry]))) {
             // A same-scene reset keeps its explicitly selected Secret/Reds mode.
             sAttemptSerial = serial;
         } else {
@@ -1212,7 +1588,11 @@ void update() {
         if (!gQFTTimer.consumeBowser(&qf)) {
             return;
         }
-        completedEntry = kGroupFirst[GROUP_CORONA];
+        completedEntry = validEntry(sSelectedEntry)
+                             ? sSelectedEntry
+                             : sAttemptStart.area == TGameSequence::AREA_CORONABOSS
+                                   ? kEntryBowser
+                                   : kEntryCorona;
     } else if (sFinishKind == FINISH_PLANT || sFinishKind == FINISH_DEATH) {
         if (!gQFTTimer.consumeCustom(sFinishKind == FINISH_DEATH, &qf)) {
             return;
@@ -1268,36 +1648,84 @@ void onSavestateLoaded() {
     clearAttempt();
 }
 
+static void drawRecent(Menu *menu, bool preview) {
+    if (!menu || (!preview && (!gSettings.getBool(SETTING_ILING_RECENT) ||
+                              sRecentCount == 0))) {
+        return;
+    }
+
+    const CreationStyle &style = gCreationExtras.recentIlStyle();
+    const int scale = style.scale;
+    const int x = style.x;
+    const int y = style.y;
+    const bool shortNames = gSettings.getBool(SETTING_ILING_SHORT_NAMES);
+    const int padding = style.padding == 0xff ? 0 : style.padding;
+    const int rows = sRecentCount ? sRecentCount : (preview ? kRecentCount : 0);
+    const int contentW = ((shortNames ? 156 : 230) * scale + 50) / 100;
+    const int w = contentW + padding * 2;
+    const int lineH = (15 * scale + 50) / 100;
+    const int headerH = (22 * scale + 50) / 100;
+    const int h = headerH + lineH * rows;
+    const int textSize = (12 * scale + 50) / 100;
+    const int textX = x + padding;
+    const u8 *rgb = gCreationExtras.recentIlTextRgb();
+    const int brightness = style.textBrightness;
+    u8 litRgb[3];
+    for (int channel = 0; channel < 3; channel++) {
+        const int value = (int)rgb[channel] * brightness / 100;
+        litRgb[channel] = (u8)(value > 255 ? 255 : value);
+    }
+    const Color textColor(litRgb[0], litRgb[1], litRgb[2], style.textA);
+    if (rows) {
+        if (style.padding != 0xff) {
+            menu->fillBox(x, y, w, h,
+                          Color(style.bgR, style.bgG, style.bgB, style.bgA));
+            menu->fillBox(x, y, (3 * scale + 50) / 100, h,
+                          Color(80, 180, 255, style.bgA));
+        }
+        menu->drawText("Recent ILs", textX,
+                       y + (5 * scale + 50) / 100, textSize, textSize,
+                       textColor);
+
+        static const char kPreviewShortNames[] =
+            "BH3\0RH2R\0GB1S\0PP6F\0B100";
+        static const char kPreviewLongNames[] =
+            "Bianco 3\0Ricco 2 Reds\0Gelato 1 Secret\0"
+            "Pinna 6 (Full)\0Bianco 100 (E2)";
+        for (int row = 0; row < rows; row++) {
+            char time[20];
+            const char *name;
+            if (sRecentCount) {
+                int index = sRecentNext - 1 - row;
+                if (index < 0) index += kRecentCount;
+                formatTime(sRecentQf[index], time, sizeof(time));
+                name = shortNames ? shortLabel(sRecentEntry[index])
+                                  : label(sRecentEntry[index]);
+            } else {
+                snprintf(time, sizeof(time), "1:%02d.%03d", 12 + row,
+                         345 + row * 111);
+                name = PackedText::at(shortNames ? kPreviewShortNames
+                                                 : kPreviewLongNames,
+                                      row);
+            }
+            char line[32];
+            snprintf(line, sizeof(line), "%s  %s", name, time);
+            menu->drawText(line, textX, y + headerH + row * lineH,
+                           textSize, textSize, textColor);
+        }
+    }
+}
+
+void drawRecentPreview(Menu *menu) {
+    drawRecent(menu, true);
+}
+
 void draw(Menu *menu) {
     if (!menu || menu->shown()) {
         return;
     }
 
-    if (gSettings.getBool(SETTING_ILING_RECENT) && sRecentCount != 0) {
-        const int x = 382;
-        const int y = 92;
-        const int w = 250;
-        const int lineH = 15;
-        const int h = 22 + lineH * sRecentCount;
-        menu->fillBox(x, y, w, h, JUtility::TColor(12, 20, 34, 205));
-        menu->fillBox(x, y, 3, h, JUtility::TColor(80, 180, 255, 255));
-        menu->drawText("Recent ILs", x + 10, y + 5, 12, 12,
-                       JUtility::TColor(160, 220, 255, 255));
-
-        for (u8 row = 0; row < sRecentCount; row++) {
-            int index = sRecentNext - 1 - row;
-            if (index < 0) {
-                index += kRecentCount;
-            }
-            char time[20];
-            char line[48];
-            formatTime(sRecentQf[index], time, sizeof(time));
-            snprintf(line, sizeof(line), "%s  %s",
-                     label(sRecentEntry[index]), time);
-            menu->drawText(line, x + 10, y + 21 + row * lineH, 12, 12,
-                           JUtility::TColor(245, 248, 255, 255));
-        }
-    }
+    drawRecent(menu, false);
 
     if (sBannerFrames > 0) {
         const int size = 22;

@@ -43,6 +43,10 @@ public:
     // message still on screen; expires on its own after kToastFrames.
     void toast(const char *msg);
 
+    // Restore mod settings, binds and layouts, then persist them. IL PBs live
+    // in their own mailbox and are deliberately untouched.
+    void factoryReset();
+
     // --- helpers a tab uses to render itself (implemented in menu.cpp) ---
     // Draw one line of text with the shared textbox. No allocation: `s` is
     // borrowed (a const literal or a caller-owned scratch buffer).
@@ -62,7 +66,7 @@ public:
     // text jitter as its content changes.
     static int textWidth(const char *s, int sizeX);
 
-    static const int kMaxTabs = 11;
+    static const int kMaxTabs = 12;
     // How long a toast stays up, in frames (~3s at 60Hz).
     static const int kToastFrames = 180;
 

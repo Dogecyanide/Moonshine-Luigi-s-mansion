@@ -57,9 +57,11 @@
 #include "susamune/savestate.hxx"
 #include "susamune/addresses.hxx"
 #include "susamune/binds.hxx"
+#include "susamune/creation_extras.hxx"
 #include "susamune/mem2_map.h"
 #include "susamune/qft_timer.hxx"
 #include "susamune/iling.hxx"
+#include "susamune/menu.hxx"
 #include "susamune/settings.hxx"
 #if ENABLE_SAVESTATE_DBG
 #endif
@@ -333,6 +335,8 @@ char sStatusBuf[12];
 // ---------------------------------------------------------------------
 
 SavestateManager::SavestateManager() {
+    mFeedback[0] = '\0';
+    mFeedbackFrames = 0;
     mLoadPending = false;
 
 #if ENABLE_SAVESTATE_DBG
@@ -371,24 +375,35 @@ void SavestateManager::setStatus(const char *msg) {
 #define SET_STATUS(msg) ((void)0)
 #endif
 
+void SavestateManager::feedback(const char *debug, const char *message) {
+    SET_STATUS(debug);
+    if (!gSettings.getBool(SETTING_SAVESTATE_FEEDBACK)) {
+        mFeedbackFrames = 0;
+        return;
+    }
+    strncpy(mFeedback, message, sizeof(mFeedback) - 1);
+    mFeedback[sizeof(mFeedback) - 1] = '\0';
+    mFeedbackFrames = Menu::kToastFrames;
+}
+
 bool SavestateManager::saveState() {
     // Refuse while a stage load is in flight or the intro sequence is playing;
     // the heap is not yet stable there. See inLoadTransition().
     if (inLoadTransition()) {
-        SET_STATUS("E:loading");
+        feedback("E:loading", "Can't save during stage loading");
         return false;
     }
 
     JKRHeap *heap = gpApplication.mCurrentHeap;
     if (!heap) {
-        SET_STATUS("E:noheap");
+        feedback("E:noheap", "Savestate unavailable");
         return false;
     }
 
     const u32 heapStart = reinterpret_cast<u32>(heap);
     const u32 heapEnd   = reinterpret_cast<u32>(heap->mEnd);
     if (heapEnd <= heapStart) {
-        SET_STATUS("E:badheap");
+        feedback("E:badheap", "Savestate unavailable");
         return false;
     }
     const u32 heapSize  = heapEnd - heapStart;
@@ -403,7 +418,7 @@ bool SavestateManager::saveState() {
     }
     total += heapSize;
     if (total + kHeaderSize > kSnapshotReservedSize) {
-        SET_STATUS("E:size");
+        feedback("E:size", "Savestate is too large");
         return false;
     }
 
@@ -493,7 +508,7 @@ bool SavestateManager::saveState() {
 
     gQFTTimer.onSavestateSaved();
     ILing::onSavestateSaved();
-    SET_STATUS("saved");
+    feedback("saved", "Savestate saved");
     return true;
 }
 
@@ -502,27 +517,27 @@ bool SavestateManager::loadState() {
     // overwriting a heap the setup thread is still filling crashes. See
     // inLoadTransition().
     if (inLoadTransition()) {
-        SET_STATUS("E:loading");
+        feedback("E:loading", "Can't load during stage loading");
         return false;
     }
 
     SavestateHeader *h = headerPtr();
     if (h->magic != kSnapshotMagic) {
-        SET_STATUS("E:nosnap");
+        feedback("E:nosnap", "No savestate yet");
         return false;
     }
     if (h->version != kSnapshotVersion) {
-        SET_STATUS("E:version");
+        feedback("E:version", "Savestate is from another build");
         return false;
     }
     if (h->game_version != SUSAMUNE_GAME_VERSION) {
-        SET_STATUS("E:region");
+        feedback("E:region", "Savestate is from another region");
         return false;
     }
 
     JKRHeap *heap = gpApplication.mCurrentHeap;
     if (!heap) {
-        SET_STATUS("E:noheap");
+        feedback("E:noheap", "Savestate unavailable");
         return false;
     }
 
@@ -530,13 +545,13 @@ bool SavestateManager::loadState() {
     // (different scenario, different boot path), restoring would scribble
     // stale pointers all over the place. Refuse the load.
     if (reinterpret_cast<u32>(heap) != h->heap_addr) {
-        SET_STATUS("E:hpaddr");
+        feedback("E:hpaddr", "Stage layout changed - save again");
         return false;
     }
     const u32 heapSize = reinterpret_cast<u32>(heap->mEnd)
                        - reinterpret_cast<u32>(heap);
     if (heapSize != h->heap_size) {
-        SET_STATUS("E:hpsize");
+        feedback("E:hpsize", "Stage layout changed - save again");
         return false;
     }
 
@@ -545,7 +560,7 @@ bool SavestateManager::loadState() {
     // new director's setup -- and not the use case we're after.
     if (h->area_id    != gpApplication.mCurrentScene.mAreaID
      || h->episode_id != gpApplication.mCurrentScene.mEpisodeID) {
-        SET_STATUS("E:scene");
+        feedback("E:scene", "Savestate belongs to another area");
         return false;
     }
 
@@ -561,7 +576,7 @@ bool SavestateManager::loadState() {
         int spins = 0;
         while (gpCardManager->getLastStatus() == CARD_ERROR_BUSY) {
             if (++spins > 600) { // ~10 s @ 60 Hz of yielding
-                SET_STATUS("E:cardbsy");
+                feedback("E:cardbsy", "Memory card busy - try again");
                 return false;
             }
             OSYieldThread();
@@ -622,7 +637,7 @@ bool SavestateManager::loadState() {
 
     gQFTTimer.onSavestateLoaded();
     ILing::onSavestateLoaded();
-    SET_STATUS("loaded");
+    feedback("loaded", "Savestate loaded");
     return true;
 }
 
@@ -663,11 +678,14 @@ void SavestateManager::processPendingLoad() {
     loadState();
 }
 
+void SavestateManager::draw(Menu *menu) {
+    if (mFeedbackFrames > 0) mFeedbackFrames--;
 #if ENABLE_SAVESTATE_DBG
-void SavestateManager::draw(J2DOrthoGraph *ortho) {
-    (void)ortho;
     if (mInfoText) {
         mInfoText->draw(20, 60);
     }
-}
 #endif
+    if (!menu || menu->shown() || mFeedbackFrames <= 0 ||
+        !gSettings.getBool(SETTING_SAVESTATE_FEEDBACK)) return;
+    gCreationExtras.drawSavestateFeedback(menu, mFeedback);
+}
