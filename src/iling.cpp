@@ -1177,7 +1177,7 @@ void recordResult(int entry, s32 qf) {
     }
     const s32 igtCentis = sNativeIgt && gpMarDirector &&
                                   gpMarDirector->mGCConsole
-                              ? gpMarDirector->mGCConsole->mTimerSecondsLeft
+                              ? gpMarDirector->mGCConsole->getFinishedTime()
                               : -1;
     Records::onILResult(entry, (u8)pbSlot(entry), qf, igtCentis,
                         sRecordsEligible);
