@@ -65,7 +65,7 @@ constexpr char kMenuText[] =
     "Word 1 text\0Word 1 style\0Word 1 visible\0"
     "Word 2 text\0Word 2 style\0Word 2 visible\0"
     "Word 3 text\0Word 3 style\0Word 3 visible\0"
-    "MOD MENU\0Menu background";
+    "MOD MENU\0Menu background\0Achievement popup";
 
 const u32 kPreviewRootTags[] = {
     '\0t_0', '\0c_0', '\0r_0', '\0d_0', '\0m_0', '\0s_0',
@@ -103,7 +103,7 @@ bool sameRgb(const u8 a[3], const u8 b[3]) {
 
 void clampStyle(CreationStyle &style) {
     style.x = (u16)clampi(style.x, 0, 640);
-    style.y = (u16)clampi(style.y, 0, 456);
+    style.y = (u16)clampi(style.y, 0, 480);
     style.scale = (u8)clampi(style.scale, 50, 200);
     style.textBrightness = (u8)clampi(style.textBrightness, 25, 200);
     if (style.padding != 0xff)
@@ -219,6 +219,13 @@ static CreationStyle defaultSavestateFeedbackStyle() {
     };
 }
 
+static CreationStyle defaultAchievementBannerStyle() {
+    return CreationStyle{
+        115, 96, 100, 255,
+        0, 0, 0, 225, 100, 4,
+    };
+}
+
 CreationStyle CreationExtras::defaultWallkickStyle() {
     return CreationStyle{
         300, 106, 90, 255,
@@ -246,6 +253,7 @@ void CreationExtras::resetDefaults() {
     Creation::fillWhite(mSavestateFeedbackRgb, 1);
     mWallkickStyle = defaultWallkickStyle();
     Creation::fillWhite(mWallkickRgb, SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT);
+    mAchievementBannerStyle = defaultAchievementBannerStyle();
     for (u32 i = 0; i < sizeof(mHudPictures) / sizeof(mHudPictures[0]); i++)
         mHudPictures[i] = nullptr;
     mHudScreen = nullptr;
@@ -314,6 +322,13 @@ void CreationExtras::adopt(const volatile SusamuneCreationCfg *src) {
         memcpy(mSavestateFeedbackRgb, (const void *)src->savestateTextRgb,
                sizeof(mSavestateFeedbackRgb));
     }
+    if (src->achievementStyleMagic ==
+        SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC) {
+        mAchievementBannerStyle.x = src->achievementX;
+        mAchievementBannerStyle.y = src->achievementY;
+        mAchievementBannerStyle.scale = src->achievementScale;
+        clampStyle(mAchievementBannerStyle);
+    }
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         const volatile SusamuneCreationWordCfg &in = src->words[word];
         loadStyle(mWordStyle[word], &in.x);
@@ -359,6 +374,12 @@ void CreationExtras::stageInto(volatile SusamuneCreationCfg *dst) const {
     storeStyle(&dst->savestateX, mSavestateFeedbackStyle);
     memcpy((void *)dst->savestateTextRgb, mSavestateFeedbackRgb,
            sizeof(mSavestateFeedbackRgb));
+    dst->achievementStyleMagic =
+        SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC;
+    dst->achievementX = mAchievementBannerStyle.x;
+    dst->achievementY = mAchievementBannerStyle.y;
+    dst->achievementScale = mAchievementBannerStyle.scale;
+    memset((void *)dst->reserved3, 0, sizeof(dst->reserved3));
 }
 
 void CreationExtras::adoptWallkick(
@@ -609,6 +630,18 @@ void CreationExtras::beginWallkickEditor() {
                   CreationEditor::CAP_ALL);
 }
 
+void CreationExtras::beginAchievementBannerEditor() {
+    if (editing()) return;
+    mDirtyBeforeEdit = mDirty;
+    mEditMode = EDIT_ACHIEVEMENT_BANNER;
+    mEditFirst = 0;
+    mEditCount = 1;
+    mEditTitle = "Achievement popup";
+    mEditor.begin(&mAchievementBannerStyle, mRecentIlRgb, mRecentIlBackup,
+                  1, 0, nullptr,
+                  CreationEditor::CAP_POSITION | CreationEditor::CAP_SCALE);
+}
+
 void CreationExtras::drawSavestateFeedback(Menu *menu,
                                            const char *message) const {
     Creation::drawTextBox(menu, mSavestateFeedbackStyle,
@@ -671,6 +704,8 @@ void CreationExtras::adjustMenuRow(int row, int direction) {
         }
     } else if (row == 19) {
         beginColorEditor(SUSAMUNE_CREATION_MENU_BG, 1, menuRowName(row));
+    } else if (row == 20) {
+        beginAchievementBannerEditor();
     }
 }
 
@@ -683,7 +718,8 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
     static const u8 kOverlayDefaults[1][3] = {{255, 255, 255}};
     const bool overlayStyle = mEditMode == EDIT_RECENT_ILS ||
                               mEditMode == EDIT_SAVESTATE_FEEDBACK ||
-                              mEditMode == EDIT_WALLKICK;
+                              mEditMode == EDIT_WALLKICK ||
+                              mEditMode == EDIT_ACHIEVEMENT_BANNER;
     const u8 (*defaults)[3] = mEditMode == EDIT_WORD_STYLE
                                   ? mDefaultColors
         : overlayStyle ? kOverlayDefaults : mDefaultColors + mEditFirst;
@@ -692,7 +728,9 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
         : mEditMode == EDIT_RECENT_ILS ? defaultRecentIlStyle()
         : mEditMode == EDIT_SAVESTATE_FEEDBACK
               ? defaultSavestateFeedbackStyle()
-        : mEditMode == EDIT_WALLKICK ? defaultWallkickStyle() : mColorStyle;
+        : mEditMode == EDIT_WALLKICK ? defaultWallkickStyle()
+        : mEditMode == EDIT_ACHIEVEMENT_BANNER
+              ? defaultAchievementBannerStyle() : mColorStyle;
     const u8 result = mEditor.update(
         pad, defaultStyle, defaults,
         mEditMode != EDIT_WORD_STYLE && !overlayStyle ? mEditCount : 1);
@@ -822,6 +860,10 @@ void CreationExtras::drawEditor(Menu *menu) const {
         const char *preview = wallkickDisplayLabel(color);
         drawWallkickDisplay(menu, preview, color);
         mEditor.draw(menu, mEditTitle, preview);
+        return;
+    }
+    if (mEditMode == EDIT_ACHIEVEMENT_BANNER) {
+        mEditor.draw(menu, mEditTitle, "Achievement preview");
         return;
     }
     mEditor.draw(menu, mEditTitle, mEditTitle);

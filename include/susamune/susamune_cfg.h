@@ -155,6 +155,7 @@ struct SusamuneInputStyleCfg {
 #define SUSAMUNE_CREATION_MENU_BG           24u
 #define SUSAMUNE_CREATION_RECENT_STYLE_MAGIC 0x5249u  // 'RI'
 #define SUSAMUNE_CREATION_SAVESTATE_STYLE_MAGIC 0x5353u  // 'SS'
+#define SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC 0xA7u
 
 #define SUSAMUNE_WALLKICK_STYLE_MAGIC       0x53574B44u  // 'SWKD'
 #define SUSAMUNE_WALLKICK_STYLE_VERSION     1u
@@ -217,7 +218,13 @@ struct SusamuneCreationCfg {
     unsigned char  savestateTextBrightness;
     unsigned char  savestatePadding;
     unsigned char  savestateTextRgb[3];
-    unsigned char  reserved3[15];
+    // Position/scale-only achievement banner style. The one-byte magic starts
+    // at the old unaligned reserved tail so the 576-byte ABI does not move.
+    unsigned char  achievementStyleMagic;
+    unsigned short achievementX;
+    unsigned short achievementY;
+    unsigned char  achievementScale;
+    unsigned char  reserved3[9];
 };
 
 struct SusamuneWallkickStyleCfg {

@@ -687,7 +687,7 @@ public:
 
         switch (mPage) {
         case PAGE_ROOT:
-            moveSelection(rapid, 4);
+            moveSelection(rapid, 5);
             if (mSel == 3 &&
                 (rapid & (TMarioGamePad::CSTICK_LEFT |
                           TMarioGamePad::CSTICK_RIGHT | TMarioGamePad::A))) {
@@ -695,6 +695,11 @@ public:
                     (rapid & TMarioGamePad::CSTICK_LEFT) ? -1 : 1;
                 mScope = (u8)wrap(mScope + direction,
                                   RecordsPersistence::SCOPE_COUNT);
+            } else if (mSel == 4 &&
+                       (rapid & (TMarioGamePad::CSTICK_LEFT |
+                                 TMarioGamePad::CSTICK_RIGHT |
+                                 TMarioGamePad::A))) {
+                gSettings.cycle(SETTING_ACHIEVEMENT_NOTIFICATIONS, +1);
             } else if (rapid & TMarioGamePad::A) {
                 mPage = mSel == 0 ? PAGE_ACHIEVEMENT_CATEGORIES
                                   : mSel == 1 ? PAGE_STATS_OVERVIEW
@@ -882,6 +887,9 @@ private:
                      RecordsPersistence::scopeName(
                          (RecordsPersistence::Scope)mScope),
                      mSel == 3, false, true);
+        drawValueRow(menu, x, y + ROW_H * 4, w, "Unlock popup & chime",
+                     gSettings.valueLabel(SETTING_ACHIEVEMENT_NOTIFICATIONS),
+                     mSel == 4, false, true);
         menu->drawText("V1.2.0 - Trial By Sunshine",
                        x + 4, y + h - 44, FOOT_SZ, FOOT_SZ, cRowDim());
         menu->drawText(storageStatus(), x + 4, y + h - 24,
@@ -1914,6 +1922,15 @@ int sAchievementBannerFrames = 0;
 bool sAchievementChimePending = false;
 bool sAchievementBatchActive = false;
 
+void discardAchievementNotifications() {
+    sAchievementBannerId = Records::ACHIEVEMENT_INVALID;
+    sAchievementBannerFrames = 0;
+    sAchievementChimePending = false;
+    sAchievementBatchActive = false;
+    Records::AchievementId ignored;
+    while (Records::popUnlock(&ignored)) {}
+}
+
 void updateAchievementChime() {
     if (!sAchievementChimePending) return;
     if (ILing::achievementChimeBlocked()) {
@@ -1934,6 +1951,10 @@ void updateAchievementChime() {
 }
 
 void updateAchievementBanner() {
+    if (!gSettings.getBool(SETTING_ACHIEVEMENT_NOTIFICATIONS)) {
+        discardAchievementNotifications();
+        return;
+    }
     if (sAchievementBannerFrames > 0) sAchievementBannerFrames--;
     if (sAchievementBannerFrames != 0) {
         updateAchievementChime();
@@ -1956,31 +1977,45 @@ void updateAchievementBanner() {
 }
 
 void drawAchievementBanner(Menu *menu) {
-    if (!menu || sAchievementBannerFrames == 0) return;
-    const Records::AchievementDesc *desc =
-        Records::achievement(sAchievementBannerId);
-    if (!desc) return;
+    const bool preview = gCreationExtras.editingAchievementBanner();
+    if (!menu || (!preview &&
+        (!gSettings.getBool(SETTING_ACHIEVEMENT_NOTIFICATIONS) ||
+         sAchievementBannerFrames == 0))) return;
 
-    const int labelSize = 12;
-    const char *tier = recordTierName(desc->tier);
-    const int w = 410;
-    const int h = 58;
-    const int x = (640 - w) / 2;
-    const int y = 96;  // below ILing's simultaneous PB banner
-    const int border = 4;
-    const Color outline = recordTierColor(desc->tier);
+    Records::Tier tier = Records::TIER_GOLD;
+    const char *name = "Achievement preview";
+    if (!preview) {
+        const Records::AchievementDesc *desc =
+            Records::achievement(sAchievementBannerId);
+        if (!desc) return;
+        tier = desc->tier;
+        name = recordText(desc->name, "Unnamed achievement");
+    }
+
+    const CreationStyle &style = gCreationExtras.achievementBannerStyle();
+    const int scale = style.scale;
+    const int w = 410 * scale / 100;
+    const int h = 58 * scale / 100;
+    const int x = style.x;
+    const int y = style.y;
+    const int border = 4 * scale / 100;
+    const int pad = 14 * scale / 100;
+    const int labelSize = 12 * scale / 100;
+    const char *tierName = recordTierName(tier);
+    const Color outline = recordTierColor(tier);
 
     menu->fillBox(x, y, w, h, outline);
     menu->fillBox(x + border, y + border, w - border * 2, h - border * 2,
                   col(4, 6, 12, 225));
-    menu->drawText("ACHIEVEMENT UNLOCKED", x + 14, y + 10,
+    menu->drawText("ACHIEVEMENT UNLOCKED", x + pad, y + 10 * scale / 100,
                    labelSize, labelSize, cRowDim());
-    menu->drawText(tier,
-                   x + w - Menu::textWidth(tier, labelSize) - 14,
-                   y + 10, labelSize, labelSize, outline);
-    const char *name = recordText(desc->name, "Unnamed achievement");
-    const int nameSize = fittedRecordTextSize(name, w - 28, 18, 12);
-    menu->drawText(name, x + 14, y + 31,
+    menu->drawText(tierName,
+                   x + w - Menu::textWidth(tierName, labelSize) - pad,
+                   y + 10 * scale / 100,
+                   labelSize, labelSize, outline);
+    const int nameSize = fittedRecordTextSize(
+        name, w - pad * 2, 18 * scale / 100, labelSize);
+    menu->drawText(name, x + pad, y + 31 * scale / 100,
                    nameSize, nameSize, cRowSel());
 }
 
