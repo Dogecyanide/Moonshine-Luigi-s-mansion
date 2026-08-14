@@ -16,6 +16,7 @@
 #include "susamune/creation_extras.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/metadata_display.hxx"
+#include "susamune/mem2_map.h"
 #include "susamune/qft_display.hxx"
 #include "susamune/packed_text.hxx"
 #include "susamune/susamune_cfg.h"
@@ -97,7 +98,11 @@ const u32 kSaveTimeoutFrames = 300;  // ~5s at 60Hz
 
 }  // namespace
 
-Settings gSettings;
+Settings &gSettings = *reinterpret_cast<Settings *>(
+    SUSAMUNE_MEM2_CONFIG_RUNTIME_PPC_BASE +
+    SUSAMUNE_CONFIG_SETTINGS_OFFSET);
+static_assert(sizeof(Settings) <= SUSAMUNE_CONFIG_SETTINGS_SIZE,
+              "settings exceed their MEM2 runtime slot");
 
 void Settings::resetDefaults() {
     // Binds ride along on the same handoff block and the same doorbell, so

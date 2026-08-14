@@ -142,7 +142,9 @@
     X(SETTING_FAVORITES_7,               "favorites_7")                       \
     X(SETTING_FAVORITES_8,               "favorites_8")                       \
     X(SETTING_FAVORITES_9,               "favorites_9")                       \
-    X(SETTING_FAVORITES_10,              "favorites_10")
+    X(SETTING_FAVORITES_10,              "favorites_10")                      \
+    /* -- Achievement presentation (append-only persisted id) -- */           \
+    X(SETTING_ACHIEVEMENT_NOTIFICATIONS, "achievement_notifications")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

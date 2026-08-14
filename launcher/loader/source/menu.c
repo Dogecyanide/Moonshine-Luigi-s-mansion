@@ -195,8 +195,13 @@ void PrintInfo(void)
 
 void PrintSusamuneBuild(void)
 {
-	static const char BuildTitle[] = "V1.1.0 \"Happy Shine Happy Life\".";
+	static const char BuildProduct[] = "Susamune Launcher";
+	static const char BuildTitle[] =
+		"V1.2.0 \"Trial By Sunshine\".";
 	static const char BuildChecksum[] = "[" SUSAMUNE_BUILD_CHECKSUM "].";
+	PrintFormat(DEFAULT_SIZE, BLACK,
+	            640 - MENU_POS_X - ((int)sizeof(BuildProduct) - 1) * 10,
+	            406, "%s", BuildProduct);
 	PrintFormat(DEFAULT_SIZE, BLACK,
 	            640 - MENU_POS_X - ((int)sizeof(BuildTitle) - 1) * 10,
 	            426, "%s", BuildTitle);

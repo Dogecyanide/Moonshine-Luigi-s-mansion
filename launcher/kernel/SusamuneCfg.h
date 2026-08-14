@@ -21,8 +21,9 @@ bool SusamuneCfgPending(void);
 // GCNCard_Save) -- FatFS is not reentrant against the DI thread.
 void SusamuneCfgService(void);
 
-// Independent ILing-PB doorbell. Keeping this separate from the ini write
-// means a PB can be saved immediately without regenerating susamune.ini.
+// Binary-journal service slot for ILing PBs and global progress. Keeping these
+// separate from the ini write avoids regenerating susamune.ini; PBs retain
+// priority when both payloads are pending.
 bool SusamunePbPending(void);
 void SusamunePbService(void);
 

@@ -8,6 +8,7 @@
 // =====================================================================
 
 #include "susamune/input_display.hxx"
+#include "susamune/mem2_map.h"
 
 #include "Dolphin/PAD.h"
 #include "Dolphin/printf.h"
@@ -142,7 +143,10 @@ static_assert(sizeof(kInputText) == 133, "input text offsets changed");
 
 }  // namespace
 
-InputDisplay gInputDisplay;
+InputDisplay &gInputDisplay = *reinterpret_cast<InputDisplay *>(
+    SUSAMUNE_MEM2_CONFIG_RUNTIME_PPC_BASE + SUSAMUNE_CONFIG_INPUT_OFFSET);
+static_assert(sizeof(InputDisplay) <= SUSAMUNE_CONFIG_INPUT_SIZE,
+              "input display exceeds its MEM2 runtime slot");
 
 CreationStyle InputDisplay::defaultStyle() {
     return CreationStyle{16, 314, 100, 255, 0, 0, 0, 0x7f, 100, 0};

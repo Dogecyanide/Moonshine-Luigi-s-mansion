@@ -7,6 +7,7 @@
 // =====================================================================
 
 #include "susamune/attempt_counter.hxx"
+#include "susamune/mem2_map.h"
 
 #include "Dolphin/printf.h"
 #include "JSystem/JUtility/JUTColor.hxx"
@@ -52,7 +53,11 @@ u16 currentArea() {
 
 }  // namespace
 
-AttemptCounter gAttemptCounter;
+AttemptCounter &gAttemptCounter = *reinterpret_cast<AttemptCounter *>(
+    SUSAMUNE_MEM2_CONFIG_RUNTIME_PPC_BASE +
+    SUSAMUNE_CONFIG_ATTEMPTS_OFFSET);
+static_assert(sizeof(AttemptCounter) <= SUSAMUNE_CONFIG_ATTEMPTS_SIZE,
+              "attempt counter exceeds its MEM2 runtime slot");
 
 // Replaces TMario::winDemo's call to fireGetStar. Publishing through a fixed
 // serial lets the normal call and No Shine Get Animation's asm cave feed one

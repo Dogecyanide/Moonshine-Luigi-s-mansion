@@ -5,7 +5,7 @@
   "base_addr": 2151847936,
   "iso_size": 1459978240,
   "source_crc32": "771AD977",
-  "mod_region_size": 98304,
+  "mod_region_size": 131072,
   "first_file_offset": 16781632,
   "dol": {
     "iso_offset": 122880,
@@ -71,6 +71,14 @@
       "iso_offset": 2809568
     },
     {
+      "address": 2150040764,
+      "iso_offset": 2667516
+    },
+    {
+      "address": 2149301888,
+      "iso_offset": 1928640
+    },
+    {
       "address": 2150265840,
       "iso_offset": 2892592
     },
@@ -125,13 +133,23 @@
     },
     {
       "offset": 353776,
-      "size": 2121040,
-      "crc32": "5EBC8AF0"
+      "size": 1574864,
+      "crc32": "35BAC607"
+    },
+    {
+      "offset": 1928644,
+      "size": 546172,
+      "crc32": "3FB5DAED"
     },
     {
       "offset": 2474820,
-      "size": 334748,
-      "crc32": "DEC37684"
+      "size": 192696,
+      "crc32": "2FE41E50"
+    },
+    {
+      "offset": 2667520,
+      "size": 142048,
+      "crc32": "8FCD40B3"
     },
     {
       "offset": 2809572,
@@ -179,9 +197,9 @@
       "crc32": "F1A51A2D"
     },
     {
-      "offset": 4350112,
-      "size": 12427104,
-      "crc32": "D15D59A5"
+      "offset": 4382880,
+      "size": 12394336,
+      "crc32": "1D04C89C"
     },
     {
       "offset": 4251904,

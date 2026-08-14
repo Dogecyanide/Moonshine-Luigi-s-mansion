@@ -8,9 +8,9 @@
 // =====================================================================
 // susamune_cfg.h
 //
-// The handoff block that carries persisted settings and ILing PBs between
-// the Nintendont ARM kernel and the mod running on the PPC. Independent
-// doorbells ask the kernel to write susamune.ini or the binary PB journal.
+// The handoff block that carries persisted settings, ILing PBs and global
+// progress between the Nintendont ARM kernel and the mod running on the PPC.
+// Independent doorbells ask the kernel to write the ini or binary journals.
 // Lives at SUSAMUNE_MEM2_CFG_* (mem2_map.h).
 //
 // Shared by three toolchains, so this header is plain C with no type
@@ -155,6 +155,7 @@ struct SusamuneInputStyleCfg {
 #define SUSAMUNE_CREATION_MENU_BG           24u
 #define SUSAMUNE_CREATION_RECENT_STYLE_MAGIC 0x5249u  // 'RI'
 #define SUSAMUNE_CREATION_SAVESTATE_STYLE_MAGIC 0x5353u  // 'SS'
+#define SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC 0xA7u
 
 #define SUSAMUNE_WALLKICK_STYLE_MAGIC       0x53574B44u  // 'SWKD'
 #define SUSAMUNE_WALLKICK_STYLE_VERSION     1u
@@ -217,7 +218,13 @@ struct SusamuneCreationCfg {
     unsigned char  savestateTextBrightness;
     unsigned char  savestatePadding;
     unsigned char  savestateTextRgb[3];
-    unsigned char  reserved3[15];
+    // Position/scale-only achievement banner style. The one-byte magic starts
+    // at the old unaligned reserved tail so the 576-byte ABI does not move.
+    unsigned char  achievementStyleMagic;
+    unsigned short achievementX;
+    unsigned short achievementY;
+    unsigned char  achievementScale;
+    unsigned char  reserved3[9];
 };
 
 struct SusamuneWallkickStyleCfg {
@@ -391,6 +398,8 @@ struct SusamuneMetadataStyleCfg {
 #define SUSAMUNE_CFG_FLAG_WALLKICK_STYLE 0x100u
 // Kernel/backend understands the appended four-bank IL PB journal.
 #define SUSAMUNE_CFG_FLAG_ILING_PROFILES 0x200u
+// Kernel/backend exposes the independent global achievement/statistics journal.
+#define SUSAMUNE_CFG_FLAG_PROGRESS 0x400u
 
 // IL PBs use stable result slots: ordinary rows use retail Shine ids, while
 // independent Secret, variant and Any% rows occupy otherwise-unused ids through 124.
@@ -480,6 +489,66 @@ struct SusamuneILingProfilesFile {
                     [SUSAMUNE_ILING_PROFILE_NAME_SIZE];
 };
 
+// Achievements are shared across all three revisions. Statistics keep one bank
+// per revision so the UI can show both regional and combined values without
+// making three files fight over a read-modify-write cycle. Achievement and stat
+// indices are persistent storage IDs: append new meanings, never reorder them.
+#define SUSAMUNE_PROGRESS_MAGIC             0x53505247u  // 'SPRG'
+#define SUSAMUNE_PROGRESS_FILE_MAGIC        0x53504746u  // 'SPGF'
+#define SUSAMUNE_PROGRESS_VERSION           1u
+#define SUSAMUNE_PROGRESS_ACHIEVEMENT_BITS  512u
+#define SUSAMUNE_PROGRESS_ACHIEVEMENT_BYTES \
+    (SUSAMUNE_PROGRESS_ACHIEVEMENT_BITS / 8u)
+#define SUSAMUNE_PROGRESS_STAT_COUNT        64u
+#define SUSAMUNE_PROGRESS_REGION_COUNT      3u
+#define SUSAMUNE_PROGRESS_REGION_JP         0u
+#define SUSAMUNE_PROGRESS_REGION_US         1u
+#define SUSAMUNE_PROGRESS_REGION_PAL        2u
+#define SUSAMUNE_PROGRESS_FLAG_WRITABLE     0x1u
+
+struct SusamuneProgressCfg {
+    // --- cache line 0: written by the kernel at boot, by the mod on save ---
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short achievementBytes;
+    unsigned short statCount;
+    unsigned char  regionCount;
+    unsigned char  flags;
+    unsigned int   saveSeq;
+    unsigned char  pad0[16];
+
+    // --- cache line 1: written ONLY by the kernel ---
+    unsigned int   ackSeq;
+    unsigned int   status;
+    unsigned char  pad1[24];
+
+    // The mod stages these from a separate live copy, flushes the whole payload,
+    // then bumps saveSeq. They stay immutable until ackSeq catches up; changes
+    // made meanwhile remain dirty in the live copy for a later save.
+    // Bit N is (achievements[N >> 3] & (1 << (N & 7))).
+    unsigned char achievements[SUSAMUNE_PROGRESS_ACHIEVEMENT_BYTES];
+    unsigned int  stats[SUSAMUNE_PROGRESS_REGION_COUNT]
+                       [SUSAMUNE_PROGRESS_STAT_COUNT];
+};
+
+// The launcher-device journal has no game id or region suffix: every disc
+// revision reads and updates this same record. Alternating generations make a
+// power loss during one write fall back to the other complete generation.
+struct SusamuneProgressFile {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned short achievementBytes;
+    unsigned short statCount;
+    unsigned char  regionCount;
+    unsigned char  reserved0;
+    unsigned int   generation;
+    unsigned int   checksum;
+    unsigned char  reserved[12];
+    unsigned char achievements[SUSAMUNE_PROGRESS_ACHIEVEMENT_BYTES];
+    unsigned int  stats[SUSAMUNE_PROGRESS_REGION_COUNT]
+                       [SUSAMUNE_PROGRESS_STAT_COUNT];
+};
+
 struct SusamuneCfg {
     // --- cache line 0: written by the kernel at boot, by the mod on save ---
     unsigned int   magic;
@@ -516,6 +585,18 @@ struct SusamuneCfg {
 
 #define SUSAMUNE_CFG_PPC_PTR  ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PPC_BASE)
 #define SUSAMUNE_CFG_PHYS_PTR ((struct SusamuneCfg *)SUSAMUNE_MEM2_CFG_PHYS_BASE)
+
+// Keep progress outside SusamuneCfg itself at a fixed ABI offset. Do not derive
+// this from sizeof(SusamuneCfg): later settings payloads may grow without moving
+// a progress mailbox shared with an adjacent launcher version. The gap also
+// preserves the v1.1 Dolphin CARD record format.
+#define SUSAMUNE_PROGRESS_CFG_OFFSET 0x2000u
+#define SUSAMUNE_PROGRESS_PPC_PTR \
+    ((struct SusamuneProgressCfg *)(SUSAMUNE_MEM2_CFG_PPC_BASE + \
+                                    SUSAMUNE_PROGRESS_CFG_OFFSET))
+#define SUSAMUNE_PROGRESS_PHYS_PTR \
+    ((struct SusamuneProgressCfg *)(SUSAMUNE_MEM2_CFG_PHYS_BASE + \
+                                    SUSAMUNE_PROGRESS_CFG_OFFSET))
 
 // Path of the ini, at the root of whichever device holds it. That is the device
 // the launcher was run from, which the kernel may have had to mount as a second
@@ -587,6 +668,19 @@ typedef char susamune_iling_profiles_file_names_check[(__builtin_offsetof(struct
 typedef char susamune_iling_profiles_file_size_check[(sizeof(struct SusamuneILingProfilesFile) == 2112) ? 1 : -1];
 typedef char susamune_cfg_iling_profiles_check[(__builtin_offsetof(struct SusamuneCfg, ilingProfiles) == 2784) ? 1 : -1];
 typedef char susamune_cfg_expanded_size_check[(sizeof(struct SusamuneCfg) == 4928) ? 1 : -1];
+typedef char susamune_progress_cfg_ack_check[(__builtin_offsetof(struct SusamuneProgressCfg, ackSeq) == 32) ? 1 : -1];
+typedef char susamune_progress_cfg_achievements_check[(__builtin_offsetof(struct SusamuneProgressCfg, achievements) == 64) ? 1 : -1];
+typedef char susamune_progress_cfg_stats_check[(__builtin_offsetof(struct SusamuneProgressCfg, stats) == 128) ? 1 : -1];
+typedef char susamune_progress_cfg_size_check[(sizeof(struct SusamuneProgressCfg) == 896) ? 1 : -1];
+typedef char susamune_progress_file_achievements_check[(__builtin_offsetof(struct SusamuneProgressFile, achievements) == 32) ? 1 : -1];
+typedef char susamune_progress_file_stats_check[(__builtin_offsetof(struct SusamuneProgressFile, stats) == 96) ? 1 : -1];
+typedef char susamune_progress_file_size_check[(sizeof(struct SusamuneProgressFile) == 864) ? 1 : -1];
+typedef char susamune_progress_alignment_check[(SUSAMUNE_PROGRESS_CFG_OFFSET % 32 == 0) ? 1 : -1];
+typedef char susamune_progress_cfg_gap_check[(sizeof(struct SusamuneCfg) <= SUSAMUNE_PROGRESS_CFG_OFFSET) ? 1 : -1];
+typedef char susamune_progress_space_check[
+    (SUSAMUNE_MEM2_CFG_PPC_BASE + SUSAMUNE_PROGRESS_CFG_OFFSET +
+         sizeof(struct SusamuneProgressCfg) <=
+     SUSAMUNE_CONSOLE_RECORDS_PPC_BASE) ? 1 : -1];
 typedef char susamune_cfg_size_check[
     (sizeof(struct SusamuneCfg) <=
      SUSAMUNE_MEM2_PB_LIVE_PPC_BASE - SUSAMUNE_MEM2_CFG_PPC_BASE) ? 1 : -1];

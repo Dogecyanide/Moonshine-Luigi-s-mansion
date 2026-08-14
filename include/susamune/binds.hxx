@@ -136,8 +136,6 @@ private:
 static_assert(sizeof(Binds) == BIND_COUNT * sizeof(u16) + 10,
               "Binds live state layout changed");
 
-// Single global instance. POD (no virtuals / no ctor), so it lives in BSS
-// zero-initialised; resetDefaults() installs the real defaults at boot.
-extern Binds gBinds;
+extern Binds &gBinds;
 
 #endif  // _SUSAMUNE_BINDS_HXX

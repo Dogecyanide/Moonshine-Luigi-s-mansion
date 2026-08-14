@@ -7,8 +7,8 @@ class Menu;
 class TMarDirector;
 
 // Native version of sup39's Attempt Counter and its two companion control
-// codes. State lives in the mod's BSS, deliberately outside the game's
-// savestate snapshot, so loading a practice state never rewinds the counts.
+// codes. State stays outside the game's savestate snapshot, so loading a
+// practice state never rewinds the counts.
 class AttemptCounter {
 public:
     void init();
@@ -33,6 +33,6 @@ private:
     bool          mWasEnabled;
 };
 
-extern AttemptCounter gAttemptCounter;
+extern AttemptCounter &gAttemptCounter;
 
 #endif  // SUSAMUNE_ATTEMPT_COUNTER_HXX

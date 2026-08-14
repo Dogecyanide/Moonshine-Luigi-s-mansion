@@ -61,6 +61,7 @@
 #include "susamune/mem2_map.h"
 #include "susamune/qft_timer.hxx"
 #include "susamune/iling.hxx"
+#include "susamune/records.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/settings.hxx"
 #if ENABLE_SAVESTATE_DBG
@@ -93,7 +94,7 @@
 
 #if IS_EMULATOR
 // Dolphin: a region in the emulator's "free" space.
-static const u32 kSnapshotBase = 0x70000000u;
+static const u32 kSnapshotBase = SUSAMUNE_DOLPHIN_SNAPSHOT_PPC_BASE;
 #else
 // Wii: a dedicated 16 MiB window. The custom Nintendont memory map relocates
 // all of its former users below this address; the ARM kernel begins exactly at
@@ -637,6 +638,7 @@ bool SavestateManager::loadState() {
 
     gQFTTimer.onSavestateLoaded();
     ILing::onSavestateLoaded();
+    Records::onSavestateLoaded();
     feedback("loaded", "Savestate loaded");
     return true;
 }

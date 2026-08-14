@@ -320,10 +320,9 @@ bool updateClassicInstant(TMarioGamePad *pad) {
 
     LevelWarp::Dest dest;
     const ClassicCommand command = resolveClassicSelector(pad, true, &dest);
-    if (command == CLASSIC_RESTART_KEEP && !sClassicInstantPending) {
-        // Give Z/Y and the C-stick one frame to join a staggered B+D-Up chord.
-        // Otherwise the current-area restart departs before the larger command
-        // can be observed.
+    if (command == CLASSIC_RESTART_DEFAULT && !sClassicInstantPending) {
+        // The full restart only fires once Z has joined the base chord for a
+        // second frame. The bare current-area restart remains one-frame.
         sClassicInstantPending = true;
         return true;
     }

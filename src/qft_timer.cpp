@@ -578,7 +578,11 @@ namespace {
     if (sState->freezeFrames != 0) {
       return clampQf(sState->offsetQf + sState->freezeQf);
     }
-    return liveQf();
+    if (!gpMarDirector || gpMarDirector != sStageDirector) {
+      return clampQf(sState->offsetQf);
+    }
+    // afterDraw observes the director one game frame later than the retail HUD.
+    return clampQf(sState->offsetQf + gpMarDirector->unk5C - 4);
   }
 
   s32 sunshineQf() {

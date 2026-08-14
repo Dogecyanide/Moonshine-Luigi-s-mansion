@@ -1,6 +1,7 @@
 #include "susamune/qft_display.hxx"
 
 #include "susamune/menu.hxx"
+#include "susamune/mem2_map.h"
 
 namespace {
 
@@ -12,7 +13,10 @@ inline int clampi(int value, int lo, int hi) {
 
 }  // namespace
 
-QftDisplay gQftDisplay;
+QftDisplay &gQftDisplay = *reinterpret_cast<QftDisplay *>(
+    SUSAMUNE_MEM2_CONFIG_RUNTIME_PPC_BASE + SUSAMUNE_CONFIG_QFT_OFFSET);
+static_assert(sizeof(QftDisplay) <= SUSAMUNE_CONFIG_QFT_SIZE,
+              "QFT display exceeds its MEM2 runtime slot");
 
 CreationStyle QftDisplay::defaults() {
     return CreationStyle{

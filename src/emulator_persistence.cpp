@@ -93,8 +93,11 @@ struct State {
     bool initialSave;
     bool idleObserved;
 };
+static_assert(sizeof(State) <= SUSAMUNE_DOLPHIN_PERSIST_SIZE,
+              "emulator persistence state exceeds its MEM2 window");
+static_assert((SUSAMUNE_DOLPHIN_PERSIST_PPC_BASE & 31u) == 0,
+              "emulator persistence state is not cache-line aligned");
 
-State sStateStorage;
 State *sState;
 InitResult sInitResult = INIT_WAITING;
 u32 sInitError;
@@ -302,7 +305,7 @@ s32 writeRecordLocked() {
 }
 
 void initState() {
-    sState = &sStateStorage;
+    sState = reinterpret_cast<State *>(SUSAMUNE_DOLPHIN_PERSIST_PPC_BASE);
     memset(sState, 0, sizeof(*sState));
     sState->activeRecord = -1;
     OSInitMutex(&sState->mutex);

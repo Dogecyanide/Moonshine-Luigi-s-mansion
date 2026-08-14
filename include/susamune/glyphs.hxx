@@ -12,6 +12,8 @@
 #define SUSAMUNE_GLYPH_Z     "\x81\x90"
 #define SUSAMUNE_GLYPH_C     "\x81\x93"
 #define SUSAMUNE_GLYPH_AMP   "\x81\x95"
+#define SUSAMUNE_GLYPH_SLASH "\x81\x5e"
+#define SUSAMUNE_GLYPH_SHINED "\x81\x9a"
 #define SUSAMUNE_GLYPH_LEFT  "\x81\xa9"
 #define SUSAMUNE_GLYPH_UP    "\x81\xaa"
 #define SUSAMUNE_GLYPH_RIGHT "\x81\xa8"
@@ -26,10 +28,12 @@
 #define SUSAMUNE_GLYPH_Z     "\x24"
 #define SUSAMUNE_GLYPH_C     "\x25"
 #define SUSAMUNE_GLYPH_AMP   "\x26"
+#define SUSAMUNE_GLYPH_SLASH "/"
+#define SUSAMUNE_GLYPH_SHINED "*"
 #define SUSAMUNE_GLYPH_LEFT  "\x5b"
 #define SUSAMUNE_GLYPH_UP    "\x5e"
 #define SUSAMUNE_GLYPH_RIGHT "\x5d"
-#define SUSAMUNE_GLYPH_DOWN  "\xff"
+#define SUSAMUNE_GLYPH_DOWN  "v"
 #else
 #error "Select a supported Susamune game version"
 #endif

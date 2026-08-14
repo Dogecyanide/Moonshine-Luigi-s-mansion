@@ -11,10 +11,11 @@ import struct
 import zlib
 from pathlib import Path
 
+from patches import mod_region_size as MOD_REGION_SIZE
+
 
 BPS_MAGIC = b"BPS1"
 GC_ISO_SIZE = 1459978240
-MOD_REGION_SIZE = 0x18000
 RELOCATED_FST_OFFSET = 0x01000000
 RELOCATED_FILE_ALIGNMENT = 0x20
 BOOT_FST_OFFSET_FIELD = 0x424

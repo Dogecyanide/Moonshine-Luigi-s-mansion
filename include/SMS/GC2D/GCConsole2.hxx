@@ -17,6 +17,7 @@ public:
     void startDisappearTimer();
     void startAppearTimer(int, s32);
     void setTimer(s32);
+    s32 getFinishedTime();
 
     u32 _00[0x24 / 4];    // 0x0000
     s32 mShineCount;      // 0x0024
@@ -72,7 +73,8 @@ public:
     TExPane *mTimerPanelRush;     // 0x0508
     u32 _50C[0x8 / 4];            // 0x050C
     bool mIsTimerPanelRush;       // 0x0514
-    s32 mTimerSecondsLeft;        // 0x0518
+    // Late timer fields differ by revision; use getFinishedTime() for results.
+    u32 _518;
     u32 _51C[0x8 / 4];            // 0x051C
     TExPane *mTelopPanel;         // 0x0524
     TExPane *mTelopWindow;        // 0x0528
