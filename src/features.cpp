@@ -18,6 +18,7 @@
 #include "susamune/features.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/addresses.hxx"  // SUSAMUNE_MEM1_ADDR
+#include "susamune/mem2_map.h"
 #include "Dolphin/OS.h"            // DCFlushRange, ICInvalidateRange
 
 namespace {
@@ -356,7 +357,8 @@ const struct {
 // Retail word at each patch site, flattened across the per-frame features in
 // stream order and captured lazily on first apply. Capture/install state lives
 // in addrState because Fast Text's heap words can legitimately be zero.
-u32 gPatchOrig[kNumPatches];
+#define gPatchOrig (*reinterpret_cast<u32 (*)[kNumPatches]>( \
+    SUSAMUNE_MEM2_FEATURE_RUNTIME_PPC_BASE))
 // Whether our word is currently installed. Writes happen on the transition
 // only -- NOT whenever the site differs from what we want. Some sites are heap
 // words the game rewrites on its own (again Fast Text's message buffer), and
@@ -635,7 +637,9 @@ AsmHook kAsmHooks[] = {
 const int kNumHooks = (int)(sizeof(kAsmHooks) / sizeof(kAsmHooks[0]));
 static_assert(kNumHooks == 14, "asm hook count changed");
 
-u32  gHookOrig[kNumHooks];  // retail word at each site (captured)
+#define gHookOrig (*reinterpret_cast<u32 (*)[kNumHooks]>( \
+    SUSAMUNE_MEM2_FEATURE_RUNTIME_PPC_BASE + \
+    sizeof(u32) * kNumPatches))
 bool gHooksInited;
 u8 gPiantissimoMode;
 
@@ -823,7 +827,13 @@ static_assert(kNumChoicePatches == 3, "choice patch sites changed");
 static_assert(sizeof(kNozzleIds) / sizeof(kNozzleIds[0]) == 3,
               "nozzle choices changed");
 
-u32 gChoiceOrig[kNumChoicePatches];
+#define gChoiceOrig (*reinterpret_cast<u32 (*)[kNumChoicePatches]>( \
+    SUSAMUNE_MEM2_FEATURE_RUNTIME_PPC_BASE + \
+    sizeof(u32) * (kNumPatches + kNumHooks)))
+static_assert(sizeof(u32) *
+                  (kNumPatches + kNumHooks + kNumChoicePatches) <=
+                  SUSAMUNE_FEATURE_RUNTIME_SIZE,
+              "feature originals exceed their MEM2 runtime window");
 u8  gChoiceState;
 
 constexpr u8 kChoiceNozzleMask = 0x03u;

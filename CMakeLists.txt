@@ -71,7 +71,7 @@ string(TOUPPER "${VERS_PRIMARY}" VERS_PRIMARY_UPPER)
 
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "Where to load the iso from by default in meta.xml")
 set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
-set(LAUNCHER_VERSION "v1.1.0" CACHE STRING
+set(LAUNCHER_VERSION "V1.2.0" CACHE STRING
     "Version shown in the packaged launcher meta.xml")
 
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
@@ -256,6 +256,7 @@ elseif(IS_EMULATOR)
                 DEPENDS "${CMAKE_BINARY_DIR}/susamune_manifest_${_v}.json"
                         "${_layout}"
                         "${CMAKE_SOURCE_DIR}/scripts/gen_iso_bps.py"
+                        "${CMAKE_SOURCE_DIR}/scripts/patches.py"
                 COMMENT "Building source-free ${_v} emulator BPS"
                 VERBATIM)
             list(APPEND EMULATOR_BPS_FILES "${_bps}")
@@ -355,8 +356,8 @@ ExternalProject_Add(nintendont_launcher
         "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
         "-DLAUNCHER_VERSION=${LAUNCHER_VERSION}"
-        "-DLAUNCHER_TEST_LOG=${CMAKE_SOURCE_DIR}/doc/v1.1.0-test-log.md"
-        "-DLAUNCHER_CHANGELOG=${CMAKE_SOURCE_DIR}/doc/v1.1.0-changelog.md"
+        "-DLAUNCHER_TEST_LOG=${CMAKE_SOURCE_DIR}/doc/v1.2.0-testing.md"
+        "-DLAUNCHER_CHANGELOG=${CMAKE_SOURCE_DIR}/changelogs and testlogs/V1.2.0 - CHANGELOG.md"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
     DEPENDS mod_bins launcher_build_id
     BUILD_ALWAYS ON

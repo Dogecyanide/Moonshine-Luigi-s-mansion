@@ -41,6 +41,7 @@ void beforeStageSetup();
 void onStageSetup();
 void onSavestateSaved();
 void onSavestateLoaded();
+bool achievementChimeBlocked();
 
 // PB result banner, drawn through Menu's shared no-allocation renderer.
 void draw(Menu *menu);

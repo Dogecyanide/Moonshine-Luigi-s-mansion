@@ -132,8 +132,6 @@ private:
 static_assert(sizeof(Settings) == ((SETTING_COUNT + 5) & ~3) + 12,
               "Settings live state layout changed");
 
-// Single global instance. POD (no virtuals / no ctor), so it lives in BSS
-// zero-initialised; resetDefaults() installs real defaults at boot.
-extern Settings gSettings;
+extern Settings &gSettings;
 
 #endif  // _SUSAMUNE_SETTINGS_HXX

@@ -363,7 +363,7 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
 
     int infoY = panelY + 29;
     if (layoutControls) {
-        snprintf(status, sizeof(status), "Position X:%u Y:%u   Size:%u%%",
+        snprintf(status, sizeof(status), "Position X:%u Y:%u   Size:%u pct",
                  mStyle->x, mStyle->y, mStyle->scale);
         menu->drawText(status, 18, infoY, 12, 12,
                        Color(190, 220, 255, 255));
@@ -427,7 +427,7 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
             if (i == OPTION_PADDING && scalar == 0xff)
                 value = "Off";
             else if (i == OPTION_TEXT_BRIGHTNESS)
-                snprintf(status, sizeof(status), "%u%%", scalar);
+                snprintf(status, sizeof(status), "%u pct", scalar);
             else
                 snprintf(status, sizeof(status), "%u", scalar);
         }
@@ -437,14 +437,16 @@ void CreationEditor::draw(Menu *menu, const char *title, const char *preview) co
     }
 
     if (optionCount) {
-        const char *controls = SUSAMUNE_GLYPH_C " U/D Option   " SUSAMUNE_GLYPH_C
-                               " L/R Adjust   START: Next   " SUSAMUNE_GLYPH_X
+        const char *controls = SUSAMUNE_GLYPH_C " U" SUSAMUNE_GLYPH_SLASH
+                               "D Option   " SUSAMUNE_GLYPH_C " L"
+                               SUSAMUNE_GLYPH_SLASH
+                               "R Adjust   START: Next   " SUSAMUNE_GLYPH_X
                                "+START: Previous";
         menu->drawText(controls, 18, panelY + panelH - 32, 9, 9,
                        Color(150, 170, 205, 255));
     }
     if (layoutControls)
-        menu->drawText("D-pad Move   L/R Size",
+        menu->drawText("D-pad Move   L" SUSAMUNE_GLYPH_SLASH "R Size",
                        18, panelY + panelH - 17, 9, 9,
                        Color(150, 170, 205, 255));
     const char *finish = SUSAMUNE_GLYPH_A " Keep  " SUSAMUNE_GLYPH_B

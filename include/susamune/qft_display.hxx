@@ -39,6 +39,6 @@ private:
     bool           mLeadingZero;
 };
 
-extern QftDisplay gQftDisplay;
+extern QftDisplay &gQftDisplay;
 
 #endif  // _SUSAMUNE_QFT_DISPLAY_HXX

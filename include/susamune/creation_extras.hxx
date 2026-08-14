@@ -137,6 +137,6 @@ private:
     bool mDirtyBeforeEdit;
 };
 
-extern CreationExtras gCreationExtras;
+extern CreationExtras &gCreationExtras;
 
 #endif  // _SUSAMUNE_CREATION_EXTRAS_HXX

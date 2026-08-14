@@ -7,6 +7,7 @@
 #include "SMS/System/MarDirector.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/menu.hxx"
+#include "susamune/records.hxx"
 #include "susamune/settings.hxx"
 
 namespace {
@@ -69,6 +70,7 @@ void requestSavePrompt(TMarDirector *director) {
 
 extern "C" void susamuneFireRideYoshi(TMarDirector *director, TYoshi *yoshi) {
     director->fireRideYoshi(yoshi);
+    Records::onYoshiMounted();
     if (gSettings.getBool(SETTING_YOSHI_NOZZLE_SAVE_PROMPT))
         requestSavePrompt(director);
 }

@@ -417,7 +417,10 @@ void drawStandard(Menu *menu, const MetadataDisplayLiveCfg &cfg,
 
 }  // namespace
 
-MetadataDisplay gMetadataDisplay;
+MetadataDisplay &gMetadataDisplay = *reinterpret_cast<MetadataDisplay *>(
+    SUSAMUNE_MEM2_METADATA_RUNTIME_PPC_BASE);
+static_assert(sizeof(MetadataDisplay) <= SUSAMUNE_METADATA_RUNTIME_SIZE,
+              "metadata display exceeds its MEM2 runtime window");
 
 CreationStyle MetadataDisplay::defaultStyle() {
     return CreationStyle{16, 112, 100, 255, 0, 0, 0, 0, 100, 3};

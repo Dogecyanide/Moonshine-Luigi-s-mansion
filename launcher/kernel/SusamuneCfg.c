@@ -34,6 +34,9 @@ the drive it ended up on.
 ILing PBs use a separate fixed binary journal on that same device. Two files
 per region alternate generations so an interrupted write leaves one valid
 copy, and their independent doorbell avoids rewriting the ini after every PB.
+Achievements and statistics use another two-generation journal with no region
+suffix. Its achievement bits are global, while its three stat banks preserve
+JP/US/PAL values for both regional and combined totals.
 
 One launcher now serves GMSJ/GMSE/GMSP, and each keeps its own settings and
 binds, hence the region tag on the section names. Only the running version's
@@ -128,6 +131,12 @@ static s32 PbActiveFile = -1;
 static bool PbReady = false;
 static char PbPaths[SUSAMUNE_PB_FILE_COUNT][SUSAMUNE_PB_PATH_SIZE];
 
+static u32 ProgressAckSeq = 0;
+static u32 ProgressGeneration = 0;
+static s32 ProgressActiveFile = -1;
+static bool ProgressReady = false;
+static char ProgressPaths[SUSAMUNE_PB_FILE_COUNT][SUSAMUNE_PB_PATH_SIZE];
+
 enum PbReadResult
 {
 	PB_READ_INVALID,
@@ -161,6 +170,11 @@ static void BuildSectionName(char *out, const char *base, const char *region)
 static struct SusamuneCfg *CfgBlock(void)
 {
 	return SUSAMUNE_CFG_PHYS_PTR;
+}
+
+static struct SusamuneProgressCfg *ProgressBlock(void)
+{
+	return SUSAMUNE_PROGRESS_PHYS_PTR;
 }
 
 // ---------------------------------------------------------------------
@@ -519,6 +533,180 @@ static int WritePbProfilesFile(const struct SusamuneILingProfilesCfg *profiles)
 	{
 		PbGeneration = file.generation;
 		PbActiveFile = (s32)target;
+	}
+	return ret;
+}
+
+// ---------------------------------------------------------------------
+// Global achievement/statistics binary files
+// ---------------------------------------------------------------------
+
+static u32 ProgressChecksum(const struct SusamuneProgressFile *file)
+{
+	u32 hash = 2166136261u;
+	u32 region;
+	u32 i;
+
+	hash = PbHashWord(hash, ((u32)file->version << 16) |
+	                         file->achievementBytes);
+	hash = PbHashWord(hash, ((u32)file->statCount << 16) |
+	                         file->regionCount);
+	hash = PbHashWord(hash, file->generation);
+	for (i = 0; i < SUSAMUNE_PROGRESS_ACHIEVEMENT_BYTES; i++)
+		hash = (hash ^ file->achievements[i]) * 16777619u;
+	for (region = 0; region < SUSAMUNE_PROGRESS_REGION_COUNT; region++)
+		for (i = 0; i < SUSAMUNE_PROGRESS_STAT_COUNT; i++)
+			hash = PbHashWord(hash, file->stats[region][i]);
+	return hash;
+}
+
+static enum PbReadResult ReadProgressFile(
+	const char *path, struct SusamuneProgressFile *file)
+{
+	FIL f;
+	UINT read = 0;
+	u32 size;
+	u32 prefixSize = sizeof(file->magic) + sizeof(file->version);
+	int ret;
+	int closeRet;
+
+	ret = f_open_char(&f, path, FA_READ | FA_OPEN_EXISTING);
+	if (ret == FR_NO_FILE || ret == FR_NO_PATH)
+		return PB_READ_INVALID;
+	if (ret != FR_OK)
+		return PB_READ_UNSAFE;
+	size = (u32)f_size(&f);
+	if (size != sizeof(*file))
+	{
+		// Inspect a recognized future header before rejecting its size. An old
+		// launcher must never treat both generations of a newer format as junk
+		// and overwrite them with a blank V1 journal.
+		memset(file, 0, sizeof(*file));
+		if (size >= prefixSize)
+			ret = f_read(&f, file, prefixSize, &read);
+		closeRet = f_close(&f);
+		if (ret != FR_OK || closeRet != FR_OK ||
+		    (size >= prefixSize && read != prefixSize))
+			return PB_READ_UNSAFE;
+		if (size >= prefixSize &&
+		    file->magic == SUSAMUNE_PROGRESS_FILE_MAGIC &&
+		    file->version != SUSAMUNE_PROGRESS_VERSION)
+			return PB_READ_UNSAFE;
+		return PB_READ_INVALID;
+	}
+	ret = f_read(&f, file, sizeof(*file), &read);
+	closeRet = f_close(&f);
+	if (ret != FR_OK || read != sizeof(*file) || closeRet != FR_OK)
+		return PB_READ_UNSAFE;
+
+	if (file->magic == SUSAMUNE_PROGRESS_FILE_MAGIC &&
+	    file->version != SUSAMUNE_PROGRESS_VERSION)
+		return PB_READ_UNSAFE;
+	if (file->magic != SUSAMUNE_PROGRESS_FILE_MAGIC ||
+	    file->achievementBytes != SUSAMUNE_PROGRESS_ACHIEVEMENT_BYTES ||
+	    file->statCount != SUSAMUNE_PROGRESS_STAT_COUNT ||
+	    file->regionCount != SUSAMUNE_PROGRESS_REGION_COUNT ||
+	    file->checksum != ProgressChecksum(file))
+		return PB_READ_INVALID;
+	return PB_READ_VALID;
+}
+
+static void InitProgressDefaults(struct SusamuneProgressCfg *progress)
+{
+	memset(progress, 0, sizeof(*progress));
+	progress->magic = SUSAMUNE_PROGRESS_MAGIC;
+	progress->version = SUSAMUNE_PROGRESS_VERSION;
+	progress->achievementBytes = SUSAMUNE_PROGRESS_ACHIEVEMENT_BYTES;
+	progress->statCount = SUSAMUNE_PROGRESS_STAT_COUNT;
+	progress->regionCount = SUSAMUNE_PROGRESS_REGION_COUNT;
+}
+
+static bool InitProgressFiles(struct SusamuneProgressCfg *progress)
+{
+	struct SusamuneProgressFile file;
+	u32 fileIndex;
+	bool safe = true;
+
+	InitProgressDefaults(progress);
+	_sprintf(ProgressPaths[0], "%s/susamune_progress_v1_a.bin",
+	         SusamuneCfgStoragePrefix());
+	_sprintf(ProgressPaths[1], "%s/susamune_progress_v1_b.bin",
+	         SusamuneCfgStoragePrefix());
+	ProgressGeneration = 0;
+	ProgressActiveFile = -1;
+	for (fileIndex = 0; fileIndex < SUSAMUNE_PB_FILE_COUNT; fileIndex++)
+	{
+		enum PbReadResult readResult =
+			ReadProgressFile(ProgressPaths[fileIndex], &file);
+		if (readResult == PB_READ_UNSAFE)
+		{
+			safe = false;
+			continue;
+		}
+		if (readResult != PB_READ_VALID)
+			continue;
+		if (ProgressActiveFile >= 0 &&
+		    !PbGenerationIsNewer(file.generation, ProgressGeneration))
+			continue;
+
+		memcpy(progress->achievements, file.achievements,
+		       sizeof(progress->achievements));
+		memcpy(progress->stats, file.stats, sizeof(progress->stats));
+		ProgressGeneration = file.generation;
+		ProgressActiveFile = (s32)fileIndex;
+	}
+
+	ProgressAckSeq = 0;
+	ProgressReady = safe;
+	if (safe)
+		progress->flags |= SUSAMUNE_PROGRESS_FLAG_WRITABLE;
+	else
+		dbgprintf("Susamune: progress persistence disabled to preserve unreadable files\r\n");
+	return safe;
+}
+
+static int WriteProgressFile(const struct SusamuneProgressCfg *progress)
+{
+	struct SusamuneProgressFile file;
+	FIL f;
+	UINT wrote = 0;
+	u32 target = ProgressActiveFile == 0 ? 1u : 0u;
+	int ret;
+	int closeRet;
+
+	if (progress->magic != SUSAMUNE_PROGRESS_MAGIC ||
+	    progress->version != SUSAMUNE_PROGRESS_VERSION ||
+	    progress->achievementBytes != SUSAMUNE_PROGRESS_ACHIEVEMENT_BYTES ||
+	    progress->statCount != SUSAMUNE_PROGRESS_STAT_COUNT ||
+	    progress->regionCount != SUSAMUNE_PROGRESS_REGION_COUNT)
+		return FR_INVALID_PARAMETER;
+
+	memset(&file, 0, sizeof(file));
+	file.magic = SUSAMUNE_PROGRESS_FILE_MAGIC;
+	file.version = SUSAMUNE_PROGRESS_VERSION;
+	file.achievementBytes = SUSAMUNE_PROGRESS_ACHIEVEMENT_BYTES;
+	file.statCount = SUSAMUNE_PROGRESS_STAT_COUNT;
+	file.regionCount = SUSAMUNE_PROGRESS_REGION_COUNT;
+	file.generation = ProgressGeneration + 1;
+	memcpy(file.achievements, progress->achievements,
+	       sizeof(file.achievements));
+	memcpy(file.stats, progress->stats, sizeof(file.stats));
+	file.checksum = ProgressChecksum(&file);
+
+	ret = f_open_char(&f, ProgressPaths[target], FA_WRITE | FA_CREATE_ALWAYS);
+	if (ret != FR_OK)
+		return ret;
+	ret = f_write(&f, &file, sizeof(file), &wrote);
+	if (ret == FR_OK && wrote != sizeof(file))
+		ret = FR_DISK_ERR;
+	closeRet = f_close(&f);
+	if (ret == FR_OK && closeRet != FR_OK)
+		ret = closeRet;
+
+	if (ret == FR_OK)
+	{
+		ProgressGeneration = file.generation;
+		ProgressActiveFile = (s32)target;
 	}
 	return ret;
 }
@@ -2099,6 +2287,7 @@ static void InitWallkickStyleDefaults(struct SusamuneWallkickStyleCfg *cfg)
 void SusamuneCfgInit(void)
 {
 	struct SusamuneCfg *cfg = CfgBlock();
+	struct SusamuneProgressCfg *progress = ProgressBlock();
 	const char *region = SUSAMUNE_MOD_REGION_TAG(GAME_ID);
 	FIL   f;
 	char *buf;
@@ -2110,14 +2299,17 @@ void SusamuneCfgInit(void)
 	// stale one left by an earlier boot would be adopted wholesale by a mod
 	// that happens to be running now.
 	memset(cfg, 0, sizeof(struct SusamuneCfg));
+	memset(progress, 0, sizeof(struct SusamuneProgressCfg));
 	CfgReady = false;
 	PbReady = false;
+	ProgressReady = false;
 
 	if (!SusamuneCfgStorageAvailable())
 	{
 		// The launcher device was different from drive 0 and could not be
 		// mounted. Zero magic advertises an unsupported backend to the mod.
 		sync_after_write(cfg, sizeof(struct SusamuneCfg));
+		sync_after_write(progress, sizeof(struct SusamuneProgressCfg));
 		return;
 	}
 
@@ -2127,6 +2319,7 @@ void SusamuneCfgInit(void)
 		// settings and no section of the ini that belongs to this run. Leaving
 		// magic zeroed is what makes the mod (if any) report "no launcher".
 		sync_after_write(cfg, sizeof(struct SusamuneCfg));
+		sync_after_write(progress, sizeof(struct SusamuneProgressCfg));
 		CfgReady = false;
 		return;
 	}
@@ -2195,6 +2388,8 @@ void SusamuneCfgInit(void)
 	if (InitPbFiles(cfg, region))
 		cfg->flags |= SUSAMUNE_CFG_FLAG_ILING_PBS |
 		              SUSAMUNE_CFG_FLAG_ILING_PROFILES;
+	if (InitProgressFiles(progress))
+		cfg->flags |= SUSAMUNE_CFG_FLAG_PROGRESS;
 
 	ret = f_open_char(&f, SusamuneCfgIniPath(), FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)
@@ -2226,6 +2421,7 @@ void SusamuneCfgInit(void)
 	}
 
 	sync_after_write(cfg, sizeof(struct SusamuneCfg));
+	sync_after_write(progress, sizeof(struct SusamuneProgressCfg));
 
 	CfgAckSeq = 0;
 	CfgReady  = true;
@@ -2275,14 +2471,10 @@ void SusamuneCfgService(void)
 	sync_after_write(&cfg->ackSeq, 32);
 }
 
-bool SusamunePbPending(void)
+static bool PbSavePending(struct SusamuneILingProfilesCfg *profiles)
 {
-	struct SusamuneCfg *cfg = CfgBlock();
-	struct SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
-
-	if (!CfgReady || !PbReady)
+	if (!PbReady)
 		return false;
-
 	sync_before_read(profiles, 32);
 	if (profiles->magic != SUSAMUNE_ILING_PROFILE_MAGIC ||
 	    profiles->version != SUSAMUNE_ILING_PROFILE_VERSION)
@@ -2290,29 +2482,72 @@ bool SusamunePbPending(void)
 	return profiles->saveSeq != PbAckSeq;
 }
 
+static bool ProgressSavePending(struct SusamuneProgressCfg *progress)
+{
+	if (!ProgressReady)
+		return false;
+	sync_before_read(progress, 32);
+	if (progress->magic != SUSAMUNE_PROGRESS_MAGIC ||
+	    progress->version != SUSAMUNE_PROGRESS_VERSION ||
+	    progress->achievementBytes != SUSAMUNE_PROGRESS_ACHIEVEMENT_BYTES ||
+	    progress->statCount != SUSAMUNE_PROGRESS_STAT_COUNT ||
+	    progress->regionCount != SUSAMUNE_PROGRESS_REGION_COUNT)
+		return false;
+	return progress->saveSeq != ProgressAckSeq;
+}
+
+bool SusamunePbPending(void)
+{
+	struct SusamuneCfg *cfg = CfgBlock();
+	struct SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
+	struct SusamuneProgressCfg *progress = ProgressBlock();
+
+	if (!CfgReady)
+		return false;
+	return PbSavePending(profiles) || ProgressSavePending(progress);
+}
+
 void SusamunePbService(void)
 {
 	struct SusamuneCfg *cfg = CfgBlock();
 	struct SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
+	struct SusamuneProgressCfg *progress = ProgressBlock();
 	u32 seq;
 	int ret;
 
-	if (!PbReady)
+	if (!CfgReady)
 		return;
 
-	sync_before_read(profiles, 32);
-	seq = profiles->saveSeq;
-	sync_before_read(profiles->values,
-	                 sizeof(profiles->values) + sizeof(profiles->customNames));
+	// Both payloads are binary journals and share this main-loop service slot.
+	// Preserve PB priority; progress follows on the next idle pass if both ring.
+	if (PbSavePending(profiles))
+	{
+		seq = profiles->saveSeq;
+		sync_before_read(profiles->values,
+		                 sizeof(profiles->values) + sizeof(profiles->customNames));
 
-	ret = WritePbProfilesFile(profiles);
+		ret = WritePbProfilesFile(profiles);
+		if (ret != FR_OK)
+			dbgprintf("Susamune: failed to write ILing PBs (%d)\r\n", ret);
+
+		profiles->status = (u32)ret;
+		profiles->ackSeq = seq;
+		PbAckSeq = seq;
+		sync_after_write(&profiles->ackSeq, 32);
+		return;
+	}
+
+	if (!ProgressSavePending(progress))
+		return;
+	seq = progress->saveSeq;
+	sync_before_read(progress->achievements,
+	                 sizeof(progress->achievements) + sizeof(progress->stats));
+	ret = WriteProgressFile(progress);
 	if (ret != FR_OK)
-		dbgprintf("Susamune: failed to write ILing PBs (%d)\r\n", ret);
+		dbgprintf("Susamune: failed to write progress (%d)\r\n", ret);
 
-	profiles->status = (u32)ret;
-	profiles->ackSeq = seq;
-	PbAckSeq = seq;
-
-	// The PPC owns the control and payload lines after boot.
-	sync_after_write(&profiles->ackSeq, 32);
+	progress->status = (u32)ret;
+	progress->ackSeq = seq;
+	ProgressAckSeq = seq;
+	sync_after_write(&progress->ackSeq, 32);
 }

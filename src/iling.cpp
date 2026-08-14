@@ -14,8 +14,10 @@
 #include "susamune/addresses.hxx"
 #include "susamune/creation_extras.hxx"
 #include "susamune/menu.hxx"
+#include "susamune/mem2_map.h"
 #include "susamune/packed_text.hxx"
 #include "susamune/qft_timer.hxx"
+#include "susamune/records.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/susamune_cfg.h"
 #if IS_EMULATOR
@@ -145,7 +147,7 @@ constexpr char kRegularShortGroupNames[] =
 constexpr char kHundredGroupLetters[] = "BRGPSNV";
 constexpr char kMenuGroupNames[] =
     "BIANCO\0RICCO\0GELATO\0PINNA\0SIRENA\0NOKI\0PIANTA\0"
-    "AIRSTRIP\0CORONA\0DELFINO\0ANY%";
+    "AIRSTRIP\0CORONA\0DELFINO\0ANY PERCENT";
 constexpr u8 kMenuGroupOffsets[] = {0, 7, 13, 20, 26, 33, 38, 45, 54, 61, 69};
 static_assert(sizeof(kMenuGroupOffsets) == GROUP_COUNT,
               "IL menu group labels changed");
@@ -395,6 +397,8 @@ struct AttemptState {
     bool ready;
     bool carryRestorePending;
     bool transitionPending;
+    bool recordsEligible;
+    bool nativeIgt;
     bool havePlazaStoryFlags;
     u8 plazaStoryFlags;
     u8 overlayCount;
@@ -405,24 +409,15 @@ struct AttemptState {
     u32 serial;
 };
 
-AttemptState sAttemptState;
-AttemptState sSavedAttemptState;
-#define sRunning sAttemptState.running
-#define sAttemptReady sAttemptState.ready
-#define sCarryRestorePending sAttemptState.carryRestorePending
-#define sTransitionPending sAttemptState.transitionPending
-#define sHavePlazaStoryFlags sAttemptState.havePlazaStoryFlags
-#define sPlazaStoryFlags sAttemptState.plazaStoryFlags
-#define sOverlayCount sAttemptState.overlayCount
-#define sOverlayFlags sAttemptState.overlayFlags
-#define sAttemptStart sAttemptState.start
-#define sFinishKind sAttemptState.finish
-#define sSelectedEntry sAttemptState.selectedEntry
-#define sAttemptSerial sAttemptState.serial
-
 #if IS_EMULATOR
-s32 sPbProfiles[SUSAMUNE_ILING_PROFILE_COUNT]
-               [SUSAMUNE_ILING_PB_MAX_SLOTS];
+#define sPbProfiles (*reinterpret_cast<s32 (*)[SUSAMUNE_ILING_PROFILE_COUNT] \
+                                            [SUSAMUNE_ILING_PB_MAX_SLOTS]>( \
+    SUSAMUNE_DOLPHIN_PB_LIVE_PPC_BASE))
+static_assert(SUSAMUNE_ILING_PROFILE_COUNT * SUSAMUNE_ILING_PB_MAX_SLOTS *
+                  sizeof(s32) <= SUSAMUNE_DOLPHIN_PB_LIVE_SIZE,
+              "Dolphin live PB mirror exceeds its MEM2 window");
+static_assert((SUSAMUNE_DOLPHIN_PB_LIVE_PPC_BASE & 31u) == 0,
+              "Dolphin live PB mirror is not cache-line aligned");
 #else
 #define sPbProfiles (*reinterpret_cast<s32 (*)[SUSAMUNE_ILING_PROFILE_COUNT] \
                                             [SUSAMUNE_ILING_PB_MAX_SLOTS]>( \
@@ -442,6 +437,7 @@ struct RuntimeState {
     u32 pbRetryFrames;
     int bannerFrames;
     int fanfareDelay;
+    u8 achievementChimeBlockFrames;
     u8 recentEntry[kRecentCount];
     u8 activePbProfile;
     u8 recentCount;
@@ -464,7 +460,38 @@ struct RuntimeState {
     bool haveSavedAttempt;
 };
 
-RuntimeState sRuntime;
+struct ILingRuntime {
+    AttemptState attempt;
+    AttemptState savedAttempt;
+    RuntimeState state;
+    char generatedLabel[kRegularLabelSize];
+    char generatedShortLabel[6];
+};
+
+#define sILingRuntime (*reinterpret_cast<ILingRuntime *>( \
+    SUSAMUNE_MEM2_ILING_RUNTIME_PPC_BASE))
+static_assert(sizeof(ILingRuntime) <= SUSAMUNE_ILING_RUNTIME_SIZE,
+              "IL runtime exceeds its MEM2 window");
+
+#define sAttemptState sILingRuntime.attempt
+#define sSavedAttemptState sILingRuntime.savedAttempt
+#define sRuntime sILingRuntime.state
+#define sGeneratedLabel sILingRuntime.generatedLabel
+#define sGeneratedShortLabel sILingRuntime.generatedShortLabel
+#define sRunning sAttemptState.running
+#define sAttemptReady sAttemptState.ready
+#define sCarryRestorePending sAttemptState.carryRestorePending
+#define sTransitionPending sAttemptState.transitionPending
+#define sRecordsEligible sAttemptState.recordsEligible
+#define sNativeIgt sAttemptState.nativeIgt
+#define sHavePlazaStoryFlags sAttemptState.havePlazaStoryFlags
+#define sPlazaStoryFlags sAttemptState.plazaStoryFlags
+#define sOverlayCount sAttemptState.overlayCount
+#define sOverlayFlags sAttemptState.overlayFlags
+#define sAttemptStart sAttemptState.start
+#define sFinishKind sAttemptState.finish
+#define sSelectedEntry sAttemptState.selectedEntry
+#define sAttemptSerial sAttemptState.serial
 #define sCustomPbProfileNames sRuntime.customProfileNames
 #define sBannerText sRuntime.bannerText
 #define sRecentQf sRuntime.recentQf
@@ -473,6 +500,7 @@ RuntimeState sRuntime;
 #define sPbRetryFrames sRuntime.pbRetryFrames
 #define sBannerFrames sRuntime.bannerFrames
 #define sFanfareDelay sRuntime.fanfareDelay
+#define sAchievementChimeBlockFrames sRuntime.achievementChimeBlockFrames
 #define sRecentEntry sRuntime.recentEntry
 #define sActivePbProfile sRuntime.activePbProfile
 #define sRecentCount sRuntime.recentCount
@@ -518,6 +546,12 @@ void copyProfileName(char *out, const char *name, const char *fallback) {
 }
 
 s32 *activePBs() { return sPbProfiles[sActivePbProfile]; }
+
+void reconcileRecordsPBs() {
+    Records::reconcilePBProfiles(
+        &sPbProfiles[0][0], SUSAMUNE_ILING_PB_MAX_SLOTS,
+        SUSAMUNE_ILING_PROFILE_COUNT, sActivePbProfile);
+}
 
 void resetPBProfiles() {
     sActivePbProfile = 0;
@@ -595,9 +629,10 @@ void loadPBs() {
 
 #if IS_EMULATOR
     SusamuneCfg *cfg = EmulatorPersistence::lock();
-    if (!cfg) return;
-    adoptPBs(cfg);
-    EmulatorPersistence::unlock();
+    if (cfg) {
+        adoptPBs(cfg);
+        EmulatorPersistence::unlock();
+    }
 #else
     volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
     DCInvalidateRange((void *)cfg, 32);
@@ -606,6 +641,7 @@ void loadPBs() {
                       sizeof(SusamuneILingProfilesCfg));
     adoptPBs(cfg);
 #endif
+    reconcileRecordsPBs();
 }
 
 void markPBsDirty() {
@@ -1039,8 +1075,11 @@ void clearAttempt() {
     sRunning = false;
     sAttemptReady = false;
     sTransitionPending = false;
+    sRecordsEligible = false;
+    sNativeIgt = false;
     sSelectedEntry = -1;
     sRocketEquipPending = false;
+    Records::onILAttemptEnded();
 }
 
 void armAttempt(const Entry &entry, int selected) {
@@ -1051,6 +1090,10 @@ void armAttempt(const Entry &entry, int selected) {
     sFinishKind = entryFinish(entry);
     sSelectedEntry = selected;
     sAttemptSerial = gQFTTimer.attemptSerial();
+    sRecordsEligible = !gSettings.getBool(SETTING_STAGE_INTRO_SKIP);
+    sNativeIgt = false;
+    Records::onILAttemptStarted((int)(&entry - kEntries));
+    if (!sRecordsEligible) Records::invalidateAttempt();
 }
 
 void formatDelta(s32 qf, char *out, u32 size) {
@@ -1076,8 +1119,12 @@ bool pbRecordingEnabled() {
            !gSettings.getBool(SETTING_STAGE_INTRO_SKIP);
 }
 
+bool attemptPBRecordingEnabled() {
+    return gSettings.getBool(SETTING_ILING_RECORDING) && sRecordsEligible;
+}
+
 void recordPB(int entry, s32 qf) {
-    if (!pbRecordingEnabled()) {
+    if (!attemptPBRecordingEnabled()) {
         return;
     }
 
@@ -1089,6 +1136,8 @@ void recordPB(int entry, s32 qf) {
 
     const s32 previous = pbs[slot];
     pbs[slot] = qf;
+    Records::onPBAccepted(entry, sActivePbProfile);
+    reconcileRecordsPBs();
     markPBsDirty();
     if (gSettings.getBool(SETTING_ILING_POPUP)) {
         char time[20];
@@ -1108,9 +1157,11 @@ void recordPB(int entry, s32 qf) {
     if (!gSettings.getBool(SETTING_ILING_FANFARE)) {
         sFanfareDelay = 0;
     } else if (entryFinish(kEntries[entry]) == FINISH_SHINE) {
+        sAchievementChimeBlockFrames = kBannerFrames;
         // The retail Shine Get request is submitted during this frame.
         sFanfareDelay = kShineFanfareDelay;
     } else {
+        sAchievementChimeBlockFrames = kBannerFrames;
         startPbFanfare();
     }
 }
@@ -1124,6 +1175,12 @@ void recordResult(int entry, s32 qf) {
     if (sRecentCount < kRecentCount) {
         sRecentCount++;
     }
+    const s32 igtCentis = sNativeIgt && gpMarDirector &&
+                                  gpMarDirector->mGCConsole
+                              ? gpMarDirector->mGCConsole->mTimerSecondsLeft
+                              : -1;
+    Records::onILResult(entry, (u8)pbSlot(entry), qf, igtCentis,
+                        sRecordsEligible);
     recordPB(entry, qf);
 }
 
@@ -1138,6 +1195,7 @@ void formatTime(s32 qf, char *out, u32 size, const char *format) {
 }
 
 void init() {
+    memset(&sILingRuntime, 0, sizeof(sILingRuntime));
     resetPBProfiles();
     sSelectedEntry = -1;
     loadPBs();
@@ -1168,10 +1226,9 @@ const char *label(int entry) {
         } else if (flags == ENTRY_NONE && item.result - group * 10 == 9) {
             formatOffset = LABEL_FORMAT_HIDDEN;
         }
-        static char generated[kRegularLabelSize];
-        sprintf(generated, kRegularLabelFormats + formatOffset,
+        sprintf(sGeneratedLabel, kRegularLabelFormats + formatOffset,
                 regularGroupName(group), item.start.gameInt3 + 1, suffix);
-        return generated;
+        return sGeneratedLabel;
     }
 
     return PackedText::at(kLiteralEntryLabels, entry - kGeneratedLabelCount);
@@ -1192,29 +1249,29 @@ const char *shortLabel(int entry) {
     const int group = hundred ? item.result - 100 : item.result / 10;
     const char *prefix = kRegularShortGroupNames + group * 3;
     const u8 flags = item.flags & ENTRY_FLAG_MASK;
-    static char generated[6];
     if (hundred) {
         const bool longPrefix = group == GROUP_PINNA || group == GROUP_PIANTA;
-        generated[0] = longPrefix ? prefix[0] : kHundredGroupLetters[group];
-        generated[1] = longPrefix ? prefix[1] : '1';
-        generated[2] = longPrefix ? '1' : '0';
-        generated[3] = '0';
-        generated[4] = longPrefix ? '0' : '\0';
-        generated[5] = '\0';
+        sGeneratedShortLabel[0] =
+            longPrefix ? prefix[0] : kHundredGroupLetters[group];
+        sGeneratedShortLabel[1] = longPrefix ? prefix[1] : '1';
+        sGeneratedShortLabel[2] = longPrefix ? '1' : '0';
+        sGeneratedShortLabel[3] = '0';
+        sGeneratedShortLabel[4] = longPrefix ? '0' : '\0';
+        sGeneratedShortLabel[5] = '\0';
     } else if (flags == ENTRY_NONE && item.result - group * 10 == 9) {
-        generated[0] = prefix[0];
-        generated[1] = 'H';
-        generated[2] = '\0';
+        sGeneratedShortLabel[0] = prefix[0];
+        sGeneratedShortLabel[1] = 'H';
+        sGeneratedShortLabel[2] = '\0';
     } else {
-        generated[0] = prefix[0];
-        generated[1] = prefix[1];
-        generated[2] = '1' + item.start.gameInt3;
+        sGeneratedShortLabel[0] = prefix[0];
+        sGeneratedShortLabel[1] = prefix[1];
+        sGeneratedShortLabel[2] = '1' + item.start.gameInt3;
         const int suffix = regularSuffixType(flags);
-        generated[3] = suffix == 2 ? 'F' : suffix == 3 ? 'S'
-                               : suffix ? 'R' : '\0';
-        generated[4] = '\0';
+        sGeneratedShortLabel[3] = suffix == 2 ? 'F' : suffix == 3 ? 'S'
+                                    : suffix ? 'R' : '\0';
+        sGeneratedShortLabel[4] = '\0';
     }
-    return generated;
+    return sGeneratedShortLabel;
 }
 
 s32 pbQf(int entry) {
@@ -1236,7 +1293,7 @@ bool anyPercentTheoryQf(s32 *out) {
 int pbProfile() { return sActivePbProfile; }
 
 const char *pbProfileName(int profile) {
-    if (profile == 0) return "Any%";
+    if (profile == 0) return "Any percent";
     if (profile == 1) return "120 Shines";
     if (profile >= 2 && profile < SUSAMUNE_ILING_PROFILE_COUNT) {
         return sCustomPbProfileNames[profile - 2];
@@ -1253,6 +1310,7 @@ void cyclePbProfile(int direction) {
         SUSAMUNE_ILING_PROFILE_COUNT + direction) %
         SUSAMUNE_ILING_PROFILE_COUNT);
     sBannerFrames = 0;
+    reconcileRecordsPBs();
     markPBsDirty();
 }
 
@@ -1335,6 +1393,7 @@ void clearPB(int entry) {
     activePBs()[slot] = -1;
     markPBsDirty();
     sBannerFrames = 0;
+    reconcileRecordsPBs();
 }
 
 void onWarpTail() {
@@ -1448,6 +1507,16 @@ void onStageSetup() {
 void update() {
     servicePBSave();
 
+    if (sRunning && sRecordsEligible &&
+        gSettings.getBool(SETTING_STAGE_INTRO_SKIP)) {
+        sRecordsEligible = false;
+        Records::invalidateAttempt();
+    }
+    if (sRunning && gpMarDirector && gpMarDirector->mGCConsole &&
+        gpMarDirector->mGCConsole->mIsTimerMoving) {
+        sNativeIgt = true;
+    }
+
     if (sBowserNozzleShieldPending && gpMarDirector &&
         gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING &&
         TFlagManager::smInstance) {
@@ -1525,6 +1594,9 @@ void update() {
     if (sBannerFrames > 0) {
         sBannerFrames--;
     }
+    if (sAchievementChimeBlockFrames > 0) {
+        sAchievementChimeBlockFrames--;
+    }
     if (!sRunning) {
         return;
     }
@@ -1549,6 +1621,14 @@ void update() {
              acceptsAnySelectedOrigin(kEntries[sSelectedEntry]))) {
             // A same-scene reset keeps its explicitly selected Secret/Reds mode.
             sAttemptSerial = serial;
+            sRecordsEligible =
+                !gSettings.getBool(SETTING_STAGE_INTRO_SKIP);
+            sNativeIgt = false;
+            const int entry = validEntry(sSelectedEntry)
+                                  ? sSelectedEntry
+                                  : entryForStartScene(scene);
+            Records::onILAttemptStarted(entry);
+            if (!sRecordsEligible) Records::invalidateAttempt();
         } else {
             // A child reset becomes an independent Secret/Reds attempt. Read
             // the temporary main-Shine mode before clearAttempt restores it.
@@ -1628,6 +1708,7 @@ void onSavestateSaved() {
 
 void onSavestateLoaded() {
     sFanfareDelay = 0;
+    sAchievementChimeBlockFrames = 0;
     sBannerFrames = 0;
     sHaveSetupShineCount = false;
     sHaveSetupMovieFlag = false;
@@ -1646,6 +1727,10 @@ void onSavestateLoaded() {
     // eligible. A genuine reset or stage load arms the next attempt normally.
     sAttemptState = sSavedAttemptState;
     clearAttempt();
+}
+
+bool achievementChimeBlocked() {
+    return sAchievementChimeBlockFrames > 0;
 }
 
 static void drawRecent(Menu *menu, bool preview) {

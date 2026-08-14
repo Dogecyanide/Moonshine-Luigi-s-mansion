@@ -13,7 +13,7 @@
 
 const char gCreationLettersLower[33] = "abcdefghijklmnopqrstuvwxyz.,!?-_";
 const char gCreationLettersUpper[33] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ.,!?-_";
-const char gCreationSymbols[33] = "0123456789+-*/=()[]<>!?:;'\"_#%&@";
+const char gCreationSymbols[33] = "0123456789+-*/=()[]<>!?:;'\"_#.&@";
 
 namespace {
 
@@ -121,7 +121,10 @@ void storeStyle(volatile void *destination, const CreationStyle &style) {
 
 }  // namespace
 
-CreationExtras gCreationExtras;
+CreationExtras &gCreationExtras = *reinterpret_cast<CreationExtras *>(
+    SUSAMUNE_MEM2_CREATION_RUNTIME_PPC_BASE);
+static_assert(sizeof(CreationExtras) <= SUSAMUNE_CREATION_RUNTIME_SIZE,
+              "Creation extras exceed their MEM2 runtime window");
 
 const char *wallkickDisplayLabel(int index) {
     return PackedText::at(kWallkickNames, index);
@@ -149,7 +152,8 @@ void drawCreationKeyboard(Menu *menu, const char *title, const char *text,
                        i == cursor ? Color(255, 255, 255, 255)
                                    : Color(200, 206, 220, 255));
     }
-    menu->drawText("D-pad Select   A Type   B Delete   X Space   Y Case   L/R Page",
+    menu->drawText("D-pad Select   A Type   B Delete   X Space   Y Case   L"
+                   SUSAMUNE_GLYPH_SLASH "R Page",
                    86, 401, 10, 10, Color(104, 114, 136, 255));
     menu->drawText("START: Keep   X+START: Cancel   Z: Clear",
                    86, 421, 10, 10, Color(104, 114, 136, 255));
@@ -765,7 +769,8 @@ void CreationExtras::drawKeyboard(Menu *menu) const {
     Creation::drawTextBox(menu, mWordStyle[word], mWordRgb[word],
                           SUSAMUNE_CREATION_WORD_CHARS, mWords[word]);
     char status[64];
-    snprintf(status, sizeof(status), "Custom text %d   %u/%u", word + 1,
+    snprintf(status, sizeof(status),
+             "Custom text %d   %u" SUSAMUNE_GLYPH_SLASH "%u", word + 1,
              mWordLength[word], SUSAMUNE_CREATION_WORD_CHARS);
     drawCreationKeyboard(menu, status, nullptr, mKeyboardPage, mUppercase,
                          mKeyboardCursor);

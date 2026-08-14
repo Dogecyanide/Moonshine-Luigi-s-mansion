@@ -12,6 +12,7 @@
 // =====================================================================
 
 #include "susamune/menu.hxx"
+#include "susamune/mem2_map.h"
 #include "susamune/binds.hxx"
 #include "susamune/creation_extras.hxx"
 #include "susamune/glyphs.hxx"
@@ -22,6 +23,8 @@
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
 #include "susamune/qft_display.hxx"
+#include "susamune/records.hxx"
+#include "susamune/records_persistence.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/susamune_cfg.h"
 #include "susamune/wallkick_display.hxx"
@@ -36,7 +39,9 @@
 #include "J2D/J2DOrthoGraph.hxx"
 #include "J2D/J2DPane.hxx"  // J2DFillBox
 #include "J2D/J2DTextBox.hxx"
+#include "SMS/MSound/MSound.hxx"
 #include "SMS/System/Application.hxx"
+#include "SMS/System/MarDirector.hxx"
 #include "JKernel/JKRHeap.hxx"  // placement new (operator new(size_t, void*))
 
 // Objects are placement-new'd into BSS buffers so the menu needs no heap.
@@ -311,8 +316,8 @@ public:
             const SettingId id = optionSetting(mSel);
             gSettings.toggleFavorite(id);
             menu->toast(gSettings.favorite(id)
-                            ? "Added to Starred"
-                            : "Removed from Starred");
+                            ? "Added to Shined"
+                            : "Removed from Shined");
             return;
         }
         if (rapid & TMarioGamePad::A) {
@@ -442,11 +447,11 @@ public:
 
             const bool selected = !isOption() && i == selectedEntry();
             char pb[24];
-            const char *value = "[PB: --]";
+            const char *value = "(PB: --)";
             const s32 qf = ILing::pbQf(i);
             if (qf >= 0) {
-                ILing::formatTime(qf, pb, sizeof(pb),
-                                  "[PB: %d:%02d.%03d]");
+                    ILing::formatTime(qf, pb, sizeof(pb),
+                                  "(PB: %d:%02d.%03d)");
                 value = pb;
             }
             drawValueRow(menu, x, ry, w, ILing::label(i), value, selected,
@@ -457,11 +462,13 @@ public:
 
         drawScrollHints(menu, x, y, w, listH, start, end, rows);
         const char *hint = isOption()
-            ? SUSAMUNE_GLYPH_A " Toggle/Edit  " SUSAMUNE_GLYPH_X " Star  "
-              SUSAMUNE_GLYPH_C
-              " U/D Select L/R Section"
+            ? SUSAMUNE_GLYPH_A " Toggle" SUSAMUNE_GLYPH_SLASH "Edit  "
+              SUSAMUNE_GLYPH_X " Shine  " SUSAMUNE_GLYPH_C
+              " U" SUSAMUNE_GLYPH_SLASH "D Select L"
+              SUSAMUNE_GLYPH_SLASH "R Section"
             : SUSAMUNE_GLYPH_A " Start  " SUSAMUNE_GLYPH_X " Delete  "
-              SUSAMUNE_GLYPH_C " U/D Select L/R Section";
+              SUSAMUNE_GLYPH_C " U" SUSAMUNE_GLYPH_SLASH "D Select L"
+              SUSAMUNE_GLYPH_SLASH "R Section";
         menu->drawText(hint, x + 4, y + h - FOOT_SZ,
                        FOOT_SZ, FOOT_SZ, cFooter());
     }
@@ -619,6 +626,550 @@ private:
     char mNameBuffer[SUSAMUNE_ILING_PROFILE_NAME_SIZE];
 };
 
+// ---------------------------------------------------------------------
+// Records -- nested achievement details and regional/global statistics.
+// ---------------------------------------------------------------------
+namespace {
+
+const char *recordTierName(Records::Tier tier) {
+    const char *name = Records::tierName(tier);
+    return name ? name : "";
+}
+
+Color recordTierColor(Records::Tier tier) {
+    switch (tier) {
+    case Records::TIER_BRONZE:   return col(205, 127, 50, 255);
+    case Records::TIER_SILVER:   return col(205, 215, 225, 255);
+    case Records::TIER_GOLD:     return col(255, 196, 40, 255);
+    case Records::TIER_DIAMOND:  return col(60, 160, 255, 255);
+    case Records::TIER_DEMON:    return col(186, 65, 230, 255);
+    case Records::TIER_FRONTIER: return col(60, 210, 100, 255);
+    default:                     return cRow();
+    }
+}
+
+const char *recordText(const char *text, const char *fallback = "") {
+    return text && text[0] ? text : fallback;
+}
+
+int fittedRecordTextSize(const char *text, int maxWidth, int largest,
+                         int smallest) {
+    text = recordText(text);
+    for (int size = largest; size > smallest; size--) {
+        if (Menu::textWidth(text, size) <= maxWidth) return size;
+    }
+    return smallest;
+}
+
+}  // namespace
+
+class RecordsTab : public MenuTab {
+public:
+    RecordsTab()
+        : mPage(PAGE_ROOT), mSel(0), mCategory(0), mAchievement(0), mWorld(0),
+          mScope(RecordsPersistence::SCOPE_GLOBAL) {}
+
+    const char *title() const override { return "Records"; }
+    void update(Menu *menu, TMarioGamePad *pad) override {
+        const u32 rapid = menu->navigationInput(pad);
+        if ((rapid & TMarioGamePad::B) && mPage != PAGE_ROOT) {
+            if (mPage == PAGE_ACHIEVEMENT_DETAIL) {
+                mPage = PAGE_ACHIEVEMENTS;
+            } else if (mPage == PAGE_ACHIEVEMENTS) {
+                mPage = PAGE_ACHIEVEMENT_CATEGORIES;
+            } else if (mPage == PAGE_WORLD_DETAIL) {
+                mPage = PAGE_WORLDS;
+            } else {
+                mPage = PAGE_ROOT;
+            }
+            return;
+        }
+
+        switch (mPage) {
+        case PAGE_ROOT:
+            moveSelection(rapid, 4);
+            if (mSel == 3 &&
+                (rapid & (TMarioGamePad::CSTICK_LEFT |
+                          TMarioGamePad::CSTICK_RIGHT | TMarioGamePad::A))) {
+                const int direction =
+                    (rapid & TMarioGamePad::CSTICK_LEFT) ? -1 : 1;
+                mScope = (u8)wrap(mScope + direction,
+                                  RecordsPersistence::SCOPE_COUNT);
+            } else if (rapid & TMarioGamePad::A) {
+                mPage = mSel == 0 ? PAGE_ACHIEVEMENT_CATEGORIES
+                                  : mSel == 1 ? PAGE_STATS_OVERVIEW
+                                              : PAGE_WORLDS;
+                mSel = 0;
+            }
+            break;
+        case PAGE_ACHIEVEMENT_CATEGORIES:
+            if (rapid & TMarioGamePad::CSTICK_UP)
+                mCategory = wrap(mCategory - 1, Records::CATEGORY_COUNT);
+            else if (rapid & TMarioGamePad::CSTICK_DOWN)
+                mCategory = wrap(mCategory + 1, Records::CATEGORY_COUNT);
+            if (rapid & TMarioGamePad::A) {
+                mAchievement = 0;
+                mPage = PAGE_ACHIEVEMENTS;
+            }
+            break;
+        case PAGE_ACHIEVEMENTS:
+            {
+            const int count = Records::categoryAchievementCount(
+                (Records::Category)mCategory);
+            if (count <= 0) {
+                mAchievement = 0;
+                break;
+            }
+            if (rapid & TMarioGamePad::CSTICK_UP)
+                mAchievement = wrap(mAchievement - 1, count);
+            else if (rapid & TMarioGamePad::CSTICK_DOWN)
+                mAchievement = wrap(mAchievement + 1, count);
+            if (rapid & TMarioGamePad::A)
+                mPage = PAGE_ACHIEVEMENT_DETAIL;
+            break;
+            }
+        case PAGE_ACHIEVEMENT_DETAIL:
+            break;
+        case PAGE_STATS_OVERVIEW:
+            break;
+        case PAGE_WORLDS:
+            if (rapid & TMarioGamePad::CSTICK_UP)
+                mWorld = wrap(mWorld - 1, Records::WORLD_COUNT);
+            else if (rapid & TMarioGamePad::CSTICK_DOWN)
+                mWorld = wrap(mWorld + 1, Records::WORLD_COUNT);
+            if (rapid & TMarioGamePad::A)
+                mPage = PAGE_WORLD_DETAIL;
+            break;
+        case PAGE_WORLD_DETAIL:
+            break;
+        }
+    }
+
+    void draw(Menu *menu, int x, int y, int w, int h) override {
+        switch (mPage) {
+        case PAGE_ROOT: drawRoot(menu, x, y, w, h); break;
+        case PAGE_ACHIEVEMENT_CATEGORIES:
+            drawAchievementCategories(menu, x, y, w, h);
+            break;
+        case PAGE_ACHIEVEMENTS: drawAchievements(menu, x, y, w, h); break;
+        case PAGE_ACHIEVEMENT_DETAIL:
+            drawAchievementDetail(menu, x, y, w, h);
+            break;
+        case PAGE_STATS_OVERVIEW: drawOverview(menu, x, y, w, h); break;
+        case PAGE_WORLDS: drawWorlds(menu, x, y, w, h); break;
+        case PAGE_WORLD_DETAIL: drawWorldDetail(menu, x, y, w, h); break;
+        }
+    }
+
+private:
+    enum Page : u8 {
+        PAGE_ROOT,
+        PAGE_ACHIEVEMENT_CATEGORIES,
+        PAGE_ACHIEVEMENTS,
+        PAGE_ACHIEVEMENT_DETAIL,
+        PAGE_STATS_OVERVIEW,
+        PAGE_WORLDS,
+        PAGE_WORLD_DETAIL,
+    };
+
+    Records::AchievementId selectedAchievement() const {
+        int selection = mAchievement;
+        const Records::Category category = (Records::Category)mCategory;
+        for (int tier = 0; tier < Records::TIER_COUNT; tier++) {
+            const int count = Records::categoryTierAchievementCount(
+                category, (Records::Tier)tier);
+            if (selection < count) {
+                return Records::categoryTierAchievement(
+                    category, (Records::Tier)tier, selection);
+            }
+            selection -= count;
+        }
+        return Records::ACHIEVEMENT_INVALID;
+    }
+
+    static int categoryVisualRows(Records::Category category) {
+        int rows = 0;
+        for (int tier = 0; tier < Records::TIER_COUNT; tier++) {
+            const int count = Records::categoryTierAchievementCount(
+                category, (Records::Tier)tier);
+            if (count > 0) rows += count + 1;
+        }
+        return rows;
+    }
+
+    static int achievementVisualRow(Records::Category category,
+                                    int selection) {
+        int row = 0;
+        for (int tier = 0; tier < Records::TIER_COUNT; tier++) {
+            const int count = Records::categoryTierAchievementCount(
+                category, (Records::Tier)tier);
+            if (count <= 0) continue;
+            row++;
+            if (selection < count) return row + selection;
+            selection -= count;
+            row += count;
+        }
+        return 0;
+    }
+
+    void moveSelection(u32 rapid, int count) {
+        if (rapid & TMarioGamePad::CSTICK_UP)
+            mSel = wrap(mSel - 1, count);
+        else if (rapid & TMarioGamePad::CSTICK_DOWN)
+            mSel = wrap(mSel + 1, count);
+    }
+
+    static void formatDuration(u32 seconds, char *out, u32 size) {
+        snprintf(out, size, "%lu:%02lu", seconds / 3600,
+                 (seconds / 60) % 60);
+    }
+
+    static u32 successRate(u32 finishes, u32 attempts) {
+        if (!attempts) return 0;
+        if (finishes >= attempts) return 100;
+        return (finishes * 100u + attempts / 2) / attempts;
+    }
+
+    static u32 scopedWorldTime(RecordsPersistence::Scope scope,
+                               Records::World world) {
+        static const u8 stats[] = {
+            Records::STAT_AREA_BIANCO_SECONDS,
+            Records::STAT_AREA_RICCO_SECONDS,
+            Records::STAT_AREA_GELATO_SECONDS,
+            Records::STAT_AREA_PINNA_SECONDS,
+            Records::STAT_AREA_SIRENA_SECONDS,
+            Records::STAT_AREA_NOKI_SECONDS,
+            Records::STAT_AREA_PIANTA_SECONDS,
+        };
+        if (world == Records::WORLD_DELFINO) {
+            return RecordsPersistence::stat(
+                       scope, Records::STAT_AREA_AIRSTRIP_SECONDS) +
+                   RecordsPersistence::stat(
+                       scope, Records::STAT_AREA_DELFINO_SECONDS) +
+                   RecordsPersistence::stat(
+                       scope, Records::STAT_AREA_CORONA_SECONDS);
+        }
+        return world < Records::WORLD_DELFINO
+                   ? RecordsPersistence::stat(
+                         scope, (Records::StatId)stats[world])
+                   : 0;
+    }
+
+    static const char *storageStatus() {
+#if IS_EMULATOR
+        return "Session only (Dolphin alpha)";
+#else
+        if (!RecordsPersistence::persistent()) return "Progress unavailable";
+        if (!RecordsPersistence::writable()) return "Progress is read-only";
+        if (RecordsPersistence::lastError() != 0) return "Progress save error";
+        if (RecordsPersistence::pending()) return "Saving progress...";
+        if (RecordsPersistence::dirty()) return "Progress not checkpointed";
+        return "Progress saved";
+#endif
+    }
+
+    void drawRoot(Menu *menu, int x, int y, int w, int h) const {
+        char unlocked[20];
+        snprintf(unlocked, sizeof(unlocked), "%d " SUSAMUNE_GLYPH_SLASH
+                 " %d", Records::unlockedCount(), Records::achievementCount());
+        drawValueRow(menu, x, y, w, "Achievements  >", unlocked,
+                     mSel == 0, false, true);
+        drawValueRow(menu, x, y + ROW_H, w, "Statistics overview  >", nullptr,
+                     mSel == 1, false, true);
+        drawValueRow(menu, x, y + ROW_H * 2, w, "Worlds  >", nullptr,
+                     mSel == 2, false, true);
+        drawValueRow(menu, x, y + ROW_H * 3, w, "Region",
+                     RecordsPersistence::scopeName(
+                         (RecordsPersistence::Scope)mScope),
+                     mSel == 3, false, true);
+        menu->drawText("V1.2.0 - Trial By Sunshine",
+                       x + 4, y + h - 44, FOOT_SZ, FOOT_SZ, cRowDim());
+        menu->drawText(storageStatus(), x + 4, y + h - 24,
+                       FOOT_SZ, FOOT_SZ,
+                       RecordsPersistence::lastError() ?
+                           col(255, 130, 100, 255) : cFooter());
+    }
+
+    void drawAchievementCategories(Menu *menu, int x, int y, int w,
+                                   int h) const {
+        int ry = y;
+        for (int i = 0; i < Records::CATEGORY_COUNT; i++, ry += ROW_H) {
+            const Records::Category category = (Records::Category)i;
+            char count[20];
+            snprintf(count, sizeof(count), "%d " SUSAMUNE_GLYPH_SLASH " %d",
+                     Records::categoryUnlockedCount(category),
+                     Records::categoryAchievementCount(category));
+            drawValueRow(menu, x, ry, w,
+                         recordText(Records::categoryName(category),
+                                    "(unnamed)"),
+                         count, i == mCategory, false, true);
+        }
+        menu->drawText(SUSAMUNE_GLYPH_A " Open    "
+                       SUSAMUNE_GLYPH_B " Back",
+                       x + 4, y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void drawAchievements(Menu *menu, int x, int y, int w, int h) {
+        const Records::Category category = (Records::Category)mCategory;
+        const int count = Records::categoryAchievementCount(category);
+        drawSectionHeader(menu, x, y, w,
+                          recordText(Records::categoryName(category),
+                                     "Achievements"));
+        if (count <= 0) {
+            menu->drawText("(none)", x + 4, y + ROW_H,
+                           ROW_SZ, ROW_SZ, cRowDim());
+            menu->drawText(SUSAMUNE_GLYPH_B " Back", x + 4,
+                           y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+            return;
+        }
+        const int listY = y + ROW_H;
+        const int listH = h - ROW_H - FOOT_SZ;
+        const int maxRows = listH / ROW_H;
+        const int rows = categoryVisualRows(category);
+        const int selectedRow = achievementVisualRow(category, mAchievement);
+        const int start = listScrollStart(selectedRow, rows, maxRows);
+        int end = start + maxRows;
+        if (end > rows) end = rows;
+        int ry = listY;
+        int row = 0;
+        int selection = 0;
+        for (int tier = 0; tier < Records::TIER_COUNT; tier++) {
+            const Records::Tier recordTier = (Records::Tier)tier;
+            const int tierCount = Records::categoryTierAchievementCount(
+                category, recordTier);
+            if (tierCount <= 0) continue;
+
+            if (row >= start && row < end) {
+                drawSectionHeader(menu, x, ry, w,
+                                  recordTierName(recordTier));
+                ry += ROW_H;
+            }
+            row++;
+            for (int i = 0; i < tierCount; i++, row++, selection++) {
+                if (row < start || row >= end) continue;
+                const Records::AchievementId id =
+                    Records::categoryTierAchievement(category, recordTier, i);
+                const Records::AchievementDesc *desc =
+                    id == Records::ACHIEVEMENT_INVALID
+                        ? nullptr : Records::achievement(id);
+                const bool isUnlocked = desc && Records::unlocked(id);
+                char progress[12];
+                const char *value = nullptr;
+                const u16 streak = category == Records::CATEGORY_STREAKS
+                    ? Records::streakProgress(id)
+                    : 0;
+                if (streak) {
+                    const u32 goal = streak & 0xff;
+                    snprintf(progress, sizeof(progress),
+                             "%lu " SUSAMUNE_GLYPH_SLASH " %lu",
+                             isUnlocked ? goal : (u32)(streak >> 8), goal);
+                    value = progress;
+                }
+                drawValueRow(menu, x, ry, w,
+                             desc ? recordText(desc->name, "(unnamed)")
+                                  : "(unavailable)",
+                             value, selection == mAchievement,
+                             isUnlocked, true);
+                ry += ROW_H;
+            }
+        }
+        drawScrollHints(menu, x, listY, w, listH, start, end, rows);
+        menu->drawText(SUSAMUNE_GLYPH_A " Details    "
+                       SUSAMUNE_GLYPH_B " Back",
+                       x + 4, y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void drawAchievementDetail(Menu *menu, int x, int y, int w, int h) const {
+        const Records::AchievementId id = selectedAchievement();
+        const Records::AchievementDesc *desc =
+            id == Records::ACHIEVEMENT_INVALID ? nullptr
+                                               : Records::achievement(id);
+        if (!desc) return;
+        const Color color = recordTierColor(desc->tier);
+        const char *name = recordText(desc->name, "Unnamed achievement");
+        const bool isUnlocked = Records::unlocked(id);
+        menu->fillBox(x, y + 4, w, 3, color);
+        const int nameSize = fittedRecordTextSize(name, w - 8, 22, 13);
+        menu->drawText(name, x + 4, y + 20, nameSize, nameSize, cRowSel());
+        menu->drawText(recordTierName(desc->tier), x + 4, y + 56,
+                       ROW_SZ, ROW_SZ, color);
+        const char *state = isUnlocked ? "UNLOCKED" : "LOCKED";
+        menu->drawText(state,
+                       x + w - Menu::textWidth(state, ROW_SZ) - 8,
+                       y + 56, ROW_SZ, ROW_SZ,
+                       isUnlocked ? cValue() : cRowDim());
+
+        const char *description = recordText(desc->description,
+                                             "Description unavailable.");
+        const int descriptionSize = fittedRecordTextSize(
+            description, w - 8, 14, 10);
+        menu->drawText(description, x + 4, y + 88,
+                       descriptionSize, descriptionSize, cRow());
+
+        menu->drawText(SUSAMUNE_GLYPH_B " Back", x + 4,
+                       y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void drawOverview(Menu *menu, int x, int y, int w, int h) const {
+        static const char names[] =
+            "Time played\0Attempts\0ILs finished\0PBs earned\0Deaths\0"
+            "Creation time";
+        static const u8 offsets[] = {0, 12, 21, 34, 45, 52};
+        static const u8 stats[] = {
+            Records::STAT_PLAY_SECONDS, Records::STAT_ATTEMPTS,
+            Records::STAT_IL_FINISHES, Records::STAT_PBS_EARNED,
+            Records::STAT_DEATHS, Records::STAT_CREATION_SECONDS,
+        };
+        char value[24];
+        const RecordsPersistence::Scope scope =
+            (RecordsPersistence::Scope)mScope;
+        drawSectionHeader(menu, x, y, w,
+                          recordText(RecordsPersistence::scopeName(scope),
+                                     "Statistics"));
+        int ry = y + ROW_H;
+        for (u32 i = 0; i < sizeof(stats); i++, ry += ROW_H) {
+            const u32 amount = RecordsPersistence::stat(
+                scope, (Records::StatId)stats[i]);
+            if (stats[i] == Records::STAT_PLAY_SECONDS ||
+                stats[i] == Records::STAT_CREATION_SECONDS) {
+                formatDuration(amount, value, sizeof(value));
+            } else if (stats[i] == Records::STAT_IL_FINISHES) {
+                const u32 attempts = RecordsPersistence::stat(
+                    scope, Records::STAT_ATTEMPTS);
+                snprintf(value, sizeof(value),
+                         "%lu (%lu pct)", amount,
+                         successRate(amount, attempts));
+            } else {
+                snprintf(value, sizeof(value), "%lu", amount);
+            }
+            drawValueRow(menu, x, ry, w, names + offsets[i], value,
+                         false, false, false);
+        }
+
+        char achievements[20];
+        snprintf(achievements, sizeof(achievements),
+                 "%d " SUSAMUNE_GLYPH_SLASH " %d", Records::unlockedCount(),
+                 Records::achievementCount());
+        drawValueRow(menu, x, ry, w, "Achievements", achievements,
+                     false, false, false);
+        menu->drawText(SUSAMUNE_GLYPH_B " Back", x + 4,
+                       y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void drawWorlds(Menu *menu, int x, int y, int w, int h) {
+        const int maxRows = (h - ROW_H - FOOT_SZ) / ROW_H;
+        const int start = listScrollStart(mWorld, Records::WORLD_COUNT,
+                                          maxRows);
+        int end = start + maxRows;
+        if (end > Records::WORLD_COUNT) end = Records::WORLD_COUNT;
+        const RecordsPersistence::Scope scope =
+            (RecordsPersistence::Scope)mScope;
+        drawSectionHeader(menu, x, y, w,
+                          recordText(RecordsPersistence::scopeName(scope),
+                                     "Worlds"));
+        int ry = y + ROW_H;
+        for (int i = start; i < end; i++, ry += ROW_H) {
+            char duration[24];
+            formatDuration(scopedWorldTime(scope, (Records::World)i),
+                           duration, sizeof(duration));
+            drawValueRow(menu, x, ry, w,
+                         recordText(Records::worldName((Records::World)i),
+                                    "(unknown)"),
+                         duration, i == mWorld, false, true);
+        }
+        drawScrollHints(menu, x, y + ROW_H, w, h - ROW_H - FOOT_SZ,
+                        start, end, Records::WORLD_COUNT);
+        menu->drawText(SUSAMUNE_GLYPH_A " Open    "
+                       SUSAMUNE_GLYPH_B " Back", x + 4,
+                       y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void formatPBSummary(Records::World world, bool anyPercent,
+                         char *out, u32 size) const {
+        u8 coverage = 0;
+        u8 goal = 0;
+        s32 qf = 0;
+        const bool complete = Records::worldPBSummary(
+            world, !anyPercent, &coverage, &goal, &qf);
+        if (!goal) {
+            snprintf(out, size, "Unavailable");
+            return;
+        }
+
+        if (!complete) {
+            snprintf(out, size,
+                     "Incomplete %lu " SUSAMUNE_GLYPH_SLASH " %lu",
+                     (u32)coverage, (u32)goal);
+            return;
+        }
+
+        char time[24];
+        ILing::formatTime(qf, time, sizeof(time));
+        snprintf(out, size, "%s (%lu " SUSAMUNE_GLYPH_SLASH " %lu)",
+                 time, (u32)coverage, (u32)goal);
+    }
+
+    void drawWorldDetail(Menu *menu, int x, int y, int w, int h) const {
+        const Records::World world = (Records::World)mWorld;
+        const RecordsPersistence::Scope scope =
+            (RecordsPersistence::Scope)mScope;
+        char header[48];
+        snprintf(header, sizeof(header), "%s - %s",
+                 recordText(Records::worldName(world), "World"),
+                 recordText(RecordsPersistence::scopeName(scope), "Region"));
+        drawSectionHeader(menu, x, y, w, header);
+
+        const u32 attempts = RecordsPersistence::stat(
+            scope, Records::worldAttemptStat(world));
+        const u32 finishes = RecordsPersistence::stat(
+            scope, Records::worldFinishStat(world));
+        char value[48];
+        int ry = y + ROW_H;
+        formatDuration(scopedWorldTime(scope, world), value, sizeof(value));
+        drawValueRow(menu, x, ry, w, "Time", value, false, false, false);
+        ry += ROW_H;
+        snprintf(value, sizeof(value), "%lu", attempts);
+        drawValueRow(menu, x, ry, w, "Attempts", value,
+                     false, false, false);
+        ry += ROW_H;
+        snprintf(value, sizeof(value), "%lu", finishes);
+        drawValueRow(menu, x, ry, w, "Finishes", value,
+                     false, false, false);
+        ry += ROW_H;
+        snprintf(value, sizeof(value), "%lu pct",
+                 successRate(finishes, attempts));
+        drawValueRow(menu, x, ry, w, "Success rate", value,
+                     false, false, false);
+        ry += ROW_H;
+
+        char pbHeader[64];
+        snprintf(pbHeader, sizeof(pbHeader), "PBs: %s - %s",
+                 recordText(Records::currentRegionScope(), "Region"),
+                 recordText(ILing::pbProfileName(ILing::pbProfile()),
+                            "Profile"));
+        drawSectionHeader(menu, x, ry, w, pbHeader);
+        ry += ROW_H;
+
+        formatPBSummary(world, true, value, sizeof(value));
+        drawValueRow(menu, x, ry, w, "Any percent PBs", value,
+                     false, false, false);
+        ry += ROW_H;
+        formatPBSummary(world, false, value, sizeof(value));
+        drawValueRow(menu, x, ry, w, "All-IL PBs", value,
+                     false, false, false);
+
+        menu->drawText(SUSAMUNE_GLYPH_B " Back", x + 4,
+                       y + h - FOOT_SZ, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    u8 mPage;
+    int mSel;
+    int mCategory;
+    int mAchievement;
+    int mWorld;
+    u8 mScope;
+};
+
 #if ENABLE_DEBUG_WARPS
 class WarpPresetsTab : public MenuTab {
 public:
@@ -720,7 +1271,7 @@ private:
 namespace {
 
 const char kCategoryTitles[] =
-    "Gameplay\0Savestate\0Practice\0Cosmetic\0Display\0Timer\0Starred";
+    "Gameplay\0Savestate\0Practice\0Cosmetic\0Display\0Timer\0Shined";
 
 enum CategoryTitleOffset {
     TITLE_QOL       = 0,
@@ -732,7 +1283,7 @@ enum CategoryTitleOffset {
     TITLE_STARRED   = TITLE_TIMER + sizeof("Timer"),
 };
 
-static_assert(sizeof(kCategoryTitles) == 59, "category title offsets changed");
+static_assert(sizeof(kCategoryTitles) == 58, "category title offsets changed");
 static_assert(SETTING_COUNT <= 0x100, "setting ids no longer fit in a byte");
 static_assert(SETTING_CAT_COUNT <= 0x100, "setting categories no longer fit in a byte");
 const u8 kStarredCategory = SETTING_CAT_COUNT;
@@ -782,10 +1333,16 @@ public:
             if (rapid & TMarioGamePad::B) {
                 mResetConfirm = 0;
             } else if (rapid & TMarioGamePad::A) {
-                if (mResetConfirm == 1) mResetConfirm = 2;
+                if (mResetConfirm & 1) mResetConfirm++;
                 else {
+                    const bool records = mResetConfirm == 4;
                     mResetConfirm = 0;
-                    menu->factoryReset();
+                    if (records) {
+                        RecordsPersistence::resetAll();
+                        menu->toast("Records reset");
+                    } else {
+                        menu->factoryReset();
+                    }
                 }
             }
             return;
@@ -822,7 +1379,7 @@ public:
                 else if (hasWallkickEditor())
                     gCreationExtras.beginWallkickEditor();
                 else if (hasFactoryReset())
-                    mResetConfirm = 1;
+                    mResetConfirm = mSel == settings ? 1 : 3;
             }
             return;
         }
@@ -830,8 +1387,8 @@ public:
         if (rapid & TMarioGamePad::X) {
             gSettings.toggleFavorite(id);
             menu->toast(gSettings.favorite(id)
-                            ? "Added to Starred"
-                            : "Removed from Starred");
+                            ? "Added to Shined"
+                            : "Removed from Shined");
             if (isStarred() && mSel >= settings - 1 && mSel > 0) mSel--;
         } else if (rapid & TMarioGamePad::A) {
             gSettings.cycle(id, +1);
@@ -840,13 +1397,19 @@ public:
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
         if (mResetConfirm) {
-            const char *title = mResetConfirm == 1
-                ? "Reset settings, binds and layouts?"
-                : "PBs stay. Reset everything else now?";
-            const char *detail = mResetConfirm == 1
-                ? "This requires one more confirmation."
-                : "This cannot be undone from the console.";
-            const char *hint = mResetConfirm == 1
+            const bool records = mResetConfirm >= 3;
+            const bool first = mResetConfirm & 1;
+            const char *title = records
+                ? (first ? "Reset all Records progress?"
+                         : "Reset Records now?")
+                : (first ? "Reset settings, binds and layouts?"
+                         : "Reset settings now?");
+            const char *detail = records
+                ? (first ? "PBs and settings stay."
+                         : "PB achievements can return.")
+                : (first ? "This requires one more confirmation."
+                         : "PBs and Records stay.");
+            const char *hint = first
                 ? SUSAMUNE_GLYPH_A " Continue    " SUSAMUNE_GLYPH_B " Cancel"
                 : SUSAMUNE_GLYPH_A " Reset    " SUSAMUNE_GLYPH_B " Cancel";
             menu->fillBox(88, 176, 464, 128, Color(8, 11, 20, 245));
@@ -867,7 +1430,7 @@ public:
         const int settings = buildList(ids);
         const int n = settings + extraRows();
         if (n == 0) {
-            menu->drawText(isStarred() ? "No starred settings" : "(none)",
+            menu->drawText(isStarred() ? "Nothing Shined yet" : "(none)",
                            x + 4, y, ROW_SZ, ROW_SZ, cRowDim());
             if (isStarred())
                 menu->drawText("Press X on a setting to add it here.", x + 4,
@@ -907,7 +1470,8 @@ public:
             } else {
                 name = hasFeedbackEditor() ? "Feedback display"
                      : hasWallkickEditor() ? "Wallkick display style"
-                                           : "Factory reset";
+                     : i == settings ? "Factory reset"
+                                     : "Reset Records";
                 val = hasVisualEditor() ? "Edit" : "Reset";
             }
             const bool starred = i < settings &&
@@ -931,7 +1495,7 @@ private:
     }
     bool hasFactoryReset() const { return mCat == SETTING_CAT_MISC; }
     int extraRows() const {
-        return hasVisualEditor() || hasFactoryReset() ? 1 : 0;
+        return hasFactoryReset() ? 2 : hasVisualEditor() ? 1 : 0;
     }
 
     int buildList(u8 *out) const {
@@ -961,7 +1525,7 @@ private:
         }
         if (hasFeedbackEditor()) return "FEEDBACK STYLE";
         if (hasWallkickEditor()) return "DISPLAY STYLE";
-        if (hasFactoryReset()) return "RESET";
+        if (hasFactoryReset()) return logical == settings ? "RESET" : nullptr;
         return nullptr;
     }
 
@@ -1084,8 +1648,9 @@ public:
             ry += ROW_H;
         }
         drawScrollHints(menu, x, y, w, h, start, end, count);
-        menu->drawText(SUSAMUNE_GLYPH_A " Open/Change   " SUSAMUNE_GLYPH_C
-                       " L/R Section   Saved on close",
+        menu->drawText(SUSAMUNE_GLYPH_A " Open" SUSAMUNE_GLYPH_SLASH
+                       "Change   " SUSAMUNE_GLYPH_C " L"
+                       SUSAMUNE_GLYPH_SLASH "R Section   Saved on close",
                        x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
     }
 
@@ -1171,8 +1736,9 @@ private:
             gCreationExtras.beginColorEditor(SUSAMUNE_CREATION_TIMER_BG, 1,
                                              "Sunshine timer streak");
         } else if (mSel == ROW_SUNSHINE_TIMER_LABEL) {
-            gCreationExtras.beginColorEditor(SUSAMUNE_CREATION_TIMER_LABEL, 1,
-                                             "TIME/TEMPO label colour");
+            gCreationExtras.beginColorEditor(
+                SUSAMUNE_CREATION_TIMER_LABEL, 1,
+                "TIME" SUSAMUNE_GLYPH_SLASH "TEMPO label colour");
         } else if (mSel == ROW_SUNSHINE_TIMER_LABEL_VISIBLE) {
             gCreationExtras.toggleTimerLabel();
         } else if (mSel >= ROW_INPUT_FIRST && mSel < ROW_INPUT_END) {
@@ -1192,9 +1758,9 @@ private:
         if (row == ROW_SUNSHINE_TIMER_STREAK)
             return "Sunshine timer streak";
         if (row == ROW_SUNSHINE_TIMER_LABEL)
-            return "TIME/TEMPO label colour";
+            return "TIME" SUSAMUNE_GLYPH_SLASH "TEMPO label colour";
         if (row == ROW_SUNSHINE_TIMER_LABEL_VISIBLE)
-            return "Show TIME/TEMPO label";
+            return "Show TIME" SUSAMUNE_GLYPH_SLASH "TEMPO label";
         if (row >= ROW_INPUT_FIRST && row < ROW_INPUT_END)
             return InputDisplay::menuRowName(inputRow(row));
         if (row >= ROW_METADATA_FIRST && row < ROW_METADATA_END)
@@ -1341,24 +1907,129 @@ private:
 // Menu
 // =====================================================================
 
+namespace {
+
+Records::AchievementId sAchievementBannerId = Records::ACHIEVEMENT_INVALID;
+int sAchievementBannerFrames = 0;
+bool sAchievementChimePending = false;
+bool sAchievementBatchActive = false;
+
+void updateAchievementChime() {
+    if (!sAchievementChimePending) return;
+    if (ILing::achievementChimeBlocked()) {
+        // A PB already owns this celebration batch.
+        sAchievementChimePending = false;
+        return;
+    }
+    if (!gpMSound || gpApplication.mContext !=
+                            TApplication::CONTEXT_DIRECT_STAGE ||
+        !gpMarDirector || gpMarDirector->_260 == 0 ||
+        gpMarDirector->mCurState < TMarDirector::STATE_GAME_STARTING ||
+        gpMarDirector->mCurState == TMarDirector::STATE_STAGE_EXIT ||
+        gpMarDirector->mCurState == TMarDirector::STATE_STAGE_EXIT_2) {
+        return;
+    }
+    gpMSound->startSoundSystemSE(MSD_SE_SY_MENU_SHINE_LIGHT, 0, nullptr, 0);
+    sAchievementChimePending = false;
+}
+
+void updateAchievementBanner() {
+    if (sAchievementBannerFrames > 0) sAchievementBannerFrames--;
+    if (sAchievementBannerFrames != 0) {
+        updateAchievementChime();
+        return;
+    }
+
+    Records::AchievementId id;
+    if (Records::popUnlock(&id)) {
+        sAchievementBannerId = id;
+        sAchievementBannerFrames = 120;  // four seconds at Susamune's 30 fps
+        if (!sAchievementBatchActive) {
+            sAchievementBatchActive = true;
+            sAchievementChimePending = true;
+        }
+        updateAchievementChime();
+    } else {
+        sAchievementBatchActive = false;
+        sAchievementChimePending = false;
+    }
+}
+
+void drawAchievementBanner(Menu *menu) {
+    if (!menu || sAchievementBannerFrames == 0) return;
+    const Records::AchievementDesc *desc =
+        Records::achievement(sAchievementBannerId);
+    if (!desc) return;
+
+    const int labelSize = 12;
+    const char *tier = recordTierName(desc->tier);
+    const int w = 410;
+    const int h = 58;
+    const int x = (640 - w) / 2;
+    const int y = 96;  // below ILing's simultaneous PB banner
+    const int border = 4;
+    const Color outline = recordTierColor(desc->tier);
+
+    menu->fillBox(x, y, w, h, outline);
+    menu->fillBox(x + border, y + border, w - border * 2, h - border * 2,
+                  col(4, 6, 12, 225));
+    menu->drawText("ACHIEVEMENT UNLOCKED", x + 14, y + 10,
+                   labelSize, labelSize, cRowDim());
+    menu->drawText(tier,
+                   x + w - Menu::textWidth(tier, labelSize) - 14,
+                   y + 10, labelSize, labelSize, outline);
+    const char *name = recordText(desc->name, "Unnamed achievement");
+    const int nameSize = fittedRecordTextSize(name, w - 28, 18, 12);
+    menu->drawText(name, x + 14, y + 31,
+                   nameSize, nameSize, cRowSel());
+}
+
+}  // namespace
+
 // Static tab instances (constructed via placement new in Menu::Menu so their
 // vtables are set without relying on C++ static-init, which the injected mod
 // does not run).
 namespace {
+struct __attribute__((aligned(8))) MenuRuntime {
 #if ENABLE_DEBUG_WARPS
-u8 sPresetsBuf[sizeof(WarpPresetsTab)] __attribute__((aligned(8)));
-u8 sStagesBuf[sizeof(WarpStagesTab)]   __attribute__((aligned(8)));
+    u8 presets[sizeof(WarpPresetsTab)] __attribute__((aligned(8)));
+    u8 stages[sizeof(WarpStagesTab)] __attribute__((aligned(8)));
 #endif
-u8 sStarredBuf[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
-u8 sQolBuf[sizeof(CategorySettingsTab)]        __attribute__((aligned(8)));
-u8 sCosmeticBuf[sizeof(CategorySettingsTab)]   __attribute__((aligned(8)));
-u8 sMiscBuf[sizeof(CategorySettingsTab)]       __attribute__((aligned(8)));
-u8 sSavestateBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
-u8 sUiBuf[sizeof(CategorySettingsTab)]  __attribute__((aligned(8)));
-u8 sTimerBuf[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
-u8 sCreationBuf[sizeof(CreationTab)]             __attribute__((aligned(8)));
-u8 sILingBuf[sizeof(ILingTab)]                   __attribute__((aligned(8)));
-u8 sBindsBuf[sizeof(BindsTab)]                 __attribute__((aligned(8)));
+    u8 starred[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
+    u8 qol[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
+    u8 cosmetic[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
+    u8 misc[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
+    u8 savestate[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
+    u8 ui[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
+    u8 timer[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
+    u8 creation[sizeof(CreationTab)] __attribute__((aligned(8)));
+    u8 iling[sizeof(ILingTab)] __attribute__((aligned(8)));
+    u8 records[sizeof(RecordsTab)] __attribute__((aligned(8)));
+    u8 binds[sizeof(BindsTab)] __attribute__((aligned(8)));
+    u8 menu[sizeof(Menu)] __attribute__((aligned(8)));
+};
+
+MenuRuntime &sMenuRuntime = *reinterpret_cast<MenuRuntime *>(
+    SUSAMUNE_MEM2_MENU_RUNTIME_PPC_BASE);
+static_assert(sizeof(MenuRuntime) <= SUSAMUNE_MENU_RUNTIME_SIZE,
+              "menu state exceeds its MEM2 runtime window");
+
+#if ENABLE_DEBUG_WARPS
+#define sPresetsBuf sMenuRuntime.presets
+#define sStagesBuf sMenuRuntime.stages
+#endif
+#define sStarredBuf sMenuRuntime.starred
+#define sQolBuf sMenuRuntime.qol
+#define sCosmeticBuf sMenuRuntime.cosmetic
+#define sMiscBuf sMenuRuntime.misc
+#define sSavestateBuf sMenuRuntime.savestate
+#define sUiBuf sMenuRuntime.ui
+#define sTimerBuf sMenuRuntime.timer
+#define sCreationBuf sMenuRuntime.creation
+#define sILingBuf sMenuRuntime.iling
+#define sRecordsBuf sMenuRuntime.records
+#define sBindsBuf sMenuRuntime.binds
+#define sMenuBuf sMenuRuntime.menu
 }  // namespace
 
 Menu::Menu() : mText(gpSystemFont->mFont, " ") {
@@ -1418,6 +2089,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] =
         new (sCosmeticBuf) CategorySettingsTab(TITLE_COSMETIC, SETTING_CAT_COSMETIC);
     mTabs[mNumTabs++] = new (sCreationBuf) CreationTab();
+    mTabs[mNumTabs++] = new (sRecordsBuf) RecordsTab();
     mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
 }
 
@@ -1598,7 +2270,7 @@ __attribute__((noinline)) static void drawValueRow(
     if (selected && arrow)
         menu->drawText(">", x - 2, y, ROW_SZ, ROW_SZ, cAccent());
     if (starred)
-        menu->drawText("*", x + (arrow ? 8 : 4), y,
+        menu->drawText(SUSAMUNE_GLYPH_SHINED, x + (arrow ? 8 : 4), y,
                        ROW_SZ, ROW_SZ, cAccent());
     menu->drawText(name, x + (arrow ? 12 : 4) +
                          (starred ? (arrow ? 12 : 16) : 0), y,
@@ -1667,12 +2339,9 @@ void Menu::drawTabStrip(int x, int y, int w) {
     // one drawn and it always sits flush at stripX. Scrolling by pixels instead
     // leaves a ragged part-tab-wide gap on the left, since a tab that does not
     // fit entirely is skipped.
-    if (mTabFirst > mCurTab) {
-        mTabFirst = mCurTab;
-    }
-    if (mTabFirst < 0 || mTabFirst >= mNumTabs) {
-        mTabFirst = 0;
-    }
+    // Derive the window from the selected tab so navigation history and
+    // regional font widths cannot leave different tabs visible.
+    mTabFirst = 0;
     // Advance the window until the selected tab fits at its right end.
     while (mTabFirst < mCurTab) {
         int span = 0;
@@ -1718,6 +2387,8 @@ int Menu::tabWidth(int i) const {
 
 void Menu::update(TMarioGamePad *pad) {
     u32 rapid = pad->mButtons.mRapidInput;
+
+    updateAchievementBanner();
 
     // Toast bookkeeping runs whether or not the menu is open -- the save it
     // reports is normally started by the menu closing.
@@ -1770,6 +2441,7 @@ void Menu::draw(J2DOrthoGraph *ortho) {
         gCreationExtras.draw(this);
         WallkickDisplay::draw(this);
         drawToast();  // still visible with the menu closed
+        drawAchievementBanner(this);
         bgmStatsDraw(this);
         return;
     }
@@ -1777,6 +2449,7 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     if (mTabs[mCurTab]->fullScreen()) {
         mTabs[mCurTab]->draw(this, 0, 0, 640, 480);
         drawToast();
+        drawAchievementBanner(this);
         return;
     }
 
@@ -1787,7 +2460,8 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     fillBox(PANEL_X, PANEL_Y, PANEL_W, 3, cAccent());
 
     // Title + accent underline.
-    drawText("susamune", PANEL_X + PAD - 2, PANEL_Y + 12, TITLE_SZ, TITLE_SZ, cTitle());
+    drawText("susamune", PANEL_X + PAD - 2, PANEL_Y + 12,
+             TITLE_SZ, TITLE_SZ, cTitle());
     fillBox(PANEL_X + PAD, PANEL_Y + 12 + TITLE_SZ + 1, 150, 2, cAccent());
 
     drawTabStrip(PANEL_X + PAD, TAB_STRIP_Y, PANEL_W - PAD * 2);
@@ -1802,10 +2476,10 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     // it is user-configurable (and re-bindable to something unguessable).
     {
         const char *hint = mTabs[mCurTab]->favoriteHint()
-            ? SUSAMUNE_GLYPH_L "/" SUSAMUNE_GLYPH_R " Tabs  "
+            ? SUSAMUNE_GLYPH_L SUSAMUNE_GLYPH_SLASH SUSAMUNE_GLYPH_R " Tabs  "
               SUSAMUNE_GLYPH_C " Move  " SUSAMUNE_GLYPH_A " Select  "
-              SUSAMUNE_GLYPH_X " Star  "
-            : SUSAMUNE_GLYPH_L "/" SUSAMUNE_GLYPH_R " Tabs    "
+              SUSAMUNE_GLYPH_X " Shine  "
+            : SUSAMUNE_GLYPH_L SUSAMUNE_GLYPH_SLASH SUSAMUNE_GLYPH_R " Tabs    "
               SUSAMUNE_GLYPH_C " Move    "
               SUSAMUNE_GLYPH_A " Select    ";
         int hx = PANEL_X + PAD;
@@ -1821,6 +2495,7 @@ void Menu::draw(J2DOrthoGraph *ortho) {
 
     // Last, so it sits above the panel rather than under the backdrop.
     drawToast();
+    drawAchievementBanner(this);
     bgmStatsDraw(this);
 }
 
@@ -1829,9 +2504,5 @@ void Menu::draw(J2DOrthoGraph *ortho) {
 // =====================================================================
 
 Menu *gMenu = nullptr;
-
-namespace {
-u8 sMenuBuf[sizeof(Menu)] __attribute__((aligned(8)));
-}  // namespace
 
 void menuInit() { gMenu = new (sMenuBuf) Menu(); }

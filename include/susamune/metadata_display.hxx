@@ -80,6 +80,6 @@ private:
     u8                         mFormatLength;
 };
 
-extern MetadataDisplay gMetadataDisplay;
+extern MetadataDisplay &gMetadataDisplay;
 
 #endif  // _SUSAMUNE_METADATA_DISPLAY_HXX

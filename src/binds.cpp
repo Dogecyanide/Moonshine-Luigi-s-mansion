@@ -7,6 +7,7 @@
 // =====================================================================
 
 #include "susamune/binds.hxx"
+#include "susamune/mem2_map.h"
 
 #include "JSystem/JUtility/JUTGamePad.hxx"
 #include "susamune/glyphs.hxx"
@@ -93,7 +94,10 @@ int popCount(u16 v) {
 
 }  // namespace
 
-Binds gBinds;
+Binds &gBinds = *reinterpret_cast<Binds *>(
+    SUSAMUNE_MEM2_CONFIG_RUNTIME_PPC_BASE + SUSAMUNE_CONFIG_BINDS_OFFSET);
+static_assert(sizeof(Binds) <= SUSAMUNE_CONFIG_BINDS_SIZE,
+              "binds exceed their MEM2 runtime slot");
 
 void Binds::resetDefaults() {
     for (int i = 0; i < BIND_COUNT; i++) {

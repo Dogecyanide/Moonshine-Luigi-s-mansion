@@ -64,6 +64,6 @@ private:
 };
 static_assert(sizeof(InputDisplay) == 136, "input display state layout changed");
 
-extern InputDisplay gInputDisplay;
+extern InputDisplay &gInputDisplay;
 
 #endif  // _SUSAMUNE_INPUT_DISPLAY_HXX

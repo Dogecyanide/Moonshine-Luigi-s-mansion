@@ -25,6 +25,8 @@
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
 #include "susamune/qft_display.hxx"
+#include "susamune/records.hxx"
+#include "susamune/records_persistence.hxx"
 #include "susamune/pattern_selector.hxx"
 #include "susamune/warp_wheel.hxx"
 #include "susamune/visible_goop.hxx"
@@ -66,6 +68,8 @@ extern "C" void onAppInit(TApplication* app) {
     gSettings.init();
     gQFTTimer.init();
     gAttemptCounter.init();
+    Records::init();
+    RecordsPersistence::init();
     ILing::init();
 #if ENABLE_MEM_DIAGNOSTICS
     memDiagnosticsInit();
@@ -122,6 +126,8 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
 
 extern "C" void onSetup(TMarDirector* director) {
     static bool inited = false;
+    static bool recordsSceneKnown = false;
+    static Records::Area recordsArea = Records::AREA_INVALID;
 
     // TPollutionManager publishes itself through gpPollution but its retail
     // destructor never clears that global. Stages without a pollution manager
@@ -131,6 +137,14 @@ extern "C" void onSetup(TMarDirector* director) {
     director->setupObjects();
     ILing::onStageSetup();
 
+    const Records::Area nextRecordsArea =
+        Records::classifyArea(director->mAreaID);
+    if (recordsSceneKnown && nextRecordsArea != recordsArea) {
+        RecordsPersistence::checkpoint();
+    }
+    recordsSceneKnown = true;
+    recordsArea = nextRecordsArea;
+
     // Runs on every stage load, so this must stay above the once-only guard.
     featuresOnStageLoad();
     actionsOnStageLoad();
@@ -138,6 +152,7 @@ extern "C" void onSetup(TMarDirector* director) {
     gQFTTimer.onStageSetup(director);
     gAttemptCounter.onStageSetup(director);
     gCreationExtras.onStageSetup();
+    Records::onStageSetup(director->mAreaID, director->mEpisodeID);
     WallkickDisplay::onStageSetup();
 #if ENABLE_MEM_DIAGNOSTICS
     memDiagnosticsOnStageSetup();
@@ -160,6 +175,15 @@ extern "C" void onSetup(TMarDirector* director) {
 
 
 extern "C" s32 onUpdate(JDrama::TDirector* director) {
+    static bool recordsStageContext = false;
+    const bool stageContext =
+        gpApplication.mContext == TApplication::CONTEXT_DIRECT_STAGE;
+    if (recordsStageContext && !stageContext) {
+        Records::onStageExit();
+        RecordsPersistence::checkpoint();
+    }
+    recordsStageContext = stageContext;
+
 #if IS_EMULATOR
     static bool persistenceReady = false;
     if (!persistenceReady && gSettings.finishInit()) {
@@ -220,7 +244,9 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
 #endif
 
     gQFTTimer.update();
+    Records::update(creationEditing);
     ILing::update();
+    RecordsPersistence::update();
     if (!creationEditing)
         gAttemptCounter.update();
 
