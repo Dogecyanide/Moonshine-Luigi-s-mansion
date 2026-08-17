@@ -25,6 +25,7 @@ def check_shared_layout():
         "SUSAMUNE_MOD_BASE_US": patches.base_addr["us"],
         "SUSAMUNE_MOD_BASE_PAL": patches.base_addr["pal"],
         "SUSAMUNE_MOD_REGION_SIZE": patches.mod_region_size,
+        "SUSAMUNE_MOD_BLOB_MAX_SIZE": patches.mod_blob_max_size,
         "SUSAMUNE_SCRATCH": patches.mod_scratch_size,
         "SUSAMUNE_DEBUG_STACK_SIZE": patches.debug_stack_size,
     }

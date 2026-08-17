@@ -29,6 +29,7 @@
 #include "susamune/records.hxx"
 #include "susamune/records_persistence.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/stage_loader.hxx"
 #include "susamune/susamune_cfg.h"
 #include "susamune/wallkick_display.hxx"
 #include "susamune/warp_wheel.hxx"
@@ -166,6 +167,9 @@ public:
     // the menu's input grab and stage-freeze behaviour.
     virtual bool fullScreen() const { return false; }
     virtual bool favoriteHint() const { return false; }
+    virtual void focus() {}
+    // Protected PB saves may need to route through a nested Ghosts page.
+    virtual bool beginProtectedPBSave(Menu *, u32) { return false; }
 
 protected:
     void drawScrollHints(Menu *menu, int x, int y, int w, int h, int start, int end,
@@ -343,6 +347,7 @@ public:
                 activateOption(menu, +1);
             } else {
                 const int entry = selectedEntry();
+                StageLoader::cancel();
                 if (WarpWheel::requestILStart(entry)) {
                     menu->hide();
                 } else {
@@ -680,7 +685,7 @@ public:
         return (held & (JUTGamePad::A | JUTGamePad::X)) != 0;
     }
 
-    bool beginProtectedPBSave(Menu *menu, u32 token) {
+    bool beginProtectedPBSave(Menu *menu, u32 token) override {
         char name[SUSAMUNE_GHOST_NAME_SIZE];
         u32 identity = 0;
         if (token == 0 || !Ghost::hasUnsavedPBToken(token) ||
@@ -2325,7 +2330,7 @@ private:
         drawValueRow(menu, x, y + ROW_H * 4, w, "Unlock popup & chime",
                      gSettings.valueLabel(SETTING_ACHIEVEMENT_NOTIFICATIONS),
                      mSel == 4, false, true);
-        menu->drawText("V2.0.0 - Ghosts of Delfino",
+        menu->drawText("V2.1.0 Pre-Release 1 \"Hot Streak\"",
                        x + 4, y + h - 44, FOOT_SZ, FOOT_SZ, cRowDim());
         menu->drawText(storageStatus(), x + 4, y + h - 24,
                        FOOT_SZ, FOOT_SZ,
@@ -2719,19 +2724,19 @@ private:
 namespace {
 
 const char kCategoryTitles[] =
-    "Gameplay\0Savestate\0Practice\0Cosmetic\0Display\0Timer\0Shined";
+    "Gameplay\0Savestate\0Practice\0Cosmetics\0Display\0Timer\0Shined";
 
 enum CategoryTitleOffset {
     TITLE_QOL       = 0,
     TITLE_SAVESTATE = TITLE_QOL + sizeof("Gameplay"),
     TITLE_MISC      = TITLE_SAVESTATE + sizeof("Savestate"),
     TITLE_COSMETIC  = TITLE_MISC + sizeof("Practice"),
-    TITLE_UI        = TITLE_COSMETIC + sizeof("Cosmetic"),
+    TITLE_UI        = TITLE_COSMETIC + sizeof("Cosmetics"),
     TITLE_TIMER     = TITLE_UI + sizeof("Display"),
     TITLE_STARRED   = TITLE_TIMER + sizeof("Timer"),
 };
 
-static_assert(sizeof(kCategoryTitles) == 58, "category title offsets changed");
+static_assert(sizeof(kCategoryTitles) == 59, "category title offsets changed");
 static_assert(SETTING_COUNT <= 0x100, "setting ids no longer fit in a byte");
 static_assert(SETTING_CAT_COUNT <= 0x100, "setting categories no longer fit in a byte");
 const u8 kStarredCategory = SETTING_CAT_COUNT;
@@ -3290,7 +3295,7 @@ public:
         }
         if (rapid & TMarioGamePad::A) {
             gBinds.beginRecord((BindId)mSel);
-        } else if (rapid & TMarioGamePad::B) {
+        } else if (rapid & TMarioGamePad::X) {
             gBinds.set((BindId)mSel, 0);  // clear
         }
     }
@@ -3343,13 +3348,488 @@ public:
         menu->drawText(gBinds.recording()
                            ? "Release a button to set, or " SUSAMUNE_GLYPH_C " to cancel"
                            : SUSAMUNE_GLYPH_A " Set bind    "
-                             SUSAMUNE_GLYPH_B " Clear",
+                             SUSAMUNE_GLYPH_X " Clear",
                        x + 4, hintY, FOOT_SZ, FOOT_SZ, cFooter());
     }
 
 private:
     int mSel;
 };
+
+// ---------------------------------------------------------------------
+// Stage Loader -- the IL catalogue with an optional repeated-finish session.
+// ---------------------------------------------------------------------
+class StageLoaderTab final : public MenuTab {
+public:
+    StageLoaderTab()
+        : mSel(0), mGoal(5), mTargetQf(-1), mStreaking(false),
+          mEditingTime(false), mTimeCursor(0), mTimePage(1),
+          mTimeLength(0), mTimeUpper(false) {
+        mTimeText[0] = '\0';
+    }
+
+    const char *title() const override { return "Stage Loader"; }
+    bool grabsInput() const override { return mEditingTime; }
+    bool suppressesBinds() const override {
+        if (mEditingTime) return true;
+        const u16 held = JUTGamePad::mPadStatus[0].mButton;
+        return (held & (JUTGamePad::A | JUTGamePad::X)) != 0;
+    }
+    bool fullScreen() const override { return mEditingTime; }
+
+    void update(Menu *menu, TMarioGamePad *pad) override {
+        if (mEditingTime) {
+            updateTimeEditor(menu, pad);
+            return;
+        }
+
+        const int count = OPTION_COUNT + ILing::count();
+        const u32 rapid = menu->navigationInput(pad);
+        if (rapid & TMarioGamePad::CSTICK_UP) {
+            mSel = wrap(mSel - 1, count);
+        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+            mSel = wrap(mSel + 1, count);
+        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            adjustOption(-1);
+        } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
+            adjustOption(+1);
+        }
+
+        if ((rapid & TMarioGamePad::X) && mSel == OPTION_TARGET &&
+            mStreaking) {
+            mTargetQf = -1;
+            menu->toast("Any finish counts");
+            return;
+        }
+        if (!(rapid & TMarioGamePad::A)) return;
+
+        if (mSel == OPTION_MODE) {
+            toggleMode();
+            return;
+        }
+        if (mSel == OPTION_FINISHES) {
+            if (mStreaking) adjustGoal(+1);
+            return;
+        }
+        if (mSel == OPTION_TARGET) {
+            if (mStreaking) beginTimeEditor();
+            return;
+        }
+
+        const int entry = selectedEntry();
+        bool started;
+        if (mStreaking) {
+            started = StageLoader::start(entry, mGoal, mTargetQf);
+        } else {
+            StageLoader::cancel();
+            started = WarpWheel::requestILStart(entry);
+        }
+        if (started) {
+            menu->hide();
+        } else {
+            menu->toast("Warps disabled");
+        }
+    }
+
+    void draw(Menu *menu, int x, int y, int w, int h) override {
+        if (mEditingTime) {
+            drawCreationKeyboard(
+                menu, "Set streak target time",
+                mTimeText[0] ? mTimeText : "(blank = any finish)",
+                mTimePage, mTimeUpper, mTimeCursor);
+            return;
+        }
+
+        const int entries = ILing::count();
+        const int listH = h - ROW_H;
+        const int maxRows = listH / ROW_H;
+        const int rows = menuRowCount(entries);
+        const int start = listScrollStart(menuRowForSelection(mSel), rows,
+                                          maxRows);
+        int end = start + maxRows;
+        if (end > rows) end = rows;
+
+        char goal[8];
+        char target[24];
+        snprintf(goal, sizeof(goal), "%u", (unsigned)mGoal);
+        if (mTargetQf < 0) {
+            strcpy(target, "Any finish");
+        } else {
+            ILing::formatTime(mTargetQf, target, sizeof(target));
+        }
+
+        int ry = y;
+        int row = 0;
+        for (int option = 0; option < OPTION_COUNT; option++, row++) {
+            if (row < start || row >= end) continue;
+            const char *name = option == OPTION_MODE ? "Mode"
+                               : option == OPTION_FINISHES ? "Finishes"
+                                                          : "Target time";
+            const char *value = option == OPTION_MODE
+                                    ? (mStreaking ? "Streaking"
+                                                  : "Stageloader")
+                                : !mStreaking ? "--"
+                                : option == OPTION_FINISHES ? goal : target;
+            drawValueRow(menu, x, ry, w, name, value, mSel == option,
+                         false, true);
+            ry += ROW_H;
+        }
+
+        for (int entry = 0; entry < entries && row < end; entry++) {
+            if (ILing::beginsGroup(entry)) {
+                if (row >= start) {
+                    drawSectionHeader(menu, x, ry, w,
+                                      ILing::groupName(entry));
+                    ry += ROW_H;
+                }
+                row++;
+                if (row >= end) break;
+            }
+            if (row < start) {
+                row++;
+                continue;
+            }
+            drawValueRow(menu, x, ry, w, ILing::label(entry), nullptr,
+                         !isOption() && selectedEntry() == entry,
+                         false, true);
+            ry += ROW_H;
+            row++;
+        }
+
+        drawScrollHints(menu, x, y, w, listH, start, end, rows);
+        const char *hint = isOption()
+            ? SUSAMUNE_GLYPH_A " Change   " SUSAMUNE_GLYPH_X
+              " Clear time   " SUSAMUNE_GLYPH_C " U"
+              SUSAMUNE_GLYPH_SLASH "D Select"
+            : SUSAMUNE_GLYPH_A " Start   " SUSAMUNE_GLYPH_C " U"
+              SUSAMUNE_GLYPH_SLASH "D Select";
+        menu->drawText(hint, x + 4, y + h - FOOT_SZ,
+                       FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+private:
+    enum Option {
+        OPTION_MODE,
+        OPTION_FINISHES,
+        OPTION_TARGET,
+        OPTION_COUNT,
+    };
+
+    bool isOption() const { return mSel < OPTION_COUNT; }
+    int selectedEntry() const { return mSel - OPTION_COUNT; }
+
+    void adjustOption(int direction) {
+        if (mSel == OPTION_MODE) {
+            toggleMode();
+        } else if (mSel == OPTION_FINISHES && mStreaking) {
+            adjustGoal(direction);
+        }
+    }
+
+    void toggleMode() {
+        mStreaking = !mStreaking;
+        if (!mStreaking) StageLoader::cancel();
+    }
+
+    void adjustGoal(int direction) {
+        int next = (int)mGoal + direction;
+        if (next < 1) next = 99;
+        if (next > 99) next = 1;
+        mGoal = (u16)next;
+    }
+
+    void beginTimeEditor() {
+        mTimeText[0] = '\0';
+        if (mTargetQf >= 0) {
+            ILing::formatTime(mTargetQf, mTimeText, sizeof(mTimeText));
+        }
+        mTimeLength = (u8)strlen(mTimeText);
+        mTimeCursor = 0;
+        mTimePage = 1;
+        mTimeUpper = false;
+        mTimeInput.begin(keyboardMask());
+        mEditingTime = true;
+    }
+
+    void updateTimeEditor(Menu *menu, TMarioGamePad *) {
+        const u16 pressed = mTimeInput.update();
+        if (pressed & JUTGamePad::START) {
+            if (JUTGamePad::mPadStatus[0].mButton & JUTGamePad::X) {
+                mEditingTime = false;
+                return;
+            }
+            s32 parsed;
+            if (!parseTarget(mTimeText, &parsed)) {
+                menu->toast("Use M:SS.mmm, or leave blank");
+                return;
+            }
+            mTargetQf = parsed;
+            mEditingTime = false;
+            menu->toast(parsed < 0 ? "Any finish counts"
+                                   : "Target time set");
+            return;
+        }
+        if (pressed & JUTGamePad::Z) {
+            mTimeLength = 0;
+            mTimeText[0] = '\0';
+            return;
+        }
+        updateTimeKeyboard(pressed);
+    }
+
+    static u16 keyboardMask() {
+        return JUTGamePad::A | JUTGamePad::B | JUTGamePad::X |
+               JUTGamePad::Y | JUTGamePad::Z | JUTGamePad::START |
+               JUTGamePad::L | JUTGamePad::R |
+               JUTGamePad::DPAD_LEFT | JUTGamePad::DPAD_RIGHT |
+               JUTGamePad::DPAD_UP | JUTGamePad::DPAD_DOWN;
+    }
+
+    void updateTimeKeyboard(u16 pressed) {
+        const int count = 32;
+        if (pressed & JUTGamePad::DPAD_LEFT)
+            mTimeCursor = (u8)((mTimeCursor + count - 1) % count);
+        else if (pressed & JUTGamePad::DPAD_RIGHT)
+            mTimeCursor = (u8)((mTimeCursor + 1) % count);
+        else if (pressed & JUTGamePad::DPAD_UP)
+            mTimeCursor = (u8)((mTimeCursor + count - 8) % count);
+        else if (pressed & JUTGamePad::DPAD_DOWN)
+            mTimeCursor = (u8)((mTimeCursor + 8) % count);
+        if (pressed & (JUTGamePad::L | JUTGamePad::R)) {
+            mTimePage ^= 1;
+            mTimeCursor = 0;
+        }
+        if (pressed & JUTGamePad::Y) mTimeUpper = !mTimeUpper;
+        if ((pressed & JUTGamePad::B) && mTimeLength) {
+            mTimeText[--mTimeLength] = '\0';
+        }
+        if ((pressed & JUTGamePad::X) &&
+            mTimeLength + 1 < sizeof(mTimeText)) {
+            mTimeText[mTimeLength++] = ' ';
+            mTimeText[mTimeLength] = '\0';
+        }
+        if ((pressed & JUTGamePad::A) &&
+            mTimeLength + 1 < sizeof(mTimeText)) {
+            const char *characters = mTimePage ? gCreationSymbols
+                                              : mTimeUpper
+                                                    ? gCreationLettersUpper
+                                                    : gCreationLettersLower;
+            mTimeText[mTimeLength++] = characters[mTimeCursor];
+            mTimeText[mTimeLength] = '\0';
+        }
+    }
+
+    static bool parseTarget(const char *text, s32 *out) {
+        if (!text[0]) {
+            *out = -1;
+            return true;
+        }
+
+        const char *p = text;
+        u64 first = 0;
+        int digits = 0;
+        while (*p >= '0' && *p <= '9') {
+            first = first * 10 + (u64)(*p++ - '0');
+            digits++;
+        }
+        if (!digits) return false;
+
+        u64 minutes = 0;
+        u64 seconds = first;
+        bool hasColon = false;
+        if (*p == ':') {
+            hasColon = true;
+            minutes = first;
+            seconds = 0;
+            digits = 0;
+            p++;
+            while (*p >= '0' && *p <= '9') {
+                seconds = seconds * 10 + (u64)(*p++ - '0');
+                digits++;
+            }
+            if (!digits || seconds >= 60) return false;
+        }
+
+        u64 fraction = 0;
+        int fractionDigits = 0;
+        if (*p == '.') {
+            p++;
+            while (*p >= '0' && *p <= '9' && fractionDigits < 3) {
+                fraction = fraction * 10 + (u64)(*p++ - '0');
+                fractionDigits++;
+            }
+            if (!fractionDigits || (*p >= '0' && *p <= '9')) return false;
+            if (fractionDigits == 1) fraction *= 100;
+            if (fractionDigits == 2) fraction *= 10;
+        }
+        if (*p) return false;
+        if (minutes > 999 || (!hasColon && seconds > 59999)) return false;
+
+        const u64 millis = (minutes * 60 + seconds) * 1000 + fraction;
+        const u64 qf = (((millis + 1) * 120) - 1) / 1001;
+        // ILing::formatTime currently multiplies qf by 1001 in signed s32.
+        if (qf > 0x7FFFFFFFu / 1001u) return false;
+        *out = (s32)qf;
+        return true;
+    }
+
+    static int menuRowForEntry(int entry) {
+        int row = OPTION_COUNT + entry;
+        for (int i = 0; i <= entry; i++) {
+            if (ILing::beginsGroup(i)) row++;
+        }
+        return row;
+    }
+
+    static int menuRowCount(int entries) {
+        return menuRowForEntry(entries - 1) + 1;
+    }
+
+    static int menuRowForSelection(int selection) {
+        return selection < OPTION_COUNT
+                   ? selection
+                   : menuRowForEntry(selection - OPTION_COUNT);
+    }
+
+    int mSel;
+    u16 mGoal;
+    s32 mTargetQf;
+    bool mStreaking;
+    bool mEditingTime;
+    u8 mTimeCursor;
+    u8 mTimePage;
+    u8 mTimeLength;
+    bool mTimeUpper;
+    char mTimeText[16];
+    RawPromptInput mTimeInput;
+};
+
+class ILSegmentsTab final : public MenuTab {
+public:
+    const char *title() const override { return "IL Segments"; }
+    void update(Menu *, TMarioGamePad *) override {}
+    void draw(Menu *menu, int x, int y, int w, int) override {
+        const char *line = "Coming in a later V2.1 pre-release";
+        menu->drawText(line, x + (w - Menu::textWidth(line, ROW_SZ)) / 2,
+                       y + 72, ROW_SZ, ROW_SZ, cRowDim());
+    }
+};
+
+// The top level stays small while existing stateful pages remain persistent.
+class NestedMenuTab final : public MenuTab {
+public:
+    NestedMenuTab(const char *name, MenuTab *const *children, int count)
+        : mName(name), mCount((u8)count), mSel(0), mPage(-1) {
+        for (int i = 0; i < MAX_CHILDREN; i++) {
+            mChildren[i] = i < count ? children[i] : nullptr;
+        }
+        mNavInput.begin(JUTGamePad::A);
+    }
+
+    const char *title() const override { return mName; }
+    bool grabsInput() const override {
+        return current() && current()->grabsInput();
+    }
+    bool suppressesBinds() const override {
+        MenuTab *child = current();
+        const u16 held = JUTGamePad::mPadStatus[0].mButton;
+        if (!child) return (held & JUTGamePad::A) != 0;
+        if (!child->grabsInput() && (held & JUTGamePad::B)) return true;
+        return child->suppressesBinds();
+    }
+    bool fullScreen() const override {
+        return current() && current()->fullScreen();
+    }
+    bool favoriteHint() const override {
+        return current() && current()->favoriteHint();
+    }
+    void focus() override {
+        mNavInput.begin(current() ? JUTGamePad::B : JUTGamePad::A);
+    }
+
+    bool beginProtectedPBSave(Menu *menu, u32 token) override {
+        for (int i = 0; i < mCount; i++) {
+            if (!mChildren[i]->beginProtectedPBSave(menu, token)) continue;
+            mSel = (u8)i;
+            mPage = (s8)i;
+            mNavInput.begin(JUTGamePad::B);
+            return true;
+        }
+        return false;
+    }
+
+    void update(Menu *menu, TMarioGamePad *pad) override {
+        MenuTab *child = current();
+        if (child) {
+            if (child->grabsInput()) {
+                // A raw modal may close on B. Require a fresh release before
+                // the same button can also leave its nested page.
+                mNavInput.begin(JUTGamePad::B);
+                child->update(menu, pad);
+                return;
+            }
+            if (mNavInput.update() & JUTGamePad::B) {
+                mPage = -1;
+                mNavInput.begin(JUTGamePad::A);
+                return;
+            }
+            child->update(menu, pad);
+            return;
+        }
+
+        const u32 rapid = menu->navigationInput(pad);
+        if (rapid & TMarioGamePad::CSTICK_UP) {
+            mSel = (u8)wrap(mSel - 1, mCount);
+        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+            mSel = (u8)wrap(mSel + 1, mCount);
+        }
+        if (mNavInput.update() & JUTGamePad::A) {
+            mPage = (s8)mSel;
+            mNavInput.begin(JUTGamePad::B);
+        }
+    }
+
+    void draw(Menu *menu, int x, int y, int w, int h) override {
+        MenuTab *child = current();
+        if (!child) {
+            int ry = y;
+            for (int i = 0; i < mCount; i++) {
+                drawValueRow(menu, x, ry, w, mChildren[i]->title(), nullptr,
+                             i == mSel, false, true);
+                ry += ROW_H;
+            }
+            return;
+        }
+
+        if (child->fullScreen()) {
+            child->draw(menu, x, y, w, h);
+            return;
+        }
+
+        child->draw(menu, x, y, w, h - ROW_H);
+        char hint[40];
+        snprintf(hint, sizeof(hint), SUSAMUNE_GLYPH_B " Back to %s", mName);
+        menu->drawText(hint, x + 4, y + h - FOOT_SZ,
+                       FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+private:
+    enum { MAX_CHILDREN = 8 };
+
+    MenuTab *current() const {
+        return mPage >= 0 && mPage < mCount ? mChildren[mPage] : nullptr;
+    }
+
+    const char *mName;
+    MenuTab *mChildren[MAX_CHILDREN];
+    u8 mCount;
+    u8 mSel;
+    s8 mPage;
+    RawPromptInput mNavInput;
+};
+
+static_assert(sizeof(NestedMenuTab) <= 64,
+              "nested menu router grew unexpectedly");
 
 // =====================================================================
 // Menu
@@ -3482,6 +3962,10 @@ struct __attribute__((aligned(8))) MenuRuntime {
     u8 ghosts[sizeof(GhostsTab)] __attribute__((aligned(8)));
     u8 records[sizeof(RecordsTab)] __attribute__((aligned(8)));
     u8 binds[sizeof(BindsTab)] __attribute__((aligned(8)));
+    u8 stageLoader[sizeof(StageLoaderTab)] __attribute__((aligned(8)));
+    u8 ilSegments[sizeof(ILSegmentsTab)] __attribute__((aligned(8)));
+    u8 settingsHub[sizeof(NestedMenuTab)] __attribute__((aligned(8)));
+    u8 ilsHub[sizeof(NestedMenuTab)] __attribute__((aligned(8)));
     u8 menu[sizeof(Menu)] __attribute__((aligned(8)));
 };
 
@@ -3506,6 +3990,10 @@ static_assert(sizeof(MenuRuntime) <= SUSAMUNE_MENU_RUNTIME_SIZE,
 #define sGhostsBuf sMenuRuntime.ghosts
 #define sRecordsBuf sMenuRuntime.records
 #define sBindsBuf sMenuRuntime.binds
+#define sStageLoaderBuf sMenuRuntime.stageLoader
+#define sILSegmentsBuf sMenuRuntime.ilSegments
+#define sSettingsHubBuf sMenuRuntime.settingsHub
+#define sILsHubBuf sMenuRuntime.ilsHub
 #define sMenuBuf sMenuRuntime.menu
 }  // namespace
 
@@ -3554,31 +4042,58 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sPresetsBuf) WarpPresetsTab();
     mTabs[mNumTabs++] = new (sStagesBuf) WarpStagesTab();
 #endif
+    MenuTab *starred =
+        new (sStarredBuf) CategorySettingsTab(TITLE_STARRED,
+                                              kStarredCategory);
+    MenuTab *practice =
+        new (sMiscBuf) CategorySettingsTab(TITLE_MISC, SETTING_CAT_MISC);
+    MenuTab *savestate =
+        new (sSavestateBuf) CategorySettingsTab(TITLE_SAVESTATE,
+                                                SETTING_CAT_SAVESTATE);
+    MenuTab *timer =
+        new (sTimerBuf) CategorySettingsTab(TITLE_TIMER, SETTING_CAT_TIMER);
+    MenuTab *gameplay =
+        new (sQolBuf) CategorySettingsTab(TITLE_QOL, SETTING_CAT_QOL);
+    MenuTab *display =
+        new (sUiBuf) CategorySettingsTab(TITLE_UI, SETTING_CAT_UI);
+    MenuTab *cosmetics =
+        new (sCosmeticBuf) CategorySettingsTab(TITLE_COSMETIC,
+                                               SETTING_CAT_COSMETIC);
+    MenuTab *creation = new (sCreationBuf) CreationTab();
+    MenuTab *binds = new (sBindsBuf) BindsTab();
+    MenuTab *iling = new (sILingBuf) ILingTab();
+    MenuTab *ghosts = new (sGhostsBuf) GhostsTab();
+    MenuTab *stageLoader = new (sStageLoaderBuf) StageLoaderTab();
+    MenuTab *segments = new (sILSegmentsBuf) ILSegmentsTab();
+    MenuTab *records = new (sRecordsBuf) RecordsTab();
+
+    MenuTab *settingsChildren[] = {
+        practice, savestate, timer, gameplay,
+        display, cosmetics, binds,
+    };
+    MenuTab *ilChildren[] = {
+        iling, ghosts, stageLoader, segments,
+    };
+
+    mTabs[mNumTabs++] = starred;
     mTabs[mNumTabs++] =
-        new (sStarredBuf) CategorySettingsTab(TITLE_STARRED, kStarredCategory);
-    mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab(TITLE_MISC, SETTING_CAT_MISC);
-    mTabs[mNumTabs++] = new (sILingBuf) ILingTab();
-    mTabs[mNumTabs++] = new (sGhostsBuf) GhostsTab();
-    mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab(TITLE_TIMER, SETTING_CAT_TIMER);
+        new (sSettingsHubBuf) NestedMenuTab(
+            "Settings", settingsChildren,
+            sizeof(settingsChildren) / sizeof(settingsChildren[0]));
     mTabs[mNumTabs++] =
-        new (sSavestateBuf) CategorySettingsTab(TITLE_SAVESTATE, SETTING_CAT_SAVESTATE);
-    mTabs[mNumTabs++] = new (sQolBuf) CategorySettingsTab(TITLE_QOL, SETTING_CAT_QOL);
-    mTabs[mNumTabs++] = new (sUiBuf) CategorySettingsTab(TITLE_UI, SETTING_CAT_UI);
-    mTabs[mNumTabs++] =
-        new (sCosmeticBuf) CategorySettingsTab(TITLE_COSMETIC, SETTING_CAT_COSMETIC);
-    mTabs[mNumTabs++] = new (sCreationBuf) CreationTab();
-    mTabs[mNumTabs++] = new (sRecordsBuf) RecordsTab();
-    mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
+        new (sILsHubBuf) NestedMenuTab(
+            "ILs", ilChildren, sizeof(ilChildren) / sizeof(ilChildren[0]));
+    mTabs[mNumTabs++] = creation;
+    mTabs[mNumTabs++] = records;
 }
 
 bool Menu::openGhostPBSave(u32 token) {
     for (int i = 0; i < mNumTabs; i++) {
-        if (strcmp(mTabs[i]->title(), "Ghosts") != 0) continue;
-        GhostsTab *ghosts = static_cast<GhostsTab *>(mTabs[i]);
-        if (!ghosts->beginProtectedPBSave(this, token)) return false;
+        if (!mTabs[i]->beginProtectedPBSave(this, token)) continue;
         mCurTab = i;
         mTabFirst = 0;
         mCRepeatFrames = 0;
+        mTabs[i]->focus();
         mShown = true;
         return true;
     }
@@ -3694,6 +4209,7 @@ void Menu::strokePoly(const s16 *xy, int n, Color color) {
 void Menu::switchTab(int dir) {
     mCurTab = wrap(mCurTab + dir, mNumTabs);
     mCRepeatFrames = 0;
+    mTabs[mCurTab]->focus();
 }
 
 u32 Menu::navigationInput(TMarioGamePad *pad) {
@@ -3919,6 +4435,7 @@ void Menu::update(TMarioGamePad *pad) {
 
     if (gBinds.wasPressed(BIND_MENU_TOGGLE)) {
         mShown = !mShown;
+        if (mShown) mTabs[mCurTab]->focus();
         // Closing with edits pending writes them back to the SD card. Gated on
         // dirty() so merely opening and closing the menu never touches storage.
         if (!mShown && (gSettings.dirty() || gBinds.dirty() ||

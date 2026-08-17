@@ -21,6 +21,7 @@
 #include "susamune/qft_timer.hxx"
 #include "susamune/records.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/stage_loader.hxx"
 #include "susamune/susamune_cfg.h"
 #if IS_EMULATOR
 #include "susamune/emulator_persistence.hxx"
@@ -1092,6 +1093,7 @@ TMapObjBase *findCoverFruit() {
 }
 
 void clearAttempt() {
+    const bool hadAttempt = sRunning;
     restorePlazaSetupState();
     restorePlazaStoryFlags();
     restoreOverlayFlags(isPlazaEntry(sSelectedEntry));
@@ -1114,6 +1116,7 @@ void clearAttempt() {
     sSelectedEntry = -1;
     sRocketEquipPending = false;
     Records::onILAttemptEnded();
+    if (hadAttempt) StageLoader::onILAttemptEnded();
 }
 
 void armAttempt(const Entry &entry, int selected) {
@@ -1219,6 +1222,7 @@ void recordResult(int entry, s32 qf) {
                               : -1;
     Records::onILResult(entry, (u8)pbSlot(entry), qf, igtCentis,
                         sRecordsEligible);
+    StageLoader::onILResult(entry, qf, sRecordsEligible);
     recordPB(entry, qf);
 }
 
@@ -1472,6 +1476,7 @@ bool copyWarpDiscardName(int entry, char *out, u32 size, u32 *outToken) {
 }
 
 void cancelWarpStart() {
+    StageLoader::onILWarpCancelled();
     clearAttempt();
     restoreWarpStartSnapshot();
 }
@@ -1734,6 +1739,7 @@ void update() {
                                   ? sSelectedEntry
                                   : entryForStartScene(scene);
             Records::onILAttemptStarted(entry);
+            if (entry >= 0) StageLoader::onILAttemptStarted(entry);
             if (!sRecordsEligible) Records::invalidateAttempt();
         } else {
             // A child reset becomes an independent Secret/Reds attempt. Read
@@ -1746,6 +1752,7 @@ void update() {
                 armAttempt(kEntries[entry], entry);
                 sAttemptSerial = serial;
                 sAttemptReady = true;
+                StageLoader::onILAttemptStarted(entry);
             }
             return;
         }
@@ -1763,6 +1770,10 @@ void update() {
         }
         sAttemptSerial = serial;
         sAttemptReady = true;
+        const int entry = validEntry(sSelectedEntry)
+                              ? sSelectedEntry
+                              : entryForStartScene(gpApplication.mCurrentScene);
+        if (entry >= 0) StageLoader::onILAttemptStarted(entry);
     }
 
     s32 qf;
@@ -1819,6 +1830,7 @@ void onSavestateLoaded() {
     sHaveSetupShineCount = false;
     sHaveSetupMovieFlag = false;
     if (!sHaveSavedAttempt) {
+        if (sRunning) StageLoader::onILAttemptEnded();
         sRunning = false;
         sAttemptReady = false;
         sCarryRestorePending = false;

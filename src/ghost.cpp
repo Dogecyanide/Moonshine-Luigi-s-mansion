@@ -24,6 +24,7 @@
 #include "susamune/qft_timer.hxx"
 #include "susamune/records.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/stage_loader.hxx"
 #include "susamune/warp_wheel.hxx"
 
 namespace Ghost {
@@ -2717,6 +2718,7 @@ bool startObserver() {
     }
     sObserverPrimarySegment = 0;
     if (!configureObserverSegment()) return false;
+    StageLoader::cancel();
     sClockPhase = CLOCK_UNAVAILABLE;
     ILing::invalidateForAssist();
     Records::invalidateAttempt();

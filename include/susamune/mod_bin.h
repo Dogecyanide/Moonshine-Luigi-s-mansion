@@ -42,7 +42,8 @@
 #define SUSAMUNE_MOD_BASE_PAL 0x80420D60u
 #define SUSAMUNE_MOD_REGION_SIZE 0x80000u
 #define SUSAMUNE_SCRATCH 0x40u
-#define SUSAMUNE_MOD_BLOB_MAX_SIZE \
+#define SUSAMUNE_MOD_BLOB_MAX_SIZE 0x50000u
+#define SUSAMUNE_MOD_SCRATCH_OFFSET \
     (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
 #define SUSAMUNE_DEBUG_STACK_SIZE 0x2000u
 #define SUSAMUNE_ARENA_RESERVE_SIZE \
@@ -86,6 +87,8 @@ typedef char susamune_mod_header_size_check
     [(sizeof(struct SusamuneModHeader) == SUSAMUNE_MOD_HEADER_SIZE) ? 1 : -1];
 typedef char susamune_mod_window_size_check
     [(SUSAMUNE_MEM2_MODBIN_SIZE >= SUSAMUNE_MOD_REGION_SIZE + 0x1000u) ? 1 : -1];
+typedef char susamune_mod_blob_scratch_check
+    [(SUSAMUNE_MOD_BLOB_MAX_SIZE <= SUSAMUNE_MOD_SCRATCH_OFFSET) ? 1 : -1];
 
 #define SUSAMUNE_MOD_PPC_PTR  ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PPC_BASE)
 #define SUSAMUNE_MOD_PHYS_PTR ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PHYS_BASE)

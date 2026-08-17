@@ -86,7 +86,8 @@ mod_region_size = 0x80000
 mod_scratch_size = 0x40
 
 # Ceiling enforced on the linked blob by every link_mod.py mode.
-mod_blob_max_size = mod_region_size - mod_scratch_size
+mod_blob_max_size = 0x50000
+assert mod_blob_max_size <= mod_region_size - mod_scratch_size
 
 # OSInit returns the debug stack to the arena when no debug monitor is present
 # (BI2DebugFlag < 2), so the runtime __OSArenaLo is this far BELOW the

@@ -31,6 +31,7 @@
 #include "susamune/qft_display.hxx"
 #include "susamune/records.hxx"
 #include "susamune/records_persistence.hxx"
+#include "susamune/stage_loader.hxx"
 #include "susamune/pattern_selector.hxx"
 #include "susamune/warp_wheel.hxx"
 #include "susamune/visible_goop.hxx"
@@ -78,6 +79,7 @@ extern "C" void onAppInit(TApplication* app) {
     Records::init();
     RecordsPersistence::init();
     ILing::init();
+    StageLoader::init();
     GhostStorage::init();
 #if ENABLE_MEM_DIAGNOSTICS
     memDiagnosticsInit();
@@ -314,6 +316,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     Ghost::update();
     Records::update(creationEditing, observerFrame);
     ILing::update();
+    StageLoader::update();
     GhostStorage::update();
     RecordsPersistence::update();
     if (observerFrame || !creationEditing)
@@ -373,6 +376,7 @@ extern "C" void afterDraw() {
         memDiagnosticsDraw(gMenu);
 #endif
         ILing::draw(gMenu);
+        StageLoader::draw(gMenu);
         if (!gMenu || !gMenu->shown())
             PatternSelector::draw(gMenu);
         if (!gSettings.getBool(SETTING_DISABLE_WARPS) || WarpWheel::shown())
