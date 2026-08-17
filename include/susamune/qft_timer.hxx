@@ -35,6 +35,11 @@ class QFTTimer {
   // Changes only when the timer actually starts a fresh stage attempt.
   u32 attemptSerial() const;
 
+  // Read-only clock access for visual ghost samples. This does not alter the
+  // QFT timing or capture hooks. `stopped` lets a recorder distinguish an
+  // exact final result from an attempt-boundary rebase.
+  bool currentQf(s32 *qf, bool *stopped = nullptr) const;
+
   // Consume the exact QF captured by the stage-loading transition hook.
   // Returns once per stage transition.
   bool consumeTransition(s32 *qf, u16 *target);

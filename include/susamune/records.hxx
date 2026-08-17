@@ -45,6 +45,8 @@ enum StatId : u8 {
     STAT_WORLD_NOKI_FINISHES,
     STAT_WORLD_PIANTA_FINISHES,
     STAT_WORLD_DELFINO_FINISHES,
+    STAT_GHOSTS_SAVED,
+    STAT_GHOST_TIME_SAVED_QF,
     STAT_COUNT,
 };
 
@@ -236,6 +238,47 @@ enum AchievementId : u16 {
     ACH_CLOCKWORK_CRISIS,
     ACH_LORD_OF_THE_NUT,
 
+    // RC2 Times. IDs remain tier-grouped so the Records browser can preserve
+    // its stable category/tier order without moving the RC1 catalog.
+    ACH_WIGGLER_WRESTLING,
+    ACH_NO_KIDDING,
+
+    ACH_TOWER_TITAN,
+    ACH_JUST_FISHIN,
+    ACH_VILLAGE_LIFE,
+    ACH_THERE_IT_IS,
+    ACH_CAPTAIN_MARIO,
+
+    ACH_PLANT_PUNISHER,
+    ACH_SWIMMING_WITH_THE_FISHES,
+    ACH_WHERE_ARE_THEY,
+    ACH_BIRDS_AND_BEES,
+    ACH_SQUEAKY_CLEAN,
+
+    ACH_RED_FREAK,
+    ACH_MY_HAT,
+    ACH_TRAUMATIC_MEMORIES,
+
+    ACH_FLIPPING_INSANE,
+    ACH_SCROUNGER,
+    ACH_NUTTY,
+    ACH_A_BOAT_A_SKIP_AND_A_HOP,
+    ACH_MAKE_OR_BREAK,
+    ACH_MIGHT_MAKES_RIGHT,
+    ACH_DOOTSTERS,
+    ACH_THAT_BIRD_THAT_I_HATE,
+
+    ACH_LORD_OF_THE_SANDS,
+    ACH_HIGH_KING,
+
+    // RC2 Special achievements, one per tier.
+    ACH_GHASTLY,
+    ACH_SPECTRAL,
+    ACH_SPECULAR,
+    ACH_ECTOPLASMIC,
+    ACH_WRAITHLIKE,
+    ACH_PHANTASMAL,
+
     ACHIEVEMENT_ID_END,
     ACHIEVEMENT_INVALID = 0xffff,
 };
@@ -265,7 +308,7 @@ void reconcileRegionalStats(const u32 regional[][STAT_CAPACITY],
                             u8 regionCount);
 
 // Called once per app frame after director->direct().
-void update(bool creationEditing);
+void update(bool creationEditing, bool observerFrame);
 void onStageSetup(u8 area, u8 episode);
 void onStageExit();
 
@@ -277,6 +320,8 @@ void onILAttemptEnded();
 void onILResult(int entry, u8 pbSlot, s32 qf, s32 igtCentis,
                 bool challengeEligible);
 void onPBAccepted(int entry, u8 profile);
+// Called only after storage acknowledges the canonical file commit.
+void onGhostSaved(u32 durationQf);
 
 // Profiles are laid out consecutively with `slotCount` s32 values each. All
 // profiles are checked independently; the active profile supplies menu stats.

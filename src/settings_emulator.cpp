@@ -33,6 +33,8 @@ bool Settings::finishInit() {
 }
 
 void Settings::save() {
+    if (mSaveState == SETTINGS_SAVE_PENDING) return;
+
     SusamuneCfg *cfg = EmulatorPersistence::lock();
     if (!cfg) {
         mSaveState = SETTINGS_SAVE_UNSUPPORTED;

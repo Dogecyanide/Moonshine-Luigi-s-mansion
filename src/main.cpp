@@ -17,6 +17,7 @@
 #include "susamune/features.hxx"
 #include "susamune/actions.hxx"
 #include "susamune/creation_extras.hxx"
+#include "susamune/crash_report.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/input_display.hxx"
 #include "susamune/metadata_display.hxx"
@@ -24,6 +25,9 @@
 #include "susamune/iling.hxx"
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
+#include "susamune/ghost.hxx"
+#include "susamune/ghost_model.hxx"
+#include "susamune/ghost_storage.hxx"
 #include "susamune/qft_display.hxx"
 #include "susamune/records.hxx"
 #include "susamune/records_persistence.hxx"
@@ -65,12 +69,16 @@ extern "C" void* getArenaLo() {
 // zeroed BSS for the whole boot sequence.
 extern "C" void onAppInit(TApplication* app) {
     app->initialize();
+    CrashReport::init();
     gSettings.init();
     gQFTTimer.init();
+    Ghost::init();
+    GhostModel::init();
     gAttemptCounter.init();
     Records::init();
     RecordsPersistence::init();
     ILing::init();
+    GhostStorage::init();
 #if ENABLE_MEM_DIAGNOSTICS
     memDiagnosticsInit();
 #endif
@@ -95,18 +103,33 @@ extern "C" void onAppInit(TApplication* app) {
 }
 
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
+    if (WarpWheel::holdGameModeBeforeUpdate(director)) {
+        return director->mCurState;
+    }
+
     u8 state = director->updateGameMode();
 
     // Opening the menu must not also pause the game. The default menu bind
     // includes Start, which is what the director is reacting to here, so
     // swallow the transition into the pause state on the frame it fires.
-    if (director->mCurState != state && state == 0x5 &&
-        gBinds.wasPressed(BIND_MENU_TOGGLE)) {
+    if (director->mCurState != state &&
+        state == TMarDirector::STATE_PAUSE_MENU &&
+        (gBinds.wasPressed(BIND_MENU_TOGGLE) ||
+         gSettings.getBool(SETTING_DISABLE_RETAIL_PAUSE) ||
+         Ghost::observerActive())) {
         state = director->mCurState;
     }
 
-    if (!gSettings.getBool(SETTING_DISABLE_WARPS))
+    state = WarpWheel::applyPendingGameModeAction(director, state);
+
+    if (gSettings.getBool(SETTING_DISABLE_WARPS)) {
+        LevelWarp::cancelPending(true);
+        if (WarpWheel::retailExitPending()) {
+            state = LevelWarp::kick(director, state);
+        }
+    } else {
         state = LevelWarp::kick(director, state);
+    }
 
 #if ENABLE_DEBUG_WARPS
     if (Warp::pending()) {
@@ -120,6 +143,10 @@ extern "C" u8 onUpdateGameMode(TMarDirector* director) {
     return state;
 }
 
+extern "C" u8 onPauseMenuNextState(TPauseMenu2 *pauseMenu) {
+    return WarpWheel::guardExitArea(pauseMenu->getNextState());
+}
+
 // extern "C" void onFinishAppState(RumbleMgr* rumble) {
 //     rumble->init();
 // }
@@ -129,12 +156,24 @@ extern "C" void onSetup(TMarDirector* director) {
     static bool recordsSceneKnown = false;
     static Records::Area recordsArea = Records::AREA_INVALID;
 
+    CrashReport::note(SUSAMUNE_CRASH_EVENT_SETUP_ENTER,
+                      static_cast<u32>(director->mAreaID) << 8 |
+                          director->mEpisodeID,
+                      reinterpret_cast<u32>(director));
+
     // TPollutionManager publishes itself through gpPollution but its retail
     // destructor never clears that global. Stages without a pollution manager
     // would otherwise inherit a pointer into the previous stage's freed heap.
     gpPollution = nullptr;
+    GhostModel::beforeStageSetup();
+    if (Ghost::observerCleanupPending())
+        ILing::resetAfterObserver();
     ILing::beforeStageSetup();
     director->setupObjects();
+    CrashReport::note(SUSAMUNE_CRASH_EVENT_SETUP_RETURN,
+                      static_cast<u32>(director->mAreaID) << 8 |
+                          director->mEpisodeID,
+                      director->_260);
     ILing::onStageSetup();
 
     const Records::Area nextRecordsArea =
@@ -150,10 +189,22 @@ extern "C" void onSetup(TMarDirector* director) {
     actionsOnStageLoad();
     visibleGoopOnStageSetup();
     gQFTTimer.onStageSetup(director);
-    gAttemptCounter.onStageSetup(director);
+    Ghost::onStageSetup(director);
+    GhostModel::onStageSetup(director);
+    const bool observerStage = Ghost::observerActive();
+    if (!observerStage)
+        gAttemptCounter.onStageSetup(director);
     gCreationExtras.onStageSetup();
+    if (observerStage)
+        Records::invalidateAttempt();
     Records::onStageSetup(director->mAreaID, director->mEpisodeID);
+    if (observerStage)
+        Records::invalidateAttempt();
     WallkickDisplay::onStageSetup();
+    CrashReport::note(SUSAMUNE_CRASH_EVENT_STAGE_READY,
+                      static_cast<u32>(director->mAreaID) << 8 |
+                          director->mEpisodeID,
+                      director->_260);
 #if ENABLE_MEM_DIAGNOSTICS
     memDiagnosticsOnStageSetup();
 #endif
@@ -175,6 +226,7 @@ extern "C" void onSetup(TMarDirector* director) {
 
 
 extern "C" s32 onUpdate(JDrama::TDirector* director) {
+    CrashReport::observeContext(gpApplication.mContext);
     static bool recordsStageContext = false;
     const bool stageContext =
         gpApplication.mContext == TApplication::CONTEXT_DIRECT_STAGE;
@@ -199,19 +251,22 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     // it and asks whether the menu bind was pressed this frame, which would
     // otherwise be answered from the previous frame's sample.
     gBinds.update();
+    if (gMenu && gMenu->suppressesBinds()) {
+        gBinds.suppressUntilRelease();
+    }
     const bool creationEditing = gQftDisplay.editing() ||
                                  gInputDisplay.editing() ||
                                  gMetadataDisplay.editing() ||
                                  gCreationExtras.editing();
-    if (!creationEditing)
-        gInputDisplay.update();
-    PatternSelector::update(!creationEditing);
     gQFTTimer.beginFrame();
     gQFTTimer.update();
+    GhostModel::beginFrame();
     // Before direct(): while the wheel is open it takes the pad away from
     // the game.
-    if (!creationEditing && !gSettings.getBool(SETTING_DISABLE_WARPS))
+    if (!creationEditing &&
+        (!gSettings.getBool(SETTING_DISABLE_WARPS) || WarpWheel::shown()))
         WarpWheel::update(gpApplication.mGamePads[0]);
+    PatternSelector::update(!creationEditing);
 
     // Freeze the stage while an overlay is up. direct() runs the movement and
     // animation perform lists only outside the pause and stage-exit states, so
@@ -229,26 +284,40 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     if (freeze) {
         gpMarDirector->mCurState = TMarDirector::STATE_STAGE_EXIT_2;
     }
+    Ghost::beforeDirect();
     int state = director->direct();
     if (freeze) {
         gpMarDirector->mCurState = TMarDirector::STATE_NORMAL;
         state = 0;
     }
+    Ghost::afterDirect(state);
     WallkickDisplay::afterDirect(marioActive);
     GameplayPolish::afterDirect();
-    if (!gSettings.getBool(SETTING_DISABLE_WARPS))
+    if (gSettings.getBool(SETTING_DISABLE_WARPS) &&
+        !WarpWheel::retailExitPending()) {
+        LevelWarp::cancelPending(true);
+    } else {
         state = LevelWarp::onDirected(state);
+    }
+
+    // Exit Area is identified inside direct(). Delay the one pre-direct
+    // bind-driven overlay toggle so its confirming A cannot leak into it.
+    if (!creationEditing)
+        gInputDisplay.update();
 
 #if IS_EMULATOR
     EmulatorPersistence::service();
 #endif
 
     gQFTTimer.update();
-    Records::update(creationEditing);
+    const bool observerFrame = Ghost::observerStatsSuppressed();
+    Ghost::update();
+    Records::update(creationEditing, observerFrame);
     ILing::update();
+    GhostStorage::update();
     RecordsPersistence::update();
-    if (!creationEditing)
-        gAttemptCounter.update();
+    if (observerFrame || !creationEditing)
+        gAttemptCounter.update(observerFrame);
 
     // Apply/restore the toggled memory-patch features (ported gecko codes).
     // Runs every frame like the gecko handler; no-ops when nothing changed.
@@ -306,7 +375,7 @@ extern "C" void afterDraw() {
         ILing::draw(gMenu);
         if (!gMenu || !gMenu->shown())
             PatternSelector::draw(gMenu);
-        if (!gSettings.getBool(SETTING_DISABLE_WARPS))
+        if (!gSettings.getBool(SETTING_DISABLE_WARPS) || WarpWheel::shown())
             WarpWheel::draw();
     }
 }

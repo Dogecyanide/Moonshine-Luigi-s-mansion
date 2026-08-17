@@ -20,6 +20,10 @@
 // onUpdate, after gBinds.update().
 void actionsApply(bool allowBinds = true);
 
+// True when the director budget patch was active for the frame that just ran.
+// This is the eligibility signal for systems such as ghost recording.
+bool actionsFastForwardActive();
+
 // Drop pointers into the previous stage heap. Call after setupObjects().
 void actionsOnStageLoad();
 

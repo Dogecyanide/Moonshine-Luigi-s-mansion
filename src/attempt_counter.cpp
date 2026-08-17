@@ -129,11 +129,19 @@ void AttemptCounter::onStageSetup(TMarDirector *director) {
     mWasEnabled   = true;
 }
 
-void AttemptCounter::update() {
+void AttemptCounter::update(bool observerFrame) {
     const bool enabled    = gSettings.getBool(SETTING_ATTEMPT_COUNTER);
     const u32 serial      = *shineSerial();
     const u32 departures = *departureSerial();
     const bool stageActive = mDirector && gpMarDirector == mDirector;
+
+    if (observerFrame) {
+        mLastShineSerial = serial;
+        mLastDepartureSerial = departures;
+        mGotShine = false;
+        mDisplayFrames = 0;
+        return;
+    }
 
     if (!enabled) {
         mWasEnabled          = false;

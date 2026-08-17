@@ -11,8 +11,10 @@
 #include "SMS/Player/Mario.hxx"
 #include "SMS/Player/Watergun.hxx"
 #include "SMS/System/Application.hxx"
+#include "susamune/actions.hxx"
 #include "susamune/addresses.hxx"
 #include "susamune/creation_extras.hxx"
+#include "susamune/ghost.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/mem2_map.h"
 #include "susamune/packed_text.hxx"
@@ -341,14 +343,26 @@ const u8 kPlazaStoryHigh[10] = {0x00, 0x10, 0xF0, 0xF0, 0xF0,
 const int kPbSlotCount = 125;
 const int kEntryGelato4Inside = 31;
 const int kEntryPinnaEyg = 46;
+const u8 kPinnaEygParentEpisode = 2;
+const int kEntrySirena8 = 63;
 const int kEntryNoki3Inside = 67;
 const int kEntryNoki4Eel = 69;
 const int kEntryCorona = 92;
 const int kEntryBowser = 93;
 static_assert(kEntries[kEntryGelato4Inside].prerequisite == 123,
               "Gelato 4 Inside entry moved");
-static_assert(kEntries[kEntryPinnaEyg].prerequisite == 121,
+static_assert(kEntries[kEntryPinnaEyg].start.area ==
+                      TGameSequence::AREA_PINNABEACH &&
+                  kEntries[kEntryPinnaEyg].start.gameInt3 ==
+                      kPinnaEygParentEpisode &&
+                  kEntries[kEntryPinnaEyg].prerequisite == 121,
               "Pinna EYG entry moved");
+static_assert(kEntries[kEntrySirena8].start.area == 7 &&
+                  kEntries[kEntrySirena8].start.episode == 4 &&
+                  kEntries[kEntrySirena8].start.gameInt3 == 7 &&
+                  kEntries[kEntrySirena8].result == 47 &&
+                  !(kEntries[kEntrySirena8].flags & ENTRY_PB_OVERRIDE),
+              "Sirena 8 hotel start moved");
 static_assert(kEntries[kEntryNoki3Inside].start.area == 0x2C &&
               kEntries[kEntryNoki3Inside].result == 52,
               "Noki 3 Inside entry moved");
@@ -458,6 +472,12 @@ struct RuntimeState {
     bool pbPending;
     bool pbTimeoutNotified;
     bool haveSavedAttempt;
+    bool pinnaEygRestart;
+    bool savedPinnaEygRestart;
+    bool warpRollbackValid;
+    bool warpRollbackPinnaEygRestart;
+    u8 warpRollbackFluddSecrets;
+    u8 warpRollbackAppliedFluddSecrets;
 };
 
 struct ILingRuntime {
@@ -521,6 +541,13 @@ static_assert(sizeof(ILingRuntime) <= SUSAMUNE_ILING_RUNTIME_SIZE,
 #define sPbPending sRuntime.pbPending
 #define sPbTimeoutNotified sRuntime.pbTimeoutNotified
 #define sHaveSavedAttempt sRuntime.haveSavedAttempt
+#define sPinnaEygRestart sRuntime.pinnaEygRestart
+#define sSavedPinnaEygRestart sRuntime.savedPinnaEygRestart
+#define sWarpRollbackValid sRuntime.warpRollbackValid
+#define sWarpRollbackPinnaEygRestart sRuntime.warpRollbackPinnaEygRestart
+#define sWarpRollbackFluddSecrets sRuntime.warpRollbackFluddSecrets
+#define sWarpRollbackAppliedFluddSecrets \
+    sRuntime.warpRollbackAppliedFluddSecrets
 
 const char *defaultCustomProfileName(int index) {
     return index == 0 ? "Custom 1" : "Custom 2";
@@ -798,6 +825,13 @@ bool sceneMatches(const TGameSequence &scene, const LevelWarp::Dest &dest) {
     return scene.mAreaID == dest.area && scene.mEpisodeID == dest.episode;
 }
 
+bool stageObjectsLive() {
+    // The next director reuses the stage heap before its pointer fields exist.
+    return gpApplication.mContext == TApplication::CONTEXT_DIRECT_STAGE &&
+           gpMarDirector && gpMarDirector->_260 != 0 &&
+           gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING;
+}
+
 bool isInternalScene(const LevelWarp::Dest &start,
                      const TGameSequence &scene) {
     if (start.area == 0x34 && scene.mAreaID == TGameSequence::AREA_CORONABOSS) {
@@ -808,7 +842,8 @@ bool isInternalScene(const LevelWarp::Dest &start,
 
 int entryForStartScene(const TGameSequence &scene) {
     for (int i = 0; i < kEntryCount; i++) {
-        if (!(kEntries[i].flags & ENTRY_PLAZA) &&
+        // A beach-to-hotel Sirena 8 run is not comparable to the hotel start.
+        if (i != kEntrySirena8 && !(kEntries[i].flags & ENTRY_PLAZA) &&
             sceneMatches(scene, kEntries[i].start)) {
             return i;
         }
@@ -1065,9 +1100,8 @@ void clearAttempt() {
             TFlagManager::smInstance->setFlag(0x40004,
                                               sSavedSecondNozzleFlag);
         }
-        if (gpMarDirector &&
-            gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING &&
-            gpMarioOriginal && gpMarioOriginal->mFludd) {
+        if (stageObjectsLive() && gpMarioOriginal &&
+            gpMarioOriginal->mFludd) {
             gpMarioOriginal->mFludd->mSecondNozzle = sSavedSecondNozzle;
         }
         sTemporaryRocketActive = false;
@@ -1083,6 +1117,8 @@ void clearAttempt() {
 }
 
 void armAttempt(const Entry &entry, int selected) {
+    const int entryIndex = (int)(&entry - kEntries);
+    sPinnaEygRestart = entryIndex == kEntryPinnaEyg;
     sRunning = true;
     sAttemptReady = false;
     sTransitionPending = false;
@@ -1090,9 +1126,10 @@ void armAttempt(const Entry &entry, int selected) {
     sFinishKind = entryFinish(entry);
     sSelectedEntry = selected;
     sAttemptSerial = gQFTTimer.attemptSerial();
-    sRecordsEligible = !gSettings.getBool(SETTING_STAGE_INTRO_SKIP);
+    sRecordsEligible = !gSettings.getBool(SETTING_STAGE_INTRO_SKIP) &&
+                       !actionsFastForwardActive();
     sNativeIgt = false;
-    Records::onILAttemptStarted((int)(&entry - kEntries));
+    Records::onILAttemptStarted(entryIndex);
     if (!sRecordsEligible) Records::invalidateAttempt();
 }
 
@@ -1136,6 +1173,7 @@ void recordPB(int entry, s32 qf) {
 
     const s32 previous = pbs[slot];
     pbs[slot] = qf;
+    Ghost::markCurrentRecordingPB(qf);
     Records::onPBAccepted(entry, sActivePbProfile);
     reconcileRecordsPBs();
     markPBsDirty();
@@ -1175,7 +1213,7 @@ void recordResult(int entry, s32 qf) {
     if (sRecentCount < kRecentCount) {
         sRecentCount++;
     }
-    const s32 igtCentis = sNativeIgt && gpMarDirector &&
+    const s32 igtCentis = sNativeIgt && stageObjectsLive() &&
                                   gpMarDirector->mGCConsole
                               ? gpMarDirector->mGCConsole->getFinishedTime()
                               : -1;
@@ -1351,19 +1389,48 @@ const char *groupName(int entry) {
 }
 
 int activeParentEpisode(u8 parentArea) {
-    if (!sRunning) return -1;
-    const u8 startParent = LevelWarp::parentArea(sAttemptStart.area);
-    if (sAttemptStart.area != parentArea && startParent != parentArea)
-        return -1;
-    return sAttemptStart.gameInt3;
+    if (sRunning) {
+        const u8 startParent = LevelWarp::parentArea(sAttemptStart.area);
+        if (sAttemptStart.area == parentArea || startParent == parentArea)
+            return sAttemptStart.gameInt3;
+    }
+    return sPinnaEygRestart &&
+                   parentArea == TGameSequence::AREA_PINNABEACH
+               ? kPinnaEygParentEpisode
+               : -1;
 }
 
-bool start(int entry) {
+bool forceParentFullRestart(u8 parentArea) {
+    return sPinnaEygRestart &&
+           parentArea == TGameSequence::AREA_PINNABEACH;
+}
+
+void restoreWarpStartSnapshot() {
+    if (!sWarpRollbackValid) return;
+    // A reopened menu may have replaced the IL's temporary choice. Preserve
+    // that newer intent instead of restoring over it on a late cancellation.
+    const u8 currentFludd = gSettings.get(SETTING_FLUDD_SECRETS);
+    const bool restoreFludd =
+        currentFludd == sWarpRollbackAppliedFluddSecrets &&
+        currentFludd != sWarpRollbackFluddSecrets;
+    if (restoreFludd) {
+        gSettings.set(SETTING_FLUDD_SECRETS, sWarpRollbackFluddSecrets);
+        if (gMenu) gMenu->scheduleSettingsSave();
+    }
+    sPinnaEygRestart = sWarpRollbackPinnaEygRestart;
+    sWarpRollbackValid = false;
+}
+
+bool start(int entry, u32 approvedDiscardToken) {
+    restoreWarpStartSnapshot();
     clearAttempt();
     if (gSettings.getBool(SETTING_DISABLE_WARPS)) {
         return false;
     }
 
+    sWarpRollbackValid = true;
+    sWarpRollbackPinnaEygRestart = sPinnaEygRestart;
+    sWarpRollbackFluddSecrets = gSettings.get(SETTING_FLUDD_SECRETS);
     const Entry &item = kEntries[entry];
     const u8 routeFlags = item.flags & ENTRY_FLAG_MASK;
     if ((routeFlags & (ENTRY_CLEAR_RESULT | ENTRY_CARRY_OVERLAY)) ==
@@ -1372,20 +1439,49 @@ bool start(int entry) {
     } else if (routeFlags == ENTRY_CARRY_OVERLAY) {
         gSettings.set(SETTING_FLUDD_SECRETS, 2);
     }
+    sWarpRollbackAppliedFluddSecrets =
+        gSettings.get(SETTING_FLUDD_SECRETS);
     armAttempt(item, entry);
     if (isPlazaEntry(entry)) {
         if (!TFlagManager::smInstance) {
-            clearAttempt();
+            cancelWarpStart();
             return false;
         }
         const LevelWarp::Dest source = {item.start.gameInt3, 0, 0};
         const LevelWarp::Dest destination = {item.start.area, item.start.episode, 0};
-        LevelWarp::warpFrom(source, destination);
+        LevelWarp::warpFromGuarded(source, destination,
+                                   approvedDiscardToken, true);
         return true;
     }
 
-    LevelWarp::warpTo(item.start);
+    LevelWarp::warpToGuarded(item.start, approvedDiscardToken, true);
     return true;
+}
+
+bool start(int entry) {
+    return start(entry, 0);
+}
+
+bool copyWarpDiscardName(int entry, char *out, u32 size, u32 *outToken) {
+    if (!validEntry(entry) ||
+        gSettings.getBool(SETTING_DISABLE_WARPS)) return false;
+    const Entry &item = kEntries[entry];
+    const s32 variant = isPlazaEntry(entry) ? 0 : item.start.gameInt3;
+    return Ghost::copyWarpDiscardName(item.start.area, item.start.episode,
+                                      variant, true, out, size, outToken);
+}
+
+void cancelWarpStart() {
+    clearAttempt();
+    restoreWarpStartSnapshot();
+}
+
+void commitWarpStart() {
+    sWarpRollbackValid = false;
+}
+
+void cancelPendingWarp() {
+    LevelWarp::cancelPending();
 }
 
 void clearPB(int entry) {
@@ -1407,8 +1503,18 @@ void onWarpTail() {
     }
 }
 
+void resetAfterObserver() {
+    clearAttempt();
+}
+
 void beforeStageSetup() {
     const TGameSequence &scene = gpApplication.mCurrentScene;
+
+    if (sPinnaEygRestart &&
+        scene.mAreaID != TGameSequence::AREA_PINNABEACH &&
+        LevelWarp::parentArea(scene.mAreaID) !=
+            TGameSequence::AREA_PINNABEACH)
+        sPinnaEygRestart = false;
 
     if (sBowserNozzleShieldActive) {
         if (TFlagManager::smInstance) {
@@ -1508,17 +1614,17 @@ void update() {
     servicePBSave();
 
     if (sRunning && sRecordsEligible &&
-        gSettings.getBool(SETTING_STAGE_INTRO_SKIP)) {
+        (gSettings.getBool(SETTING_STAGE_INTRO_SKIP) ||
+         actionsFastForwardActive())) {
         sRecordsEligible = false;
         Records::invalidateAttempt();
     }
-    if (sRunning && gpMarDirector && gpMarDirector->mGCConsole &&
+    if (sRunning && stageObjectsLive() && gpMarDirector->mGCConsole &&
         gpMarDirector->mGCConsole->mIsTimerMoving) {
         sNativeIgt = true;
     }
 
-    if (sBowserNozzleShieldPending && gpMarDirector &&
-        gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING &&
+    if (sBowserNozzleShieldPending && stageObjectsLive() &&
         TFlagManager::smInstance) {
         sSavedBowserNozzleFlag =
             TFlagManager::smInstance->getFlag(0x40004);
@@ -1526,9 +1632,8 @@ void update() {
         sBowserNozzleShieldPending = false;
     }
 
-    if (sRocketEquipPending && gpMarDirector &&
-        gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING &&
-        gpMarioOriginal && gpMarioOriginal->mFludd &&
+    if (sRocketEquipPending && stageObjectsLive() && gpMarioOriginal &&
+        gpMarioOriginal->mFludd &&
         TFlagManager::smInstance) {
         TWaterGun *fludd = gpMarioOriginal->mFludd;
         sSavedSecondNozzle = fludd->mSecondNozzle;
@@ -1601,7 +1706,7 @@ void update() {
         return;
     }
 
-    if (isPlazaEntry(sSelectedEntry) && gpMarDirector &&
+    if (isPlazaEntry(sSelectedEntry) && stageObjectsLive() &&
         (gpMarDirector->mCurState == TMarDirector::STATE_PAUSE_MENU ||
          gpMarDirector->mCurState == TMarDirector::STATE_SAVE_CARD)) {
         // Never let temporary route progression reach a card save.
@@ -1622,7 +1727,8 @@ void update() {
             // A same-scene reset keeps its explicitly selected Secret/Reds mode.
             sAttemptSerial = serial;
             sRecordsEligible =
-                !gSettings.getBool(SETTING_STAGE_INTRO_SKIP);
+                !gSettings.getBool(SETTING_STAGE_INTRO_SKIP) &&
+                !actionsFastForwardActive();
             sNativeIgt = false;
             const int entry = validEntry(sSelectedEntry)
                                   ? sSelectedEntry
@@ -1645,8 +1751,7 @@ void update() {
         }
     }
 
-    if (sCarryRestorePending && gpMarDirector &&
-        gpMarDirector->mCurState >= TMarDirector::STATE_GAME_STARTING) {
+    if (sCarryRestorePending && stageObjectsLive()) {
         // setMario has consumed the temporary mode; restore before gameplay
         // can write the memory card.
         restoreOverlayFlags();
@@ -1703,6 +1808,7 @@ void update() {
 
 void onSavestateSaved() {
     sSavedAttemptState = sAttemptState;
+    sSavedPinnaEygRestart = sPinnaEygRestart;
     sHaveSavedAttempt = true;
 }
 
@@ -1726,7 +1832,14 @@ void onSavestateLoaded() {
     // attempt's temporary overlays, then disarm it: loaded time is never PB-
     // eligible. A genuine reset or stage load arms the next attempt normally.
     sAttemptState = sSavedAttemptState;
+    sPinnaEygRestart = sSavedPinnaEygRestart;
     clearAttempt();
+}
+
+void invalidateForAssist() {
+    if (!sRunning || !sRecordsEligible) return;
+    sRecordsEligible = false;
+    Records::invalidateAttempt();
 }
 
 bool achievementChimeBlocked() {
@@ -1813,17 +1926,7 @@ void draw(Menu *menu) {
     drawRecent(menu, false);
 
     if (sBannerFrames > 0) {
-        const int size = 22;
-        const int textW = Menu::textWidth(sBannerText, size);
-        const int w = textW + 28;
-        const int h = 42;
-        const int x = (640 - w) / 2;
-        const int y = 42;
-
-        menu->fillBox(x, y, w, h, JUtility::TColor(90, 58, 4, 230));
-        menu->fillBox(x, y, 4, h, JUtility::TColor(255, 196, 40, 255));
-        menu->drawText(sBannerText, x + 14, y + 10, size, size,
-                       JUtility::TColor(255, 239, 178, 255));
+        gCreationExtras.drawPbBanner(menu, sBannerText);
     }
 }
 

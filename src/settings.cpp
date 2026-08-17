@@ -32,6 +32,9 @@ enum ChoiceSet {
     CHOICES_FREEZE_DURATION,
     CHOICES_BOX_GAME,
     CHOICES_PIANTISSIMO,
+    CHOICES_GHOST_OPACITY,
+    CHOICES_APPEARANCE,
+    CHOICES_GHOST_APPEARANCE,
     CHOICES_COUNT,
 };
 
@@ -55,7 +58,9 @@ const char kChoiceLabels[] =
     "Off\0On\0Completed\0No FLUDD\0All secrets\0Unlocked\0Rocket\0Turbo\0Hover\0"
     "Always\0Shine only\0Hidden\0On freeze\0"
     "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0" "1\0" "2\0"
-    "Slowest\0Fastest";
+    "Slowest\0Fastest\0"
+    "25%\0" "50%\0" "75%\0" "100%\0Default\0Never\0"
+    "Shadow Mario\0Piantissimo";
 
 const u8 kChoiceMap[] = {
     0, 1,              // bool
@@ -66,8 +71,30 @@ const u8 kChoiceMap[] = {
     0, 13, 14, 15, 16, 17,  // freeze duration
     0, 18, 19,          // box game
     0, 20, 21,          // Piantissimo pattern
+    22, 23, 24, 25,     // ghost opacity
+    26, 9, 27,          // appearance: Default, Always, Never
+    28, 29,             // ghost appearance
 };
-const u8 kChoiceFirst[CHOICES_COUNT + 1] = {0, 2, 5, 9, 12, 15, 21, 24, 27};
+const u8 kChoiceFirst[CHOICES_COUNT + 1] = {
+    0, 2, 5, 9, 12, 15, 21, 24, 27, 31, 34, 36
+};
+
+static_assert(sizeof(kChoiceMap) / sizeof(kChoiceMap[0]) == 36,
+              "choice map size changed");
+static_assert(SETTING_HELMET_APPEARANCE == SETTING_GHOST_OPACITY + 1 &&
+                  SETTING_CAP_APPEARANCE == SETTING_HELMET_APPEARANCE + 1 &&
+                  SETTING_SHADES_APPEARANCE == SETTING_CAP_APPEARANCE + 1 &&
+                  SETTING_SHINE_SHIRT_APPEARANCE ==
+                      SETTING_SHADES_APPEARANCE + 1 &&
+                  SETTING_METADATA_HORIZONTAL ==
+                      SETTING_SHINE_SHIRT_APPEARANCE + 1 &&
+                  SETTING_DISABLE_RETAIL_PAUSE ==
+                      SETTING_METADATA_HORIZONTAL + 1 &&
+                  SETTING_GHOST_APPEARANCE ==
+                      SETTING_DISABLE_RETAIL_PAUSE + 1 &&
+                  SETTING_GHOST_LAST_SUCCESS ==
+                      SETTING_GHOST_APPEARANCE + 1,
+              "append-only V2 setting ids moved");
 
 u8 choiceCount(const SettingDesc &desc) {
     return kChoiceFirst[desc.choices + 1] - kChoiceFirst[desc.choices];
@@ -165,6 +192,8 @@ bool Settings::finishInit() { return true; }
 
 void Settings::save() {
     volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+
+    if (mSaveState == SETTINGS_SAVE_PENDING) return;
 
     if (mSaveState == SETTINGS_SAVE_UNSUPPORTED) {
         mDirty = false;

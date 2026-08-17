@@ -8,6 +8,12 @@ class PatchType(Enum):
 patches = [
     # changeState__12TMarDirectorFv + 0x2c0: updateGameMode() call.
     {'jp': 0x800ec6c4, 'us': 0x80299140, 'pal': 0x80290fd8, 'sym': 'onUpdateGameMode', 'type': PatchType.BL},
+    # changeState__12TMarDirectorFv: the pause menu's getNextState() call.
+    # Result 5 is uniquely Exit Area. If it would discard an unsaved PB ghost,
+    # the wrapper takes retail Resume and opens the raw-pad confirmation; it
+    # never holds Sunshine's already-closed pause object.
+    {'jp': 0x800ec6d4, 'us': 0x80299150, 'pal': 0x80290fe8,
+     'sym': 'onPauseMenuNextState', 'type': PatchType.BL},
     # gameLoop__12TApplicationFv + 0x210: director->direct() call.
     {'jp': 0x800f9b64, 'us': 0x802a6160, 'pal': 0x8029e070, 'sym': 'onUpdate', 'type': PatchType.BL, 'nop_count': 3},
     # direct__12TMarDirectorFv + 0x80: setupObjects() call.
@@ -73,7 +79,7 @@ arena_lo = {
 # Size of the carved region. Comes out of the ~19 MiB heap, so it can be
 # generous; the mod must fit within it. MUST match
 # SUSAMUNE_MOD_REGION_SIZE in mod_bin.h.
-mod_region_size = 0x20000
+mod_region_size = 0x80000
 
 # Tail of the region reserved for the asm caves' fixed-address scratch, which
 # the blob must not grow into. MUST match SUSAMUNE_SCRATCH in mod_bin.h.

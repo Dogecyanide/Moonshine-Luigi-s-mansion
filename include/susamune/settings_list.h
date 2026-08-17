@@ -128,7 +128,7 @@
     X(SETTING_WALLKICK_DISPLAY,          "wallkick_display")                \
     /* -- Restart queue feedback (append-only persisted id) -- */             \
     X(SETTING_RESTART_QUEUED_FEEDBACK,   "restart_queued_feedback")           \
-    /* -- Pre-release 6 polish (append-only persisted ids) -- */               \
+    /* -- Gameplay presentation (append-only persisted ids) -- */              \
     X(SETTING_YOSHI_NOZZLE_SAVE_PROMPT,  "yoshi_nozzle_save_prompt")          \
     X(SETTING_HIDE_HUD_WHEN_PAUSED,      "hide_hud_when_paused")              \
     /* -- Starred-menu bit storage, seven setting ids per byte -- */           \
@@ -144,7 +144,22 @@
     X(SETTING_FAVORITES_9,               "favorites_9")                       \
     X(SETTING_FAVORITES_10,              "favorites_10")                      \
     /* -- Achievement presentation (append-only persisted id) -- */           \
-    X(SETTING_ACHIEVEMENT_NOTIFICATIONS, "achievement_notifications")
+    X(SETTING_ACHIEVEMENT_NOTIFICATIONS, "achievement_notifications")         \
+    /* -- Ghost presentation (append-only persisted ids) -- */                 \
+    X(SETTING_GHOST_DISPLAY,             "ghost_display")                     \
+    X(SETTING_GHOST_OPACITY,             "ghost_opacity")                     \
+    /* -- V2 appearance controls (append-only persisted ids) -- */             \
+    X(SETTING_HELMET_APPEARANCE,         "helmet_appearance")                 \
+    X(SETTING_CAP_APPEARANCE,            "cap_appearance")                    \
+    X(SETTING_SHADES_APPEARANCE,         "shades_appearance")                 \
+    X(SETTING_SHINE_SHIRT_APPEARANCE,    "shine_shirt_appearance")            \
+    /* -- V2 UI/QoL controls (append-only persisted ids) -- */                 \
+    X(SETTING_METADATA_HORIZONTAL,       "metadata_horizontal")               \
+    X(SETTING_DISABLE_RETAIL_PAUSE,      "disable_retail_pause")              \
+    /* -- Ghost model selection (append-only persisted id) -- */               \
+    X(SETTING_GHOST_APPEARANCE,          "ghost_appearance")                  \
+    /* -- Automatic ghost target policy (append-only persisted id) -- */       \
+    X(SETTING_GHOST_LAST_SUCCESS,        "ghost_last_success")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

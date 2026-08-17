@@ -858,6 +858,16 @@ void QFTTimer::requestReset() {
 
 u32 QFTTimer::attemptSerial() const { return sAttemptSerial; }
 
+bool QFTTimer::currentQf(s32 *qf, bool *stopped) const {
+  if (!qf || !sStageReady || !gpMarDirector ||
+      gpMarDirector != sStageDirector) {
+    return false;
+  }
+  *qf = liveQf();
+  if (stopped) *stopped = sState->stopped != 0;
+  return true;
+}
+
 bool QFTTimer::consumeTransition(s32 *qf, u16 *target) {
   if (!qf || !target || *sTransitionTarget == 0xFFFF) {
     return false;

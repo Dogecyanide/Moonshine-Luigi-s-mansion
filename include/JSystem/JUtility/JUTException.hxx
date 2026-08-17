@@ -7,6 +7,8 @@
 
 class JUTException : public JKRThread {
 public:
+    typedef void (*UserCallback)(u16, OSContext *, u32, u32);
+
     JUTException(JUTDirectPrint *printer);
     virtual ~JUTException();
 
@@ -29,4 +31,5 @@ public:
     JUTDirectPrint *mPrinter;  // _64
 
     static char **sCpuExpName;
+    static UserCallback sPreUserCallback;
 };

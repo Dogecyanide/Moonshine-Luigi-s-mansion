@@ -31,7 +31,14 @@ public:
     void draw(J2DOrthoGraph *ortho);
 
     bool shown() const { return mShown; }
+    // A tab-owned confirmation may still read A/B directly while configured
+    // actions stay silent until those buttons are released.
+    bool suppressesBinds() const;
     void hide();
+
+    // Open the Ghosts tab on a save confirmation bound to this exact accepted
+    // PB. The caller retains ownership of any action held behind that PB.
+    bool openGhostPBSave(u32 token);
 
     // Menu-only C-stick repeat. This never changes the game's pad state.
     u32 navigationInput(TMarioGamePad *pad);
@@ -46,6 +53,10 @@ public:
     // Restore mod settings, binds and layouts, then persist them. IL PBs and
     // Records live in separate mailboxes and are deliberately untouched.
     void factoryReset();
+
+    // Persist a feature-owned settings correction without restaging an
+    // in-flight mailbox payload.
+    void scheduleSettingsSave();
 
     // --- helpers a tab uses to render itself (implemented in menu.cpp) ---
     // Draw one line of text with the shared textbox. No allocation: `s` is
@@ -66,7 +77,7 @@ public:
     // text jitter as its content changes.
     static int textWidth(const char *s, int sizeX);
 
-    static const int kMaxTabs = 13;
+    static const int kMaxTabs = 14;
     // How long a toast stays up, in frames (~3s at 60Hz).
     static const int kToastFrames = 180;
 

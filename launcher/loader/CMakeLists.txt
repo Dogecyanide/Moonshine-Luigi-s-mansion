@@ -40,7 +40,7 @@ target_link_directories(loader PRIVATE
     "${LIBOGC_LIB}")
 target_link_libraries(loader PRIVATE
     freetype pngu png z
-    wiiuse wiidrc wupc bte fatfs-ppc ogc di m)
+    asnd mad wiiuse wiidrc wupc bte fatfs-ppc ogc di m)
 
 target_link_options(loader PRIVATE
     -g -DGEKKO -mrvl -mcpu=750 -meabi -mhard-float

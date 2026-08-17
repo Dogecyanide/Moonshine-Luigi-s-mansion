@@ -65,7 +65,7 @@ SHINE_SET("Sirena 4 Reds", 0x28, 0, 3, 49, GROUP_SIRENA, 43)
 SHINE("Sirena 5", 6, 4, 4, 44, GROUP_SIRENA)
 SHINE("Sirena 6", 6, 5, 5, 45, GROUP_SIRENA)
 SHINE("Sirena 7", 6, 6, 6, 46, GROUP_SIRENA)
-SHINE("Sirena 8", 6, 7, 7, 47, GROUP_SIRENA)
+SHINE("Sirena 8", 7, 4, 7, 47, GROUP_SIRENA)
 SHINE("Sirena 100 (E7)", 6, 6, 6, 104, GROUP_SIRENA)
 
 SHINE("Noki 1", 9, 0, 0, 50, GROUP_NOKI)

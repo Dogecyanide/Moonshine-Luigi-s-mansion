@@ -52,7 +52,10 @@ public:
     J3DDrawMtxData();
     ~J3DDrawMtxData();
 
-    u16 _0;
-    u16 mJointCount;
-    u32 _8;
+    u16 mEntryNum;
+    u16 mDrawFullWgtMtxNum;
+    u8 *mDrawMtxFlag;
+    u16 *mDrawMtxIndex;
 };
+
+static_assert(sizeof(J3DDrawMtxData) == 0xC, "J3DDrawMtxData layout changed");

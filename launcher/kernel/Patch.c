@@ -39,6 +39,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "ff_utf8.h"
 #include "susamune/mem2_map.h"
 #include "susamune/mod_bin.h"
+#include "susamune/ghost_model_asset.h"
 
 //#define DEBUG_DSP  // Very slow!! Replace with raw dumps?
 
@@ -4115,6 +4116,111 @@ static const struct SusamuneModHeader *SusamuneModStaged(void)
 	return hdr;
 }
 
+static u32 SusamuneAssetCrc32(const void *data, u32 size)
+{
+	const u8 *bytes = (const u8*)data;
+	u32 crc = 0xFFFFFFFFu;
+	u32 i, bit;
+	for (i = 0; i < size; ++i)
+	{
+		crc ^= bytes[i];
+		for (bit = 0; bit < 8; ++bit)
+			crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+	}
+	return crc ^ 0xFFFFFFFFu;
+}
+
+static bool SusamuneShadowAssetValid(
+	const struct SusamuneGhostShadowAsset *asset)
+{
+	sync_before_read((void*)asset, SUSAMUNE_GHOST_SHADOW_ASSET_BUFFER_SIZE);
+	return asset->magic == SUSAMUNE_GHOST_SHADOW_ASSET_MAGIC &&
+		asset->version == SUSAMUNE_GHOST_MODEL_ASSET_VERSION &&
+		asset->headerSize == SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE &&
+		asset->status == SUSAMUNE_GHOST_MODEL_STATUS_READY &&
+		asset->totalSize == SUSAMUNE_GHOST_SHADOW_ASSET_SIZE &&
+		asset->bmdOffset == SUSAMUNE_GHOST_SHADOW_BMD_OFFSET &&
+		asset->bmdSize == SUSAMUNE_GHOST_SHADOW_BMD_SIZE &&
+		asset->payloadChecksum == SUSAMUNE_GHOST_SHADOW_PAYLOAD_CRC32 &&
+		asset->reserved == 0 &&
+		SusamuneAssetCrc32(asset->payload,
+			SUSAMUNE_GHOST_SHADOW_BMD_SIZE +
+			SUSAMUNE_GHOST_SHADOW_BTK_SIZE) ==
+			SUSAMUNE_GHOST_SHADOW_PAYLOAD_CRC32;
+}
+
+static bool SusamunePiantaAssetValid(
+	const struct SusamuneGhostPiantaAsset *asset)
+{
+	sync_before_read((void*)asset, SUSAMUNE_GHOST_PIANTA_ASSET_BUFFER_SIZE);
+	return asset->magic == SUSAMUNE_GHOST_PIANTA_ASSET_MAGIC &&
+		asset->version == SUSAMUNE_GHOST_MODEL_ASSET_VERSION &&
+		asset->headerSize == SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE &&
+		asset->status == SUSAMUNE_GHOST_MODEL_STATUS_READY &&
+		asset->totalSize == SUSAMUNE_GHOST_PIANTA_ASSET_SIZE &&
+		asset->bmdOffset == SUSAMUNE_GHOST_PIANTA_BMD_OFFSET &&
+		asset->bmdSize == SUSAMUNE_GHOST_PIANTA_BMD_SIZE &&
+		asset->payloadChecksum == SUSAMUNE_GHOST_PIANTA_PAYLOAD_CRC32 &&
+		asset->reserved == 0 &&
+		SusamuneAssetCrc32(asset->payload,
+			SUSAMUNE_GHOST_PIANTA_BMD_SIZE) ==
+			SUSAMUNE_GHOST_PIANTA_PAYLOAD_CRC32;
+}
+
+static void SusamunePublishAsset(void *destination, void *source, u32 size)
+{
+	memset(destination, 0, SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+	sync_after_write(destination, SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+	memcpy((u8*)destination + SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE,
+		(u8*)source + SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE,
+		size - SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+	sync_after_write((u8*)destination + SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE,
+		size - SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+	memcpy(destination, source, SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+	sync_after_write(destination, SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+	memset(source, 0, SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+	sync_after_write(source, SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+}
+
+static void SusamuneClearAssetHeader(void *asset)
+{
+	memset(asset, 0, SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+	sync_after_write(asset, SUSAMUNE_GHOST_MODEL_ASSET_HEADER_SIZE);
+}
+
+static void SusamunePreserveGhostModelAssets(
+	const struct SusamuneModHeader *hdr)
+{
+	struct SusamuneGhostShadowAsset *shadow =
+		(struct SusamuneGhostShadowAsset*)SUSAMUNE_GHOST_SHADOW_STAGING_PHYS_PTR;
+	struct SusamuneGhostPiantaAsset *pianta =
+		(struct SusamuneGhostPiantaAsset*)SUSAMUNE_GHOST_PIANTA_STAGING_PHYS_PTR;
+	void *shadowMaster = (void*)SUSAMUNE_GHOST_SHADOW_MASTER_PHYS_PTR;
+	void *piantaMaster = (void*)SUSAMUNE_GHOST_PIANTA_MASTER_PHYS_PTR;
+
+	// A larger future mod may own these bytes and must remain repeat-patchable.
+	if (hdr->fileSize > SUSAMUNE_GHOST_ASSET_VAULT_OFFSET)
+	{
+		dbgprintf("Patch:Ghost model vault unavailable (mod file 0x%X)\r\n",
+			hdr->fileSize);
+		return;
+	}
+
+	if (SusamuneShadowAssetValid(shadow))
+		SusamunePublishAsset(shadowMaster, shadow,
+			SUSAMUNE_GHOST_SHADOW_ASSET_BUFFER_SIZE);
+	else if (!SusamuneShadowAssetValid(
+			(const struct SusamuneGhostShadowAsset*)shadowMaster))
+		SusamuneClearAssetHeader(shadowMaster);
+
+	if (SusamunePiantaAssetValid(pianta))
+		SusamunePublishAsset(piantaMaster, pianta,
+			SUSAMUNE_GHOST_PIANTA_ASSET_BUFFER_SIZE);
+	else if (!SusamunePiantaAssetValid(
+			(const struct SusamuneGhostPiantaAsset*)piantaMaster))
+		SusamuneClearAssetHeader(piantaMaster);
+}
+
 // Relocate hardcoded-heap-address Gecko codes so they keep working with the
 // mod active.
 //
@@ -4255,6 +4361,9 @@ void PatchSusamune(void)
 		write32(addr, writes[i * 2 + 1]);
 		sync_after_write((void*)addr, 4);
 	}
+
+	// The complete mod file is consumed; its tail can now own pristine models.
+	SusamunePreserveGhostModelAssets(hdr);
 
 	dbgprintf("Patch:Injected susamune mod (%u bytes at 0x%08X, %u writes)\r\n",
 			hdr->codeSize, hdr->baseAddr, hdr->writeCount);

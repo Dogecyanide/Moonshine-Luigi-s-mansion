@@ -7,6 +7,7 @@
 
 #include "susamune/warp_wheel.hxx"
 
+#include "Dolphin/string.h"
 #include "SMS/Manager/FlagManager.hxx"
 #include "SMS/System/Application.hxx"
 #include "SMS/System/CardManager.hxx"
@@ -14,10 +15,13 @@
 #include "susamune/addresses.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/glyphs.hxx"
+#include "susamune/ghost.hxx"
+#include "susamune/ghost_format.h"
 #include "susamune/iling.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/packed_text.hxx"
 #include "susamune/qft_timer.hxx"
+#include "susamune/raw_prompt_input.hxx"
 #include "susamune/settings.hxx"
 
 namespace {
@@ -78,6 +82,44 @@ bool             sClassicInstantPending;
 bool             sDeathSequence;
 bool             sWaitForSave;
 u8               sSaveIdleFrames;
+bool             sCourseGuard;
+bool             sArmStartedIL;
+bool             sExitSelectorPending;
+bool             sShown;
+int              sArmedILIndex = -1;
+
+enum PromptAction : u8 {
+    PROMPT_NONE,
+    PROMPT_WARP,
+    PROMPT_IL,
+    PROMPT_EXIT_AREA,
+    PROMPT_TITLE,
+    PROMPT_RESTART_KEEP,
+    PROMPT_RESTART_FULL,
+    PROMPT_RESTART_SAVE_KEEP,
+    PROMPT_RESTART_SAVE_FULL,
+    PROMPT_SAVESTATE_LOAD,
+    PROMPT_NATURAL_DEPARTURE,
+};
+
+struct PromptState {
+    PromptAction    action;
+    LevelWarp::Dest dest;
+    u32             token;
+    s32             detail;
+    char            name[SUSAMUNE_GHOST_NAME_SIZE];
+};
+
+PromptState    sPrompt;
+RawPromptInput sPromptInput;
+bool           sPromptSaving;
+PromptAction   sArmedAction;
+bool           sSavestateLoadApproved;
+bool           sPendingTitleExit;
+bool           sHoldNaturalDeparture;
+
+void cancelArmedCourseWarp();
+void close();
 
 bool saveFlowActive() {
     if (!gpMarDirector) return false;
@@ -98,6 +140,31 @@ u8 currentGameInt3() {
         value |= LevelWarp::Dest::POST_CORONA;
     }
     return value;
+}
+
+// Exit Area still has episode 0xff here; mirror moveStage's resolver so the
+// discard check predicts the concrete Plaza route without mutating game state.
+u8 retailPlazaScenario() {
+    TFlagManager *flags = TFlagManager::smInstance;
+    if (flags->getBool(kPostCoronaFlag)) return 2;
+
+    const u8 kFinalShines[] = {0x06, 0x10, 0x1a, 0x24,
+                               0x2e, 0x38, 0x42};
+    bool finalPlaza = true;
+    for (u32 i = 0; i < sizeof(kFinalShines); i++) {
+        if (!flags->getShineFlag(kFinalShines[i])) {
+            finalPlaza = false;
+            break;
+        }
+    }
+    if (finalPlaza) return 9;
+    if (flags->getBool(0x10389)) return 8;
+    if (flags->getBool(0x10386) && flags->getBool(0x10387)) {
+        return flags->getFlag(0x40000) >= 10 ? 7 : 6;
+    }
+    if (flags->getBool(0x10385)) return 5;
+    if (flags->getBool(0x10384)) return 1;
+    return 0;
 }
 
 enum ClassicCommand {
@@ -290,7 +357,9 @@ LevelWarp::Dest currentDest(bool parent) {
     // Z keeps the exact area. Main stages and standalone specials stay put.
     // Pinna Park is a main area here, while IL route matching also treats it
     // as the parent of its embedded scenario scenes.
-    if (cur.mAreaID == 0x0D) return dest;
+    if (cur.mAreaID == TGameSequence::AREA_PINNAPARCO &&
+        !ILing::forceParentFullRestart(TGameSequence::AREA_PINNABEACH))
+        return dest;
     const u8 parentArea = LevelWarp::parentArea(cur.mAreaID);
     if (parentArea == 0xFF) return dest;
     dest.area = parentArea;
@@ -304,6 +373,181 @@ LevelWarp::Dest currentDest(bool parent) {
     dest.episode = parentEpisode;
     dest.gameInt3 = parentEpisode;
     return dest;
+}
+
+void clearPrompt() {
+    sPrompt.action = PROMPT_NONE;
+    sPrompt.token = 0;
+    sPrompt.detail = 0;
+    sPrompt.name[0] = '\0';
+    sPromptSaving = false;
+    sPromptInput.clear();
+}
+
+bool refreshPromptPB() {
+    u32 token = 0;
+    char name[SUSAMUNE_GHOST_NAME_SIZE];
+    if (!Ghost::copyUnsavedPBName(name, sizeof(name), &token)) return false;
+    sPrompt.token = token;
+    strncpy(sPrompt.name, name, sizeof(sPrompt.name));
+    sPrompt.name[sizeof(sPrompt.name) - 1] = '\0';
+    sPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+    return true;
+}
+
+bool beginPrompt(PromptAction action, const LevelWarp::Dest &dest,
+                 s32 detail = 0) {
+    const PromptAction oldAction = sPrompt.action;
+    const LevelWarp::Dest oldDest = sPrompt.dest;
+    const s32 oldDetail = sPrompt.detail;
+    sPrompt.action = action;
+    sPrompt.dest = dest;
+    sPrompt.detail = detail;
+    sPromptSaving = false;
+    if (!refreshPromptPB()) {
+        sPrompt.action = oldAction;
+        sPrompt.dest = oldDest;
+        sPrompt.detail = oldDetail;
+        return false;
+    }
+    close();
+    gBinds.suppressUntilRelease();
+    return true;
+}
+
+void executePromptAction() {
+    const PromptState action = sPrompt;
+    const bool closeSaveMenu = sPromptSaving;
+    clearPrompt();
+    gBinds.suppressUntilRelease();
+    if (closeSaveMenu && gMenu && gMenu->shown()) gMenu->hide();
+
+    switch (action.action) {
+    case PROMPT_WARP:
+        LevelWarp::warpToGuarded(action.dest, 0, false);
+        break;
+    case PROMPT_IL:
+        if (ILing::start(action.detail, 0)) {
+            sArmedILIndex = action.detail;
+        } else if (gMenu) {
+            gMenu->toast("Warps disabled");
+        }
+        break;
+    case PROMPT_EXIT_AREA:
+        LevelWarp::warpToGuarded(action.dest, 0, false);
+        sArmedAction = PROMPT_EXIT_AREA;
+        sExitSelectorPending = true;
+        break;
+    case PROMPT_TITLE:
+        sPendingTitleExit = true;
+        break;
+    case PROMPT_RESTART_KEEP:
+        LevelWarp::restart(true);
+        break;
+    case PROMPT_RESTART_FULL:
+        LevelWarp::restartFull();
+        break;
+    case PROMPT_RESTART_SAVE_KEEP:
+        LevelWarp::restartAfterSave(true);
+        break;
+    case PROMPT_RESTART_SAVE_FULL:
+        LevelWarp::restartFullAfterSave();
+        break;
+    case PROMPT_SAVESTATE_LOAD:
+        sSavestateLoadApproved = true;
+        break;
+    case PROMPT_NATURAL_DEPARTURE:
+        sHoldNaturalDeparture = false;
+        break;
+    default:
+        break;
+    }
+}
+
+void updatePrompt() {
+    if (sPrompt.action == PROMPT_NONE) return;
+    // RawPromptInput owns the controller while this global modal is visible.
+    // Silence every configured action, including buttons outside its A/B mask.
+    gBinds.suppressUntilRelease();
+
+    // A save owns only the storage request. Keep the destructive action here
+    // until its exact PB token disappears on the successful storage ACK.
+    if (sPromptSaving) {
+        if (!Ghost::hasUnsavedPBToken(sPrompt.token)) {
+            if (!refreshPromptPB()) {
+                executePromptAction();
+                return;
+            }
+            if (gMenu && gMenu->openGhostPBSave(sPrompt.token)) return;
+            sPromptSaving = false;
+            sPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+            if (gMenu) gMenu->toast("Could not open protected PB save");
+            return;
+        }
+        if (!gMenu || !gMenu->shown()) {
+            sPromptSaving = false;
+            sPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+        }
+        return;
+    }
+
+    // A storage ACK can remove the shown PB while this overlay is open. Move
+    // to the next protected PB, or release the held action when none remain.
+    if (!Ghost::hasUnsavedPBToken(sPrompt.token)) {
+        if (!refreshPromptPB()) executePromptAction();
+        return;
+    }
+
+    const u16 pressed = sPromptInput.update();
+    if (pressed & JUTGamePad::B) {
+        gBinds.suppressUntilRelease();
+        if (!Ghost::discardUnsavedPB(sPrompt.token)) {
+            if (!refreshPromptPB()) executePromptAction();
+            return;
+        }
+        // Record and playback can each own an accepted PB. Consume each exact
+        // token explicitly before releasing the held departure.
+        if (!refreshPromptPB()) executePromptAction();
+        return;
+    }
+    if (!(pressed & JUTGamePad::A)) return;
+
+    gBinds.suppressUntilRelease();
+    sPromptSaving = true;
+    sPromptInput.clear();
+    if (!gMenu || !gMenu->openGhostPBSave(sPrompt.token)) {
+        sPromptSaving = false;
+        sPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+        if (gMenu) gMenu->toast("Could not open protected PB save");
+        return;
+    }
+}
+
+bool requestCourseWarp(const LevelWarp::Dest &dest) {
+    // A new explicit destination replaces any still-card-delayed command now,
+    // even if this request itself opens the PB guard.
+    if (sArmed) cancelArmedCourseWarp();
+    if (beginPrompt(PROMPT_WARP, dest)) return true;
+    LevelWarp::warpToGuarded(dest, 0, false);
+    return true;
+}
+
+void requestRestart(bool full, bool afterSave) {
+    if (sArmed) cancelArmedCourseWarp();
+    const LevelWarp::Dest dest = full ? currentDest(true)
+                                      : currentDest(false);
+    const PromptAction action = full
+        ? (afterSave ? PROMPT_RESTART_SAVE_FULL : PROMPT_RESTART_FULL)
+        : (afterSave ? PROMPT_RESTART_SAVE_KEEP : PROMPT_RESTART_KEEP);
+    if (beginPrompt(action, dest)) return;
+    if (full) {
+        if (afterSave) LevelWarp::restartFullAfterSave();
+        else LevelWarp::restartFull();
+    } else if (afterSave) {
+        LevelWarp::restartAfterSave(true);
+    } else {
+        LevelWarp::restart(true);
+    }
 }
 
 bool updateClassicInstant(TMarioGamePad *pad) {
@@ -330,10 +574,14 @@ bool updateClassicInstant(TMarioGamePad *pad) {
     sClassicInstantPending = false;
 
     switch (command) {
-    case CLASSIC_WARP:            LevelWarp::warpTo(dest); return true;
-    case CLASSIC_RESTART_KEEP:    LevelWarp::restart(true); return true;
-    case CLASSIC_RESTART_DEFAULT: LevelWarp::restartFull(); return true;
-    case CLASSIC_WARP_LAST:       LevelWarp::warpToLast(); return true;
+    case CLASSIC_WARP:
+        requestCourseWarp(dest);
+        return true;
+    case CLASSIC_RESTART_KEEP:    requestRestart(false, false); return true;
+    case CLASSIC_RESTART_DEFAULT: requestRestart(true, false); return true;
+    case CLASSIC_WARP_LAST:
+        if (sLastValid) requestCourseWarp(sLast);
+        return true;
     default: return false;
     }
 }
@@ -381,8 +629,17 @@ void overrideSourceForDefaultSpawn(const LevelWarp::Dest &source) {
 }
 
 void prepareArmedDeparture() {
+    if (sCourseGuard && !sExitSelectorPending) {
+        sLast = sDest;
+        sLastValid = true;
+    }
     sArmed       = false;
     sTailPending = true;
+    if (sArmStartedIL) ILing::commitWarpStart();
+    sCourseGuard = false;
+    sArmStartedIL = false;
+    sArmedAction = PROMPT_NONE;
+    sArmedILIndex = -1;
 
     if (sKeepSpawn) {
         sKeepSpawn = false;
@@ -406,6 +663,91 @@ __attribute__((noinline)) void armWarp(const LevelWarp::Dest &dest,
     sKeepSpawn = keepSpawn;
     sOverrideSource = overrideSource;
     sWaitForSave = false;
+    sCourseGuard = false;
+    sArmStartedIL = false;
+    sArmedAction = PROMPT_NONE;
+    sExitSelectorPending = false;
+    sArmedILIndex = -1;
+}
+
+void armGuardedWarp(const LevelWarp::Dest &dest, bool overrideSource,
+                    bool selectedIL) {
+    if (sArmed && sArmStartedIL && !selectedIL) {
+        ILing::cancelWarpStart();
+    }
+    armWarp(dest, false, overrideSource);
+    sCourseGuard = true;
+    sArmStartedIL = selectedIL;
+    sArmedAction = selectedIL ? PROMPT_IL : PROMPT_WARP;
+}
+
+void cancelArmedCourseWarp() {
+    const bool cancelIL = sArmStartedIL;
+    sArmed = false;
+    sKeepSpawn = false;
+    sOverrideSource = false;
+    sWaitForSave = false;
+    sSaveIdleFrames = 0;
+    sCourseGuard = false;
+    sArmStartedIL = false;
+    sArmedAction = PROMPT_NONE;
+    sExitSelectorPending = false;
+    sArmedILIndex = -1;
+    if (cancelIL) ILing::cancelWarpStart();
+}
+
+bool armedCourseWarpReady() {
+    if (sArmedAction == PROMPT_NONE) return true;
+
+    u32 token = 0;
+    char name[SUSAMUNE_GHOST_NAME_SIZE];
+    if (!Ghost::copyUnsavedPBName(name, sizeof(name), &token)) return true;
+
+    const LevelWarp::Dest retryDest = sDest;
+    const PromptAction retryAction = sArmedAction;
+    const int retryIL = sArmedILIndex;
+    cancelArmedCourseWarp();
+    beginPrompt(retryAction, retryDest, retryIL);
+    return false;
+}
+
+enum SelectorResult {
+    SELECTOR_NONE,
+    SELECTOR_REDIRECTED,
+    SELECTOR_BLOCKED,
+};
+
+SelectorResult applyTransitionSelector() {
+    const TGameSequence &next = gpApplication.mNextScene;
+    const bool selectorExit =
+        (next.mAreaID == TGameSequence::AREA_DOLPIC && next.mEpisodeID <= 9) ||
+        (next.mAreaID == TGameSequence::AREA_AIRPORT && next.mEpisodeID == 0);
+    if (!selectorExit || !gpApplication.mGamePads[0]) return SELECTOR_NONE;
+
+    LevelWarp::Dest selected;
+    ClassicCommand command =
+        resolveClassicSelector(gpApplication.mGamePads[0], false, &selected);
+    bool parentRestart = false;
+    if (command == CLASSIC_RESTART_DEFAULT) {
+        selected = currentDest(false);
+        command = CLASSIC_WARP;
+    } else if (command == CLASSIC_RESTART_PARENT) {
+        selected = currentDest(true);
+        command = CLASSIC_WARP;
+        parentRestart = true;
+    }
+    if (command != CLASSIC_WARP) return SELECTOR_NONE;
+
+    char discarded[SUSAMUNE_GHOST_NAME_SIZE];
+    u32 discardedToken = 0;
+    if (Ghost::copyUnsavedPBName(discarded, sizeof(discarded),
+                                 &discardedToken)) {
+        if (gMenu) gMenu->toast("Save PB ghost before chart warp");
+        return SELECTOR_BLOCKED;
+    }
+    applyDest(selected);
+    if (parentRestart) overrideSourceForDefaultSpawn(selected);
+    return SELECTOR_REDIRECTED;
 }
 
 }  // namespace
@@ -413,36 +755,108 @@ __attribute__((noinline)) void armWarp(const LevelWarp::Dest &dest,
 namespace LevelWarp {
 
 void warpTo(const Dest &dest) {
-    armWarp(dest, false, false);
-    sLast      = dest;
-    sLastValid = true;
+    warpToGuarded(dest, 0, false);
+}
+
+void warpToGuarded(const Dest &dest, u32 legacyToken, bool selectedIL) {
+    (void)legacyToken;
+    armGuardedWarp(dest, false, selectedIL);
 }
 
 void warpFrom(const Dest &source, const Dest &dest) {
-    warpTo(dest);
+    warpFromGuarded(source, dest, 0, false);
+}
+
+void warpFromGuarded(const Dest &source, const Dest &dest,
+                     u32 legacyToken, bool selectedIL) {
+    (void)legacyToken;
+    armGuardedWarp(dest, true, selectedIL);
     sSource = source;
-    sOverrideSource = true;
 }
 
 void warpToLast() {
-    if (sLastValid) armWarp(sLast, false, false);
+    if (sLastValid) armGuardedWarp(sLast, false, false);
+}
+
+void cancelPending(bool keepExitApproval) {
+    if (keepExitApproval) {
+        const bool keepExitState = sExitSelectorPending &&
+            (sArmed || sTailPending);
+        if (!keepExitState) {
+            if (sArmed) cancelArmedCourseWarp();
+            sTailPending = false;
+            sKeepSpawn = false;
+            sOverrideSource = false;
+            sWaitForSave = false;
+            sSaveIdleFrames = 0;
+            sCourseGuard = false;
+            sArmStartedIL = false;
+            sArmedAction = PROMPT_NONE;
+            sExitSelectorPending = false;
+            sArmedILIndex = -1;
+        }
+        switch (sPrompt.action) {
+        case PROMPT_WARP:
+        case PROMPT_IL:
+        case PROMPT_RESTART_KEEP:
+        case PROMPT_RESTART_FULL:
+        case PROMPT_RESTART_SAVE_KEEP:
+        case PROMPT_RESTART_SAVE_FULL:
+            clearPrompt();
+            break;
+        default:
+            break;
+        }
+        return;
+    }
+
+    if (sArmed) cancelArmedCourseWarp();
+    // Savestate restore can rewind a director after kick() has consumed the
+    // arm but before its fade reaches onDirected(). That tail lives in mod BSS,
+    // outside the snapshot, and must not fire on some later retail departure.
+    sTailPending = false;
+    sKeepSpawn = false;
+    sOverrideSource = false;
+    sWaitForSave = false;
+    sSaveIdleFrames = 0;
+    sCourseGuard = false;
+    sArmStartedIL = false;
+    sArmedAction = PROMPT_NONE;
+    sExitSelectorPending = false;
+    sArmedILIndex = -1;
+    clearPrompt();
+    sSavestateLoadApproved = false;
+    sPendingTitleExit = false;
+    sHoldNaturalDeparture = false;
 }
 
 void restart(bool keepSpawn) {
+    if (sArmed && sArmStartedIL) ILing::cancelWarpStart();
     const TGameSequence &cur = gpApplication.mCurrentScene;
     const Dest dest = { cur.mAreaID, cur.mEpisodeID, currentGameInt3() };
     armWarp(dest, keepSpawn, false);
+    sArmedAction = PROMPT_RESTART_KEEP;
 }
 
 void restartFull() {
+    if (sArmed && sArmStartedIL) ILing::cancelWarpStart();
     const Dest dest = currentDest(true);
     armWarp(dest, false, true);
+    sArmedAction = PROMPT_RESTART_FULL;
     sSource = dest;
     // Entering from the destination itself selects the level's default spawn.
 }
 
 void restartAfterSave(bool keepSpawn) {
     restart(keepSpawn);
+    sArmedAction = PROMPT_RESTART_SAVE_KEEP;
+    sWaitForSave = true;
+    sSaveIdleFrames = 0;
+}
+
+void restartFullAfterSave() {
+    restartFull();
+    sArmedAction = PROMPT_RESTART_SAVE_FULL;
     sWaitForSave = true;
     sSaveIdleFrames = 0;
 }
@@ -462,6 +876,7 @@ u8 kick(TMarDirector *director, u8 state) {
     if (gpCardManager && gpCardManager->getLastStatus() == CARD_ERROR_BUSY) {
         return state;
     }
+    if (!armedCourseWarpReady()) return state;
     prepareArmedDeparture();
 
     director->moveStage();
@@ -474,7 +889,6 @@ s32 onDirected(s32 appState) {
     if (appState == 0) {
         return appState;
     }
-
     // If the director reaches an app-state handoff before another game-mode
     // tick, the card becoming idle is sufficient to release the queued exit.
     if (sArmed && sWaitForSave) {
@@ -483,13 +897,29 @@ s32 onDirected(s32 appState) {
     }
     if (sArmed) {
         sWaitForSave = false;
-        prepareArmedDeparture();
+        if (sCourseGuard) {
+            // A retail departure won the race with the queued course warp.
+            // It is too late to open a confirmation at this handoff.
+            cancelArmedCourseWarp();
+            if (gMenu) gMenu->toast("Course warp cancelled");
+        } else {
+            prepareArmedDeparture();
+        }
     }
     sDeathSequence = false;
 
     if (sTailPending) {
         sTailPending = false;
-        applyDest(sDest);
+        const bool applyExitSelector = sExitSelectorPending;
+        sExitSelectorPending = false;
+        // Resolve the held chart while the source route flags are still live.
+        // In particular, Z/Y centre restarts derive their parent episode from
+        // those flags; applying Plaza first would silently replace that value.
+        const SelectorResult selector = applyExitSelector &&
+                !gSettings.getBool(SETTING_DISABLE_WARPS)
+            ? applyTransitionSelector()
+            : SELECTOR_NONE;
+        if (selector != SELECTOR_REDIRECTED) applyDest(sDest);
         if (sOverrideSource) {
             overrideSourceForDefaultSpawn(sSource);
             sOverrideSource = false;
@@ -501,30 +931,11 @@ s32 onDirected(s32 appState) {
     // Original Level Select: while an ordinary file/stage departure finishes,
     // a held chart combination redirects the next scene. Instant Level Select
     // uses the same resolver earlier in WarpWheel::update().
-    const TGameSequence &next = gpApplication.mNextScene;
-    const bool selectorExit =
-        (next.mAreaID == TGameSequence::AREA_DOLPIC && next.mEpisodeID <= 9) ||
-        (next.mAreaID == TGameSequence::AREA_AIRPORT && next.mEpisodeID == 0);
-    if (appState > 1 && selectorExit && gpApplication.mGamePads[0]) {
-        Dest selected;
-        ClassicCommand command =
-            resolveClassicSelector(gpApplication.mGamePads[0], false, &selected);
-        bool parentRestart = false;
-        if (command == CLASSIC_RESTART_DEFAULT) {
-            selected = currentDest(false);
-            command = CLASSIC_WARP;
-        } else if (command == CLASSIC_RESTART_PARENT) {
-            selected = currentDest(true);
-            command = CLASSIC_WARP;
-            parentRestart = true;
-        }
-        if (command == CLASSIC_WARP) {
-            applyDest(selected);
-            if (parentRestart) {
-                overrideSourceForDefaultSpawn(selected);
-            }
+    if (appState > 1) {
+        const SelectorResult selector = applyTransitionSelector();
+        if (selector == SELECTOR_REDIRECTED)
             return TApplication::CONTEXT_DIRECT_STAGE;
-        }
+        if (selector == SELECTOR_BLOCKED) return appState;
     }
 
     if (appState > 1 && gSettings.getBool(SETTING_AREA_LOCK)) {
@@ -808,7 +1219,6 @@ inline Color cLabel()    { return col(233, 241, 247, 255); }
 inline Color cOnAccent() { return col(27, 18, 6, 255); }
 inline Color cFooter()   { return col(127, 149, 166, 255); }
 
-bool  sShown;
 s8    sRoot = -1;  // -1 while the root wheel is up
 bool  sSubMode;
 
@@ -964,9 +1374,126 @@ void close() {
 
 namespace WarpWheel {
 
+bool requestILStart(int entry) {
+    if (gSettings.getBool(SETTING_DISABLE_WARPS)) return false;
+    const LevelWarp::Dest key = {0, 0, 0};
+    if (beginPrompt(PROMPT_IL, key, entry)) return true;
+    if (!ILing::start(entry, 0)) return false;
+    sArmedILIndex = entry;
+    return true;
+}
+
+bool requestSavestateLoad() {
+    const LevelWarp::Dest key = {0, 0, 0};
+    return !beginPrompt(PROMPT_SAVESTATE_LOAD, key);
+}
+
+bool takeSavestateLoadApproval() {
+    const bool approved = sSavestateLoadApproved;
+    sSavestateLoadApproved = false;
+    return approved;
+}
+
+bool holdGameModeBeforeUpdate(TMarDirector *director) {
+    if (!director || director->mCurState != TMarDirector::STATE_NORMAL ||
+        (director->mGameState & 0x2) == 0) {
+        return false;
+    }
+    if (!Ghost::hasUnsavedPB()) {
+        sHoldNaturalDeparture = false;
+        return false;
+    }
+    // Shine Get sets the departure bit as its result presentation begins, but
+    // demo state 3 keeps moveStage() unreachable until that camera finishes.
+    // Hold only once retail returns to state 0, on the last safe update before
+    // the same bit would actually tear down the stage.
+    if (director->mDemoState != 0) return false;
+    if (!sHoldNaturalDeparture && sPrompt.action == PROMPT_NONE) {
+        const LevelWarp::Dest key = {0, 0, 0};
+        beginPrompt(PROMPT_NATURAL_DEPARTURE, key);
+    }
+    return true;
+}
+
+u8 applyPendingGameModeAction(TMarDirector *director, u8 state) {
+    if (!sPendingTitleExit || !director ||
+        director->mCurState != TMarDirector::STATE_NORMAL) {
+        return state;
+    }
+    sPendingTitleExit = false;
+    // Mirrors the retail pause-menu title branch after its object has closed.
+    director->_13[1] = 4;
+    director->mNextState = 4;
+    return TMarDirector::STATE_STAGE_EXIT_2;
+}
+
+bool retailExitPending() {
+    return sPrompt.action == PROMPT_EXIT_AREA ||
+           ((sArmed || sTailPending) && sExitSelectorPending);
+}
+
+bool promptShown() {
+    return sPrompt.action != PROMPT_NONE && !sPromptSaving;
+}
+
+bool promptPending() { return sPrompt.action != PROMPT_NONE; }
+
+bool resumePBPrompt(u32 token) {
+    if (!sPromptSaving || sPrompt.action == PROMPT_NONE ||
+        token == 0 || token != sPrompt.token ||
+        !Ghost::hasUnsavedPBToken(token)) {
+        return false;
+    }
+    sPromptSaving = false;
+    sPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+    gBinds.suppressUntilRelease();
+    return true;
+}
+
+u8 guardExitArea(u8 nextState) {
+    const u8 kPauseResume = 0;
+    const u8 kPauseTitle = 1;
+    const u8 kPauseExitArea = 5;
+    if (nextState != kPauseTitle && nextState != kPauseExitArea)
+        return nextState;
+
+    LevelWarp::Dest dest = {0, 0, 0};
+    PromptAction action = PROMPT_TITLE;
+    if (nextState == kPauseExitArea) {
+        if (!TFlagManager::smInstance) return nextState;
+        const u8 plazaFlags =
+            TFlagManager::smInstance->getBool(kPostCoronaFlag)
+                ? LevelWarp::Dest::POST_CORONA : 0;
+        dest.area = TGameSequence::AREA_DOLPIC;
+        dest.episode = retailPlazaScenario();
+        dest.gameInt3 = plazaFlags;
+        action = PROMPT_EXIT_AREA;
+    }
+    if (sArmed) cancelArmedCourseWarp();
+    if (!beginPrompt(action, dest)) return nextState;
+
+    // getNextState() has already closed the pause object. Resume first; the
+    // raw-pad overlay owns no retail UI pointer.
+    return kPauseResume;
+}
+
 void update(TMarioGamePad *pad) {
     if (!gpMarDirector) {
+        clearPrompt();
+        sSavestateLoadApproved = false;
+        sPendingTitleExit = false;
+        sHoldNaturalDeparture = false;
         close();
+        return;
+    }
+
+    if (sPrompt.action != PROMPT_NONE) {
+        updatePrompt();
+        if (promptShown()) {
+            pad->mButtons.mInput = 0;
+            pad->mButtons.mFrameInput = 0;
+            pad->mButtons.mRapidInput = 0;
+        }
         return;
     }
 
@@ -987,12 +1514,11 @@ void update(TMarioGamePad *pad) {
              gpMarDirector->mPauseMenu &&
              gpMarDirector->mPauseMenu->mState == TPauseMenu2::MENU_SAVING);
         // The save dialog owns the director, so that path waits for an idle tick.
+        const bool fullRestart = gBinds.wasPressed(BIND_FULL_RESTART);
+        const bool instantRestart = gBinds.wasPressed(BIND_INSTANT_RESTART);
         if ((deathExit || saveDialog) &&
-            gBinds.wasPressed(BIND_INSTANT_RESTART)) {
-            if (saveDialog)
-                LevelWarp::restartAfterSave(true);
-            else
-                LevelWarp::restart(true);
+            (fullRestart || instantRestart)) {
+            requestRestart(fullRestart, saveDialog);
             if (gMenu && gSettings.getBool(SETTING_RESTART_QUEUED_FEEDBACK))
                 gMenu->toast("Restart queued");
         }
@@ -1006,13 +1532,13 @@ void update(TMarioGamePad *pad) {
         // Bianco 1 rather than the bare B+D-up restart bind.
         closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_INSTANT_RESTART)) {
-        LevelWarp::restart(true);
+        requestRestart(false, false);
         closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_FULL_RESTART)) {
-        LevelWarp::restartFull();
+        requestRestart(true, false);
         closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_WARP_LAST)) {
-        LevelWarp::warpToLast();
+        if (sLastValid) requestCourseWarp(sLast);
         closeForCommand = true;
     }
     if (closeForCommand) {
@@ -1020,7 +1546,6 @@ void update(TMarioGamePad *pad) {
         // completed. Do not let that overlay freeze an already-armed warp.
         close();
     }
-
     if (gMenu && gMenu->shown()) {
         close();
         return;
@@ -1054,8 +1579,7 @@ void update(TMarioGamePad *pad) {
         } else {
             LevelWarp::Dest dest;
             if (slotDest(slot, &dest)) {
-                LevelWarp::warpTo(dest);
-                close();
+                if (requestCourseWarp(dest)) close();
             }
         }
     }
@@ -1069,10 +1593,35 @@ void update(TMarioGamePad *pad) {
     }
 }
 
-bool shown() { return sShown; }
+bool shown() { return sShown || promptShown(); }
 
 void draw() {
-    if (!sShown || !gMenu) {
+    if (!gMenu || (!sShown && !promptShown())) {
+        return;
+    }
+
+    if (promptShown()) {
+        const int x = 62;
+        const int y = 142;
+        const int w = 516;
+        const int h = 190;
+        const char *title = "Protect unsaved PB ghost?";
+        const char *note = "Save it, or explicitly discard and continue.";
+        const char *hint = SUSAMUNE_GLYPH_A " Ghosts / Save    "
+                           SUSAMUNE_GLYPH_B " Discard & continue";
+
+        gMenu->fillBox(0, 0, 640, 480, cBackdrop());
+        gMenu->fillBox(x, y, w, h, cSlice());
+        gMenu->fillBox(x, y, w, 3, cSelected());
+        drawCentred(title, kCx, y + 26, 22, cLabel());
+        int nameSize = 18;
+        while (nameSize > 11 &&
+               Menu::textWidth(sPrompt.name, nameSize) > w - 24) {
+            nameSize--;
+        }
+        drawCentred(sPrompt.name, kCx, y + 64, nameSize, cSelected());
+        drawCentred(note, kCx, y + 104, 14, cLabel());
+        drawCentred(hint, kCx, y + 148, 15, cFooter());
         return;
     }
 

@@ -22,12 +22,16 @@
 #include "susamune/packed_text.hxx"
 #include "susamune/attempt_counter.hxx"
 #include "susamune/qft_timer.hxx"
+#include "susamune/ghost.hxx"
+#include "susamune/ghost_storage.hxx"
 #include "susamune/qft_display.hxx"
+#include "susamune/raw_prompt_input.hxx"
 #include "susamune/records.hxx"
 #include "susamune/records_persistence.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/susamune_cfg.h"
 #include "susamune/wallkick_display.hxx"
+#include "susamune/warp_wheel.hxx"
 #if ENABLE_DEBUG_WARPS
 #include "susamune/debug_warp.hxx"
 #endif
@@ -51,6 +55,11 @@ namespace {
 typedef JUtility::TColor Color;
 
 inline Color col(u8 r, u8 g, u8 b, u8 a) { return Color(r, g, b, a); }
+inline int clampi(int value, int lo, int hi) {
+    if (value < lo) return lo;
+    if (value > hi) return hi;
+    return value;
+}
 
 // -------- palette (built inline so nothing lives in static storage) -------
 inline Color cBackdrop()   { return col(6, 8, 14, 150); }    // full-screen dim
@@ -152,6 +161,7 @@ public:
     // switching, no close combo. The binds tab needs it, since every button
     // it might record is also a menu control.
     virtual bool grabsInput() const { return false; }
+    virtual bool suppressesBinds() const { return false; }
     // A live editor can temporarily replace the normal panel while retaining
     // the menu's input grab and stage-freeze behaviour.
     virtual bool fullScreen() const { return false; }
@@ -266,7 +276,14 @@ public:
 
     const char *title() const override { return "ILs"; }
     bool grabsInput() const override {
-        return mConfirmDelete || mEditingName || gCreationExtras.editing();
+        return mConfirmDelete || mEditingName ||
+               gCreationExtras.editing();
+    }
+    bool suppressesBinds() const override {
+        if (mConfirmDelete || mEditingName) return true;
+        const u16 held = JUTGamePad::mPadStatus[0].mButton;
+        return !isOption() &&
+               (held & (JUTGamePad::A | JUTGamePad::X)) != 0;
     }
     bool fullScreen() const override {
         return mEditingName || gCreationExtras.editing();
@@ -282,17 +299,18 @@ public:
             return;
         }
         if (mConfirmDelete) {
-            const u32 rapid = pad->mButtons.mRapidInput;
-            if (rapid & TMarioGamePad::A) {
+            const u16 pressed = mPromptInput.update();
+            if (pressed & JUTGamePad::A) {
                 ILing::clearPB(selectedEntry());
                 mConfirmDelete = false;
+                mPromptInput.clear();
                 menu->toast("PB deleted");
-            } else if (rapid & TMarioGamePad::B) {
+            } else if (pressed & JUTGamePad::B) {
                 mConfirmDelete = false;
+                mPromptInput.clear();
             }
             return;
         }
-
         const u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
             mSel = wrap(mSel - 1, OPTION_COUNT + ILing::count());
@@ -323,14 +341,18 @@ public:
         if (rapid & TMarioGamePad::A) {
             if (isOption()) {
                 activateOption(menu, +1);
-            } else if (ILing::start(selectedEntry())) {
-                menu->hide();
             } else {
-                menu->toast("Warps disabled");
+                const int entry = selectedEntry();
+                if (WarpWheel::requestILStart(entry)) {
+                    menu->hide();
+                } else {
+                    menu->toast("Warps disabled");
+                }
             }
         } else if (!isOption() && (rapid & TMarioGamePad::X) &&
                    ILing::pbQf(selectedEntry()) >= 0) {
             mConfirmDelete = true;
+            mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
         }
     }
 
@@ -361,7 +383,6 @@ public:
                            y + 112, FOOT_SZ, FOOT_SZ, cFooter());
             return;
         }
-
         const int entries = ILing::count();
         const int listH = h - ROW_H;
         const int maxRows = listH / ROW_H;
@@ -618,12 +639,1426 @@ private:
 
     int mSel;
     bool mConfirmDelete;
+    RawPromptInput mPromptInput;
     bool mEditingName;
     u8 mNameCursor;
     u8 mNamePage;
     u8 mNameLength;
     bool mNameUpper;
     char mNameBuffer[SUSAMUNE_ILING_PROFILE_NAME_SIZE];
+};
+
+// ---------------------------------------------------------------------
+// Ghost library -- fixed-slot, console-only asynchronous SD storage.
+// ---------------------------------------------------------------------
+class GhostsTab : public MenuTab {
+public:
+    GhostsTab()
+        : mSel(0), mConfirmDelete(false), mDeleteImported(false),
+          mDeleteSlot(-1), mConfirmSave(false), mSaveSlot(-1),
+          mSaveIdentity(0), mChoice(CHOICE_NONE),
+          mLaunch(LAUNCH_IDLE), mPBAction(PB_ACTION_NONE), mPBToken(0),
+          mProtectedPBToken(0), mProtectedSavePending(false),
+          mProtectedDeleteConfirm(false), mProtectedDeletePending(false) {
+        mSaveName[0] = '\0';
+        mPBName[0] = '\0';
+        mPrimaryRef.selection = -1;
+        mPrimaryRef.fingerprint = 0;
+        mSecondaryRef.selection = -1;
+        mSecondaryRef.fingerprint = 0;
+    }
+
+    const char *title() const override { return "Ghosts"; }
+    bool grabsInput() const override {
+        return mConfirmDelete || mConfirmSave || mChoice != CHOICE_NONE ||
+               mLaunch != LAUNCH_IDLE || mPBAction != PB_ACTION_NONE ||
+               mProtectedPBToken != 0;
+    }
+    bool suppressesBinds() const override {
+        if (grabsInput()) return true;
+        const u16 held = JUTGamePad::mPadStatus[0].mButton;
+        return (held & (JUTGamePad::A | JUTGamePad::X)) != 0;
+    }
+
+    bool beginProtectedPBSave(Menu *menu, u32 token) {
+        char name[SUSAMUNE_GHOST_NAME_SIZE];
+        u32 identity = 0;
+        if (token == 0 || !Ghost::hasUnsavedPBToken(token) ||
+            !Ghost::copySaveableName(name, sizeof(name), &identity) ||
+            identity != token) {
+            return false;
+        }
+
+        mConfirmDelete = false;
+        mConfirmSave = false;
+        mChoice = CHOICE_NONE;
+        mLaunch = LAUNCH_IDLE;
+        mPBAction = PB_ACTION_NONE;
+        mPBToken = 0;
+        mProtectedPBToken = token;
+        mProtectedSavePending = false;
+        mProtectedDeleteConfirm = false;
+        mProtectedDeletePending = false;
+        mSaveIdentity = token;
+        mSaveSlot = -2;
+        strncpy(mSaveName, name, sizeof(mSaveName));
+        mSaveName[sizeof(mSaveName) - 1] = '\0';
+        mPromptInput.begin(JUTGamePad::B);
+        prepareProtectedPBSave(menu);
+        return true;
+    }
+
+    void update(Menu *menu, TMarioGamePad *pad) override {
+        if (mProtectedPBToken != 0 && !mConfirmSave) {
+            updateProtectedPBSave(menu, pad);
+            return;
+        }
+        if (mPBAction != PB_ACTION_NONE) {
+            updatePBAction(menu);
+            return;
+        }
+        if (updateObserverLaunch(menu, pad)) return;
+        if (mChoice != CHOICE_NONE) {
+            updateChoice(menu, pad);
+            return;
+        }
+        if (mConfirmDelete) {
+            const u16 pressed = mPromptInput.update();
+            if (pressed & JUTGamePad::A) {
+                const bool started = mDeleteImported
+                    ? GhostStorage::removeImported(mDeleteSlot)
+                    : GhostStorage::remove(mDeleteSlot);
+                if (started) {
+                    menu->toast("Deleting ghost...");
+                } else {
+                    menu->toast(storageStatus());
+                }
+                mConfirmDelete = false;
+                mPromptInput.clear();
+            } else if (pressed & JUTGamePad::B) {
+                mConfirmDelete = false;
+                mPromptInput.clear();
+            }
+            return;
+        }
+        if (mConfirmSave) {
+            const u16 pressed = mPromptInput.update();
+            char name[SUSAMUNE_GHOST_NAME_SIZE];
+            u32 identity = 0;
+            const bool saveable = Ghost::copySaveableName(
+                name, sizeof(name), &identity);
+            const bool protectedSave = mProtectedPBToken != 0;
+            if (protectedSave &&
+                (!Ghost::hasUnsavedPBToken(mProtectedPBToken) ||
+                 !saveable || identity != mProtectedPBToken)) {
+                clearProtectedPBSave();
+                return;
+            }
+            const bool changed = saveable && identity != mSaveIdentity;
+            if (saveable) {
+                strncpy(mSaveName, name, sizeof(mSaveName));
+                mSaveName[sizeof(mSaveName) - 1] = '\0';
+            }
+            if (changed) {
+                if (protectedSave) return;
+                mSaveIdentity = identity;
+                mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+                if (pressed & JUTGamePad::A) {
+                    menu->toast("Ghost changed; confirm save again");
+                }
+                return;
+            }
+            if (pressed & JUTGamePad::A) {
+                if (!saveable) {
+                    menu->toast("No ghost recording to save");
+                    mConfirmSave = false;
+                } else if (GhostStorage::save(mSaveSlot, mSaveIdentity)) {
+                    menu->toast("Saving ghost...");
+                    mConfirmSave = false;
+                    if (protectedSave) {
+                        mProtectedSavePending = true;
+                        mPromptInput.begin(JUTGamePad::B);
+                    }
+                } else {
+                    menu->toast(storageStatus());
+                    mConfirmSave = protectedSave;
+                    if (protectedSave)
+                        mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+                }
+                if (!mConfirmSave && !mProtectedSavePending)
+                    mPromptInput.clear();
+            } else if (pressed & JUTGamePad::B) {
+                mConfirmSave = false;
+                mPromptInput.clear();
+                if (protectedSave) cancelProtectedPBSave(menu);
+            }
+            return;
+        }
+        const u32 rapid = menu->navigationInput(pad);
+        if (rapid & TMarioGamePad::CSTICK_UP) {
+            mSel = wrap(mSel - 1, SELECTION_COUNT);
+        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+            mSel = wrap(mSel + 1, SELECTION_COUNT);
+        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            jumpSection(-1);
+        } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
+            jumpSection(+1);
+        }
+
+        if (rapid & TMarioGamePad::Y) {
+            const bool imports = mSel >= IMPORT_SCAN_SELECTION;
+            const bool started = imports ? GhostStorage::scanImports()
+                                         : GhostStorage::refresh();
+            if (started) {
+                menu->toast(imports ? "Scanning import folder..."
+                                    : "Refreshing ghosts...");
+            } else {
+                menu->toast(storageStatus());
+            }
+            return;
+        }
+
+        if (rapid & TMarioGamePad::A) {
+            activate(menu);
+        } else if (rapid & TMarioGamePad::Z) {
+            share(menu);
+        } else if (rapid & TMarioGamePad::X) {
+            if (mSel == TARGET_ROW) {
+                if (GhostStorage::busy()) {
+                    menu->toast(storageStatus());
+                } else if (Ghost::observerActive()) {
+                    Ghost::stopObserver();
+                    menu->toast("Ghost watch ended");
+                } else {
+                    beginPBAction(menu, PB_ACTION_CLEAR_TARGET);
+                }
+            } else if (isPersonalSlot() || isImportedSlot()) {
+                const bool imported = isImportedSlot();
+                const int slot = imported ? selectedImportedSlot()
+                                          : selectedPersonalSlot();
+                const SusamuneGhostSlotInfo *info = imported
+                    ? GhostStorage::importedSlot(slot)
+                    : GhostStorage::slot(slot);
+                if (info && (info->flags & SUSAMUNE_GHOST_SLOT_PRESENT) &&
+                    (imported ||
+                     !(info->flags & SUSAMUNE_GHOST_SLOT_UNSAFE)) &&
+                    !GhostStorage::busy()) {
+                    mDeleteImported = imported;
+                    mDeleteSlot = slot;
+                    mConfirmDelete = true;
+                    mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+                }
+            }
+        }
+    }
+
+    void draw(Menu *menu, int x, int y, int w, int h) override {
+        if (mProtectedPBToken != 0 && !mConfirmSave) {
+            drawProtectedPBSave(menu, x, y, w);
+            return;
+        }
+        if (mPBAction != PB_ACTION_NONE) {
+            drawPBConfirmation(menu, x, y, w);
+            return;
+        }
+        if (mLaunch != LAUNCH_IDLE) {
+            drawWatchLoading(menu, x, y, w);
+            return;
+        }
+        if (mChoice == CHOICE_ACTION) {
+            drawActionChoice(menu, x, y, w);
+            return;
+        }
+        if (mConfirmDelete) {
+            drawDeleteConfirmation(menu, x, y, w);
+            return;
+        }
+        if (mConfirmSave) {
+            drawSaveConfirmation(menu, x, y, w);
+            return;
+        }
+
+        const int listH = h - ROW_H;
+        const int maxRows = listH / ROW_H;
+        const int selectedRow = selectionRow(mSel);
+        const int start = listScrollStart(selectedRow, DISPLAY_ROW_COUNT,
+                                          maxRows);
+        int end = start + maxRows;
+        if (end > DISPLAY_ROW_COUNT) end = DISPLAY_ROW_COUNT;
+
+        int ry = y;
+        for (int row = start; row < end; row++, ry += ROW_H) {
+            if (row == 0) {
+                drawSectionHeader(menu, x, ry, w, "GHOST LIBRARY");
+            } else if (row == 1) {
+                drawValueRow(menu, x, ry, w, "Ghost display",
+                             gSettings.valueLabel(SETTING_GHOST_DISPLAY),
+                             mSel == DISPLAY_ROW, false, true);
+            } else if (row == 2) {
+                drawValueRow(menu, x, ry, w, "Ghost opacity",
+                             gSettings.valueLabel(SETTING_GHOST_OPACITY),
+                             mSel == OPACITY_ROW, false, true);
+            } else if (row == 3) {
+                drawValueRow(menu, x, ry, w, "Ghost appearance",
+                             gSettings.valueLabel(SETTING_GHOST_APPEARANCE),
+                             mSel == APPEARANCE_ROW, false, true);
+            } else if (row == 4) {
+                drawValueRow(
+                    menu, x, ry, w, "Auto race target",
+                    gSettings.getBool(SETTING_GHOST_LAST_SUCCESS)
+                        ? "Last success" : "Last attempt",
+                    mSel == AUTO_TARGET_ROW, false, true);
+            } else if (row == 5) {
+                drawValueRow(menu, x, ry, w, "PB profile",
+                             ILing::pbProfileName(ILing::pbProfile()),
+                             mSel == PROFILE_ROW, false, true);
+            } else if (row == 6) {
+                char target[24];
+                targetValue(target, sizeof(target));
+                drawValueRow(menu, x, ry, w, "Race target", target,
+                             mSel == TARGET_ROW, false, true);
+            } else if (row == PERSONAL_SUMMARY_DISPLAY) {
+                char summary[48];
+                catalogSummary(summary, sizeof(summary));
+                drawSectionHeader(menu, x, ry, w, summary);
+            } else if (row >= PERSONAL_DISPLAY_FIRST &&
+                       row < IMPORTED_SUMMARY_DISPLAY) {
+                int index;
+                if (rangeRowSlot(row, PERSONAL_DISPLAY_FIRST, &index)) {
+                    drawPersonalSlot(menu, x, ry, w, index);
+                } else {
+                    drawRangeHeader(menu, x, ry, w, "PERSONAL", index,
+                                    PERSONAL_SELECTION_COUNT);
+                }
+            } else if (row == IMPORTED_SUMMARY_DISPLAY) {
+                char summary[64];
+                importedSummary(summary, sizeof(summary));
+                drawSectionHeader(menu, x, ry, w, summary);
+            } else if (row == IMPORT_SCAN_DISPLAY) {
+                drawValueRow(menu, x, ry, w, "Scan import folder",
+                             "drag & drop .smsghost",
+                             mSel == IMPORT_SCAN_SELECTION, false, true);
+            } else {
+                int index;
+                if (rangeRowSlot(row, IMPORTED_DISPLAY_FIRST, &index)) {
+                    drawImportedSlot(menu, x, ry, w, index);
+                } else {
+                    drawRangeHeader(menu, x, ry, w, "IMPORTED", index,
+                                    IMPORTED_SELECTION_COUNT);
+                }
+            }
+        }
+
+        drawScrollHints(menu, x, y, w, listH, start, end,
+                        DISPLAY_ROW_COUNT);
+        const bool settingRow = mSel == DISPLAY_ROW || mSel == OPACITY_ROW ||
+                                mSel == APPEARANCE_ROW ||
+                                mSel == AUTO_TARGET_ROW;
+        const char *footer = mChoice == CHOICE_SECOND
+            ? SUSAMUNE_GLYPH_A " Choose ghost 2  " SUSAMUNE_GLYPH_C
+              " L" SUSAMUNE_GLYPH_SLASH "R Section  "
+              SUSAMUNE_GLYPH_B " Back"
+            : settingRow
+              ? SUSAMUNE_GLYPH_A " Change  " SUSAMUNE_GLYPH_C
+                " L" SUSAMUNE_GLYPH_SLASH "R Section  "
+                SUSAMUNE_GLYPH_Y " Rescan"
+            : SUSAMUNE_GLYPH_A " Select  " SUSAMUNE_GLYPH_C
+              " L" SUSAMUNE_GLYPH_SLASH "R Section  "
+              SUSAMUNE_GLYPH_X " Delete  " SUSAMUNE_GLYPH_Z " Export";
+        menu->drawText(footer, x + 4, y + h - FOOT_SZ,
+                       FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+private:
+    enum Choice : u8 {
+        CHOICE_NONE,
+        CHOICE_ACTION,
+        CHOICE_SECOND,
+    };
+
+    enum Launch : u8 {
+        LAUNCH_IDLE,
+        LAUNCH_ONE_PRIMARY,
+        LAUNCH_TWO_PRIMARY,
+        LAUNCH_TWO_SECONDARY,
+    };
+
+    enum PBAction : u8 {
+        PB_ACTION_NONE,
+        PB_ACTION_RACE,
+        PB_ACTION_WATCH_ONE,
+        PB_ACTION_WATCH_TWO,
+        PB_ACTION_CLEAR_TARGET,
+    };
+
+    struct GhostRef {
+        s16 selection;
+        u32 fingerprint;
+    };
+
+    enum {
+        RANGE_SIZE = 10,
+        DISPLAY_ROW = 0,
+        OPACITY_ROW = 1,
+        APPEARANCE_ROW = 2,
+        AUTO_TARGET_ROW = 3,
+        PROFILE_ROW = 4,
+        TARGET_ROW = 5,
+        PERSONAL_SELECTION_FIRST = 6,
+        PERSONAL_SELECTION_COUNT = SUSAMUNE_GHOST_PROFILE_WRITABLE_ENTRIES,
+        IMPORT_SCAN_SELECTION = PERSONAL_SELECTION_FIRST +
+                                PERSONAL_SELECTION_COUNT,
+        IMPORTED_SELECTION_FIRST = IMPORT_SCAN_SELECTION + 1,
+        IMPORTED_SELECTION_COUNT = SUSAMUNE_GHOST_IMPORTED_MAX_ENTRIES,
+        SELECTION_COUNT = IMPORTED_SELECTION_FIRST +
+                          IMPORTED_SELECTION_COUNT,
+
+        PERSONAL_RANGE_COUNT =
+            (PERSONAL_SELECTION_COUNT + RANGE_SIZE - 1) / RANGE_SIZE,
+        IMPORTED_RANGE_COUNT =
+            (IMPORTED_SELECTION_COUNT + RANGE_SIZE - 1) / RANGE_SIZE,
+        PERSONAL_SUMMARY_DISPLAY = 7,
+        PERSONAL_DISPLAY_FIRST = PERSONAL_SUMMARY_DISPLAY + 1,
+        PERSONAL_DISPLAY_COUNT = PERSONAL_SELECTION_COUNT +
+                                 PERSONAL_RANGE_COUNT,
+        IMPORTED_SUMMARY_DISPLAY = PERSONAL_DISPLAY_FIRST +
+                                   PERSONAL_DISPLAY_COUNT,
+        IMPORT_SCAN_DISPLAY = IMPORTED_SUMMARY_DISPLAY + 1,
+        IMPORTED_DISPLAY_FIRST = IMPORT_SCAN_DISPLAY + 1,
+        DISPLAY_ROW_COUNT = IMPORTED_DISPLAY_FIRST +
+                            IMPORTED_SELECTION_COUNT +
+                            IMPORTED_RANGE_COUNT,
+        SECTION_COUNT = 1 + PERSONAL_RANGE_COUNT + 1 +
+                        IMPORTED_RANGE_COUNT,
+    };
+
+    bool isPersonalSlot() const {
+        return mSel >= PERSONAL_SELECTION_FIRST &&
+               mSel < IMPORT_SCAN_SELECTION;
+    }
+    bool isImportedSlot() const {
+        return mSel >= IMPORTED_SELECTION_FIRST;
+    }
+    int selectedPersonalSlot() const {
+        return mSel - PERSONAL_SELECTION_FIRST;
+    }
+    int selectedImportedSlot() const {
+        return mSel - IMPORTED_SELECTION_FIRST;
+    }
+    static int slotDisplayRow(int first, int slot) {
+        return first + slot + slot / RANGE_SIZE + 1;
+    }
+    static int selectionRow(int selection) {
+        if (selection < PERSONAL_SELECTION_FIRST) return selection + 1;
+        if (selection < IMPORT_SCAN_SELECTION) {
+            return slotDisplayRow(PERSONAL_DISPLAY_FIRST,
+                                  selection - PERSONAL_SELECTION_FIRST);
+        }
+        if (selection == IMPORT_SCAN_SELECTION) return IMPORT_SCAN_DISPLAY;
+        return slotDisplayRow(IMPORTED_DISPLAY_FIRST,
+                              selection - IMPORTED_SELECTION_FIRST);
+    }
+
+    // Each range is one non-selectable heading followed by up to ten slots.
+    // Selection IDs remain the storage slot IDs; only their display rows move.
+    static bool rangeRowSlot(int row, int first, int *index) {
+        const int offset = row - first;
+        const int range = offset / (RANGE_SIZE + 1);
+        const int within = offset % (RANGE_SIZE + 1);
+        if (within == 0) {
+            *index = range;
+            return false;
+        }
+        *index = range * RANGE_SIZE + within - 1;
+        return true;
+    }
+
+    static int sectionSelection(int section) {
+        if (section == 0) return DISPLAY_ROW;
+        section--;
+        if (section < PERSONAL_RANGE_COUNT) {
+            return PERSONAL_SELECTION_FIRST + section * RANGE_SIZE;
+        }
+        section -= PERSONAL_RANGE_COUNT;
+        if (section == 0) return IMPORT_SCAN_SELECTION;
+        section--;
+        return IMPORTED_SELECTION_FIRST + section * RANGE_SIZE;
+    }
+
+    void jumpSection(int direction) {
+        if (direction > 0) {
+            for (int section = 0; section < SECTION_COUNT; section++) {
+                const int selection = sectionSelection(section);
+                if (selection > mSel) {
+                    mSel = selection;
+                    return;
+                }
+            }
+            mSel = sectionSelection(0);
+            return;
+        }
+
+        for (int section = SECTION_COUNT - 1; section >= 0; section--) {
+            const int selection = sectionSelection(section);
+            if (selection < mSel) {
+                mSel = selection;
+                return;
+            }
+        }
+        mSel = sectionSelection(SECTION_COUNT - 1);
+    }
+
+    void clearProtectedPBSave() {
+        mProtectedPBToken = 0;
+        mConfirmSave = false;
+        mSaveSlot = -1;
+        mSaveIdentity = 0;
+        mProtectedSavePending = false;
+        mProtectedDeleteConfirm = false;
+        mProtectedDeletePending = false;
+        mPromptInput.clear();
+    }
+
+    void cancelProtectedPBSave(Menu *menu) {
+        const u32 token = mProtectedPBToken;
+        clearProtectedPBSave();
+        WarpWheel::resumePBPrompt(token);
+        menu->hide();
+    }
+
+    void prepareProtectedPBSave(Menu *menu) {
+        if (!Ghost::hasUnsavedPBToken(mProtectedPBToken)) return;
+        if (GhostStorage::busy()) return;
+        if (!GhostStorage::catalogReady()) {
+            if (GhostStorage::refresh())
+                menu->toast("Refreshing ghosts...");
+            return;
+        }
+
+        for (int slot = 0; slot < PERSONAL_SELECTION_COUNT; slot++) {
+            const SusamuneGhostSlotInfo *info = GhostStorage::slot(slot);
+            if (!info ||
+                (info->flags & (SUSAMUNE_GHOST_SLOT_PRESENT |
+                                SUSAMUNE_GHOST_SLOT_UNSAFE))) {
+                continue;
+            }
+            mSel = PERSONAL_SELECTION_FIRST + slot;
+            mSaveSlot = slot;
+            mConfirmSave = true;
+            mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+            return;
+        }
+
+        mSaveSlot = -1;
+        if (!isPersonalSlot()) mSel = PERSONAL_SELECTION_FIRST;
+        mPromptInput.begin(JUTGamePad::B | JUTGamePad::X);
+        menu->toast("Choose a saved slot to delete first");
+    }
+
+    void updateProtectedPBSave(Menu *menu, TMarioGamePad *pad) {
+        if (!Ghost::hasUnsavedPBToken(mProtectedPBToken)) {
+            clearProtectedPBSave();
+            return;
+        }
+        if (mProtectedDeleteConfirm) {
+            const u16 pressed = mPromptInput.update();
+            if (pressed & JUTGamePad::B) {
+                mProtectedDeleteConfirm = false;
+                mPromptInput.begin(JUTGamePad::B | JUTGamePad::X);
+            } else if (pressed & JUTGamePad::A) {
+                if (GhostStorage::remove(mDeleteSlot)) {
+                    mProtectedDeleteConfirm = false;
+                    mProtectedDeletePending = true;
+                    mPromptInput.begin(JUTGamePad::B);
+                    menu->toast("Deleting ghost...");
+                } else {
+                    menu->toast(storageStatus());
+                    mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+                }
+            }
+            return;
+        }
+        if (mProtectedDeletePending) {
+            if (mPromptInput.update() & JUTGamePad::B) {
+                cancelProtectedPBSave(menu);
+                return;
+            }
+            if (GhostStorage::busy()) return;
+            mProtectedDeletePending = false;
+            mSaveSlot = -2;
+            mPromptInput.begin(JUTGamePad::B);
+            prepareProtectedPBSave(menu);
+            return;
+        }
+        if (mProtectedSavePending) {
+            if (mPromptInput.update() & JUTGamePad::B) {
+                cancelProtectedPBSave(menu);
+                return;
+            }
+            if (GhostStorage::busy()) return;
+            mProtectedSavePending = false;
+            mConfirmSave = true;
+            mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+            return;
+        }
+        if (mSaveSlot == -2) {
+            if (mPromptInput.update() & JUTGamePad::B) {
+                cancelProtectedPBSave(menu);
+                return;
+            }
+            if (!GhostStorage::busy()) prepareProtectedPBSave(menu);
+            return;
+        }
+        if (mSaveSlot == -1) {
+            const u32 rapid = menu->navigationInput(pad);
+            int slot = selectedPersonalSlot();
+            if (rapid & TMarioGamePad::CSTICK_UP) {
+                slot = wrap(slot - 1, PERSONAL_SELECTION_COUNT);
+            } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+                slot = wrap(slot + 1, PERSONAL_SELECTION_COUNT);
+            }
+            mSel = PERSONAL_SELECTION_FIRST + slot;
+
+            const u16 pressed = mPromptInput.update();
+            if (pressed & JUTGamePad::B) {
+                cancelProtectedPBSave(menu);
+            } else if (pressed & JUTGamePad::X) {
+                const SusamuneGhostSlotInfo *info = GhostStorage::slot(slot);
+                if (!info ||
+                    (info->flags & (SUSAMUNE_GHOST_SLOT_PRESENT |
+                                    SUSAMUNE_GHOST_SLOT_UNSAFE)) !=
+                        SUSAMUNE_GHOST_SLOT_PRESENT) {
+                    menu->toast("Choose a writable saved ghost");
+                    return;
+                }
+                mDeleteImported = false;
+                mDeleteSlot = slot;
+                mProtectedDeleteConfirm = true;
+                mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+            }
+            return;
+        }
+
+        // A completed save clears the PB token on its storage ACK. Reaching
+        // idle with the same token means the request failed; offer a retry.
+        mConfirmSave = true;
+        mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+    }
+
+    static const char *storageStatus() {
+        return GhostStorage::statusText();
+    }
+
+    static u32 slotFingerprint(const SusamuneGhostSlotInfo &info) {
+        const u8 *bytes = reinterpret_cast<const u8 *>(&info);
+        u32 hash = 2166136261u;
+        for (u32 i = 0; i < sizeof(info); i++) {
+            hash = (hash ^ bytes[i]) * 16777619u;
+        }
+        return hash ? hash : 1u;
+    }
+
+    static bool selectionImported(int selection) {
+        return selection >= IMPORTED_SELECTION_FIRST;
+    }
+
+    static int selectionSlot(int selection) {
+        return selectionImported(selection)
+            ? selection - IMPORTED_SELECTION_FIRST
+            : selection - PERSONAL_SELECTION_FIRST;
+    }
+
+    static const SusamuneGhostSlotInfo *selectionInfo(int selection) {
+        if (selection >= PERSONAL_SELECTION_FIRST &&
+            selection < IMPORT_SCAN_SELECTION) {
+            return GhostStorage::slot(selectionSlot(selection));
+        }
+        if (selection >= IMPORTED_SELECTION_FIRST &&
+            selection < SELECTION_COUNT) {
+            return GhostStorage::importedSlot(selectionSlot(selection));
+        }
+        return nullptr;
+    }
+
+    static bool captureRef(int selection, GhostRef *out) {
+        if (!out) return false;
+        const SusamuneGhostSlotInfo *info = selectionInfo(selection);
+        if (!info ||
+            (info->flags & (SUSAMUNE_GHOST_SLOT_PRESENT |
+                            SUSAMUNE_GHOST_SLOT_UNSAFE)) !=
+                SUSAMUNE_GHOST_SLOT_PRESENT) {
+            return false;
+        }
+        out->selection = static_cast<s16>(selection);
+        out->fingerprint = slotFingerprint(*info);
+        return true;
+    }
+
+    static bool refStillValid(const GhostRef &ref) {
+        GhostRef current;
+        return captureRef(ref.selection, &current) &&
+               current.fingerprint == ref.fingerprint;
+    }
+
+    static bool loadRef(const GhostRef &ref, bool observer,
+                        bool secondary) {
+        if (!refStillValid(ref)) return false;
+        const int slot = selectionSlot(ref.selection);
+        if (selectionImported(ref.selection)) {
+            return observer
+                ? GhostStorage::loadImportedObserver(slot, secondary)
+                : GhostStorage::loadImported(slot);
+        }
+        return observer ? GhostStorage::loadObserver(slot, secondary)
+                        : GhostStorage::load(slot);
+    }
+
+    static bool copyRefName(const GhostRef &ref, char *out, u32 size) {
+        if (!out || size == 0 || !refStillValid(ref)) return false;
+        const int slot = selectionSlot(ref.selection);
+        return selectionImported(ref.selection)
+            ? GhostStorage::copyImportedSlotName(slot, out, size)
+            : GhostStorage::copySlotName(slot, out, size);
+    }
+
+    bool copyPBActionName(PBAction action, char *out, u32 size,
+                          u32 *token) const {
+        return action == PB_ACTION_CLEAR_TARGET
+            ? Ghost::copyPlaybackUnsavedPBName(out, size, token)
+            : Ghost::copyUnsavedPBName(out, size, token);
+    }
+
+    bool refreshPBAction() {
+        u32 token = 0;
+        char name[SUSAMUNE_GHOST_NAME_SIZE];
+        if (!copyPBActionName(mPBAction, name, sizeof(name), &token)) {
+            return false;
+        }
+        mPBToken = token;
+        strncpy(mPBName, name, sizeof(mPBName));
+        mPBName[sizeof(mPBName) - 1] = '\0';
+        mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+        return true;
+    }
+
+    void executePBAction(Menu *menu, PBAction action) {
+        switch (action) {
+        case PB_ACTION_RACE:
+            if (GhostStorage::busy()) {
+                menu->toast(storageStatus());
+            } else if (!loadRef(mPrimaryRef, false, false)) {
+                menu->toast("Ghost row changed; choose again");
+            } else {
+                menu->toast("Loading ghost to race...");
+            }
+            mChoice = CHOICE_NONE;
+            break;
+        case PB_ACTION_WATCH_ONE:
+            beginWatch(menu, false);
+            break;
+        case PB_ACTION_WATCH_TWO:
+            beginWatch(menu, true);
+            break;
+        case PB_ACTION_CLEAR_TARGET:
+            if (Ghost::observerActive()) {
+                Ghost::stopObserver();
+                menu->toast("Ghost watch ended");
+            } else {
+                Ghost::clearPlayback();
+                menu->toast("Ghost race target cleared");
+            }
+            break;
+        default:
+            break;
+        }
+    }
+
+    void finishPBAction(Menu *menu) {
+        const PBAction action = mPBAction;
+        mPBAction = PB_ACTION_NONE;
+        mPBToken = 0;
+        mPBName[0] = '\0';
+        mPromptInput.clear();
+        executePBAction(menu, action);
+    }
+
+    void beginPBAction(Menu *menu, PBAction action) {
+        mPBAction = action;
+        if (!refreshPBAction()) {
+            finishPBAction(menu);
+            return;
+        }
+        mChoice = CHOICE_NONE;
+        gBinds.suppressUntilRelease();
+    }
+
+    void updatePBAction(Menu *menu) {
+        if (!Ghost::hasUnsavedPBToken(mPBToken)) {
+            if (!refreshPBAction()) finishPBAction(menu);
+            return;
+        }
+
+        const u16 pressed = mPromptInput.update();
+        if (pressed & JUTGamePad::B) {
+            const bool returnToChoice = mPBAction == PB_ACTION_RACE ||
+                mPBAction == PB_ACTION_WATCH_ONE ||
+                mPBAction == PB_ACTION_WATCH_TWO;
+            mPBAction = PB_ACTION_NONE;
+            mPBToken = 0;
+            mPBName[0] = '\0';
+            mPromptInput.clear();
+            if (returnToChoice) {
+                mChoice = CHOICE_ACTION;
+                mSel = mPrimaryRef.selection;
+                mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                                   JUTGamePad::X | JUTGamePad::Y);
+            }
+            gBinds.suppressUntilRelease();
+            return;
+        }
+        if (!(pressed & JUTGamePad::A)) return;
+
+        if (!Ghost::discardUnsavedPB(mPBToken)) {
+            if (!refreshPBAction()) finishPBAction(menu);
+            return;
+        }
+        if (!refreshPBAction()) finishPBAction(menu);
+    }
+
+    void cancelLaunch(Menu *menu, const char *message) {
+        Ghost::stopObserver();
+        mLaunch = LAUNCH_IDLE;
+        mPromptInput.clear();
+        if (message) menu->toast(message);
+    }
+
+    bool beginWatch(Menu *menu, bool two) {
+        // Every Watch attempt leaves the action/second-ghost modal first. A
+        // rejected launch must give the surrounding menu its input back.
+        mChoice = CHOICE_NONE;
+        if (GhostStorage::busy()) {
+            menu->toast(storageStatus());
+            return false;
+        }
+        if (!gSettings.getBool(SETTING_GHOST_DISPLAY)) {
+            mSel = DISPLAY_ROW;
+            menu->toast("Enable Ghost Display before Watch");
+            return false;
+        }
+        if (!refStillValid(mPrimaryRef) ||
+            (two && (!refStillValid(mSecondaryRef) ||
+                     mSecondaryRef.selection == mPrimaryRef.selection))) {
+            menu->toast("Ghost row changed; choose again");
+            return false;
+        }
+        if (!Ghost::beginObserverPreparation(two)) {
+            menu->toast("Watch unavailable in this stage");
+            return false;
+        }
+        if (!loadRef(mPrimaryRef, true, false)) {
+            cancelLaunch(menu, storageStatus());
+            return false;
+        }
+        mLaunch = two ? LAUNCH_TWO_PRIMARY : LAUNCH_ONE_PRIMARY;
+        mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+        menu->toast(two ? "Loading ghost 1 of 2..."
+                        : "Loading ghost to watch...");
+        return true;
+    }
+
+    bool finishWatch(Menu *menu, int count) {
+        if (!Ghost::startObserver()) {
+            cancelLaunch(menu, "Ghost routes cannot be watched together");
+            return false;
+        }
+        mLaunch = LAUNCH_IDLE;
+        mPromptInput.clear();
+        menu->hide();
+        menu->toast(count == 2
+            ? "Warping to 2-ghost watch - B/Start exits"
+            : "Warping to ghost watch - B/Start exits");
+        return true;
+    }
+
+    bool updateObserverLaunch(Menu *menu, TMarioGamePad *) {
+        if (mLaunch == LAUNCH_IDLE) return false;
+        if (mPromptInput.update() & JUTGamePad::B) {
+            cancelLaunch(menu, "Ghost watch canceled");
+            mPromptInput.clear();
+            return true;
+        }
+        if (!Ghost::observerPreparing()) {
+            mLaunch = LAUNCH_IDLE;
+            mPromptInput.clear();
+            menu->toast(storageStatus());
+            return true;
+        }
+        if (GhostStorage::busy()) return true;
+
+        if (mLaunch == LAUNCH_ONE_PRIMARY) {
+            if (!Ghost::observerTrackReady(false)) {
+                cancelLaunch(menu, storageStatus());
+            } else {
+                finishWatch(menu, 1);
+            }
+            return true;
+        }
+        if (mLaunch == LAUNCH_TWO_PRIMARY) {
+            if (!Ghost::observerTrackReady(false) ||
+                !refStillValid(mSecondaryRef) ||
+                !loadRef(mSecondaryRef, true, true)) {
+                cancelLaunch(menu, "Ghost 2 changed or could not load");
+            } else {
+                mLaunch = LAUNCH_TWO_SECONDARY;
+                menu->toast("Loading ghost 2 of 2...");
+            }
+            return true;
+        }
+        if (!Ghost::observerTrackReady(true)) {
+            cancelLaunch(menu, storageStatus());
+        } else {
+            finishWatch(menu, 2);
+        }
+        return true;
+    }
+
+    void updateChoice(Menu *menu, TMarioGamePad *pad) {
+        if (mChoice == CHOICE_ACTION) {
+            const u16 pressed = mPromptInput.update();
+            if (pressed & JUTGamePad::B) {
+                mChoice = CHOICE_NONE;
+                mPromptInput.clear();
+            } else if (pressed & JUTGamePad::A) {
+                beginPBAction(menu, PB_ACTION_RACE);
+            } else if (pressed & JUTGamePad::Y) {
+                beginPBAction(menu, PB_ACTION_WATCH_ONE);
+            } else if (pressed & JUTGamePad::X) {
+                mChoice = CHOICE_SECOND;
+                mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                                   JUTGamePad::X | JUTGamePad::Y);
+                menu->toast("Choose a different ghost for marker 2");
+            }
+            return;
+        }
+
+        const u32 rapid = menu->navigationInput(pad);
+        if (rapid & TMarioGamePad::CSTICK_UP) {
+            mSel = wrap(mSel - 1, SELECTION_COUNT);
+        } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
+            mSel = wrap(mSel + 1, SELECTION_COUNT);
+        } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
+            jumpSection(-1);
+        } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
+            jumpSection(+1);
+        }
+        const u16 pressed = mPromptInput.update();
+        if (pressed & JUTGamePad::B) {
+            mChoice = CHOICE_ACTION;
+            mSel = mPrimaryRef.selection;
+            mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                               JUTGamePad::X | JUTGamePad::Y);
+            return;
+        }
+        if (pressed & JUTGamePad::A) {
+            if (!captureRef(mSel, &mSecondaryRef)) {
+                menu->toast("Choose a saved, validated ghost");
+            } else if (mSecondaryRef.selection == mPrimaryRef.selection) {
+                menu->toast("Choose a different second ghost");
+            } else {
+                beginPBAction(menu, PB_ACTION_WATCH_TWO);
+            }
+        }
+    }
+
+    void activate(Menu *menu) {
+        if (mSel == DISPLAY_ROW) {
+            gSettings.cycle(SETTING_GHOST_DISPLAY, 1);
+            return;
+        }
+        if (mSel == OPACITY_ROW) {
+            gSettings.cycle(SETTING_GHOST_OPACITY, 1);
+            return;
+        }
+        if (mSel == APPEARANCE_ROW) {
+            gSettings.cycle(SETTING_GHOST_APPEARANCE, 1);
+            return;
+        }
+        if (mSel == AUTO_TARGET_ROW) {
+            gSettings.cycle(SETTING_GHOST_LAST_SUCCESS, 1);
+            return;
+        }
+        if (GhostStorage::busy()) {
+            menu->toast(storageStatus());
+            return;
+        }
+        if (mSel == PROFILE_ROW) {
+            ILing::cyclePbProfile(1);
+            menu->toast(ILing::pbProfileName(ILing::pbProfile()));
+            return;
+        }
+        if (mSel == TARGET_ROW) {
+            if (Ghost::observerActive()) {
+                Ghost::stopObserver();
+                menu->toast("Ghost watch ended");
+            } else if (Ghost::playbackPinned()) {
+                Ghost::unpinPlayback();
+                menu->toast("Library ghost unpinned");
+            } else {
+                menu->toast("No pinned library ghost");
+            }
+            return;
+        }
+        if (mSel == IMPORT_SCAN_SELECTION) {
+            const bool started = GhostStorage::scanImports();
+            menu->toast(started ? "Scanning import folder..."
+                                : storageStatus());
+            return;
+        }
+
+        const bool imported = isImportedSlot();
+        const int index = imported ? selectedImportedSlot()
+                                   : selectedPersonalSlot();
+        const SusamuneGhostSlotInfo *info = imported
+            ? GhostStorage::importedSlot(index) : GhostStorage::slot(index);
+        if (!info) {
+            const bool started = imported ? GhostStorage::refreshImported()
+                                          : GhostStorage::refresh();
+            if (started) {
+                menu->toast(imported ? "Refreshing imports..."
+                                     : "Refreshing ghosts...");
+            } else {
+                menu->toast(storageStatus());
+            }
+            return;
+        }
+        if (info->flags & SUSAMUNE_GHOST_SLOT_UNSAFE) {
+            menu->toast("Ghost slot is read-only/unsafe");
+            return;
+        }
+        const bool present = info->flags & SUSAMUNE_GHOST_SLOT_PRESENT;
+        if (imported) {
+            if (!present) {
+                menu->toast("No imported ghost in this row");
+                return;
+            }
+            if (!captureRef(mSel, &mPrimaryRef)) {
+                menu->toast("Imported ghost changed; rescan");
+                return;
+            }
+            mChoice = CHOICE_ACTION;
+            mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                               JUTGamePad::X | JUTGamePad::Y);
+            return;
+        }
+        if (present) {
+            if (!captureRef(mSel, &mPrimaryRef)) {
+                menu->toast("Ghost row changed; refresh");
+                return;
+            }
+            mChoice = CHOICE_ACTION;
+            mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                               JUTGamePad::X | JUTGamePad::Y);
+            return;
+        }
+        u32 identity = 0;
+        if (!Ghost::copySaveableName(mSaveName, sizeof(mSaveName),
+                                     &identity)) {
+            menu->toast("No ghost recording to save");
+            return;
+        }
+        mSaveSlot = index;
+        mSaveIdentity = identity;
+        mConfirmSave = true;
+        mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+    }
+
+    void share(Menu *menu) {
+        if (!isPersonalSlot()) {
+            menu->toast(isImportedSlot()
+                            ? "Imported files are already shareable"
+                            : "Select a personal ghost to export");
+            return;
+        }
+        if (GhostStorage::busy()) {
+            menu->toast(storageStatus());
+            return;
+        }
+        const int index = selectedPersonalSlot();
+        const SusamuneGhostSlotInfo *info = GhostStorage::slot(index);
+        if (!info) {
+            if (GhostStorage::refresh()) menu->toast("Refreshing ghosts...");
+            else menu->toast(storageStatus());
+            return;
+        }
+        if (info->flags & SUSAMUNE_GHOST_SLOT_UNSAFE) {
+            menu->toast("Ghost slot is read-only/unsafe");
+            return;
+        }
+        if (!(info->flags & SUSAMUNE_GHOST_SLOT_PRESENT)) {
+            menu->toast("Select a saved ghost to export");
+            return;
+        }
+        const bool started = GhostStorage::exportShare(index);
+        menu->toast(started ? "Exporting .smsghost..." : storageStatus());
+    }
+
+    static void targetValue(char *out, u32 size) {
+        Ghost::PlaybackInfo info;
+        if (Ghost::observerActive()) {
+            const int count = Ghost::observerGhostCount();
+            if (Ghost::observerLoading()) {
+                snprintf(out, size, "Watch %d loading", count);
+            } else {
+                snprintf(out, size, "Watching %d (%d/%d)", count,
+                         Ghost::observerVisibleCount(), count);
+            }
+        } else if (Ghost::playbackPinned()) {
+            if (GhostStorage::loadedImported()) {
+                snprintf(out, size, "Imported %02d (pinned)",
+                         GhostStorage::loadedImportedSlot() + 1);
+            } else {
+                const int loaded = GhostStorage::loadedSlot();
+                if (loaded >= 0)
+                    snprintf(out, size, "Slot %02d (pinned)", loaded + 1);
+                else strncpy(out, "Pinned ghost", size);
+            }
+        } else if (Ghost::playbackInfo(&info)) {
+            strncpy(out, "Auto target", size);
+        } else {
+            strncpy(out, "None", size);
+        }
+        if (size) out[size - 1] = '\0';
+    }
+
+    static void catalogSummary(char *out, u32 size) {
+        int count = 0;
+        u32 duration = 0;
+        if (GhostStorage::catalogReady()) {
+            for (int i = 0; i < PERSONAL_SELECTION_COUNT; i++) {
+                const SusamuneGhostSlotInfo *info = GhostStorage::slot(i);
+                if (info && (info->flags & SUSAMUNE_GHOST_SLOT_PRESENT)) {
+                    count++;
+                    duration += info->durationQf;
+                }
+            }
+        }
+        const u32 seconds = static_cast<u32>(
+            static_cast<u64>(duration) * 1001u / 120000u);
+        snprintf(out, size, "PERSONAL %d/45  %lu:%02lu / 10h", count,
+                 seconds / 3600u, (seconds / 60u) % 60u);
+    }
+
+    static void importedSummary(char *out, u32 size) {
+        int count = 0;
+        if (GhostStorage::importedCatalogReady()) {
+            for (int i = 0; i < IMPORTED_SELECTION_COUNT; i++) {
+                const SusamuneGhostSlotInfo *info =
+                    GhostStorage::importedSlot(i);
+                if (info && (info->flags & SUSAMUNE_GHOST_SLOT_PRESENT))
+                    count++;
+            }
+        }
+        const u32 seconds = static_cast<u32>(
+            static_cast<u64>(GhostStorage::importedTotalDurationQf()) *
+            1001u / 120000u);
+        const u32 overflow = GhostStorage::importedOverflowCount();
+        if (overflow) {
+            snprintf(out, size, "IMPORTED %d/12  %lu:%02lu  +%lu MORE",
+                     count, seconds / 3600u, (seconds / 60u) % 60u,
+                     overflow);
+        } else {
+            snprintf(out, size, "IMPORTED %d/12  %lu:%02lu", count,
+                     seconds / 3600u, (seconds / 60u) % 60u);
+        }
+    }
+
+    static const char *regionTag(u8 region) {
+        switch (region) {
+        case SUSAMUNE_GHOST_REGION_JP: return "[JP]";
+        case SUSAMUNE_GHOST_REGION_US: return "[US]";
+        case SUSAMUNE_GHOST_REGION_PAL: return "[PAL]";
+        default: return "[?]";
+        }
+    }
+
+    static void drawRangeHeader(Menu *menu, int x, int y, int w,
+                                const char *catalog, int range,
+                                int slotCount) {
+        const int first = range * RANGE_SIZE + 1;
+        int last = first + RANGE_SIZE - 1;
+        if (last > slotCount) last = slotCount;
+        char label[24];
+        snprintf(label, sizeof(label), "%s %02d-%02d", catalog,
+                 first, last);
+        drawSectionHeader(menu, x, y, w, label);
+    }
+
+    void drawPersonalSlot(Menu *menu, int x, int y, int w, int index) const {
+        char name[34];
+        char label[40];
+        char value[24];
+        const SusamuneGhostSlotInfo *info = GhostStorage::slot(index);
+        const char *shownValue = GhostStorage::catalogReady() ? "Empty"
+                                                              : "Not scanned";
+        if (info && (info->flags & SUSAMUNE_GHOST_SLOT_UNSAFE)) {
+            snprintf(label, sizeof(label), "%02d (unsafe)", index + 1);
+            shownValue = "Read-only";
+        } else if (info && (info->flags & SUSAMUNE_GHOST_SLOT_PRESENT)) {
+            if (!GhostStorage::copySlotName(index, name, sizeof(name))) {
+                strncpy(name, "Unnamed ghost", sizeof(name));
+                name[sizeof(name) - 1] = '\0';
+            }
+            snprintf(label, sizeof(label), "%02d %s", index + 1, name);
+            ILing::formatTime(static_cast<s32>(info->durationQf), value,
+                              sizeof(value));
+            shownValue = value;
+            if (GhostStorage::loadedSlot() == index && Ghost::playbackPinned())
+                shownValue = "RACING";
+            if (mChoice == CHOICE_SECOND &&
+                mPrimaryRef.selection == PERSONAL_SELECTION_FIRST + index) {
+                shownValue = "GHOST 1";
+            }
+        } else {
+            snprintf(label, sizeof(label), "%02d (empty)", index + 1);
+        }
+        drawValueRow(menu, x, y, w, label, shownValue,
+                     isPersonalSlot() && selectedPersonalSlot() == index,
+                     false, true);
+    }
+
+    void drawImportedSlot(Menu *menu, int x, int y, int w, int index) const {
+        char name[24];
+        char label[40];
+        char value[24];
+        const SusamuneGhostSlotInfo *info =
+            GhostStorage::importedSlot(index);
+        const char *shownValue = GhostStorage::importedCatalogReady()
+            ? "Empty" : "Not scanned";
+        if (info && (info->flags & SUSAMUNE_GHOST_SLOT_UNSAFE)) {
+            snprintf(label, sizeof(label), "%02d (unsafe)", index + 1);
+            shownValue = "Rejected";
+        } else if (info && (info->flags & SUSAMUNE_GHOST_SLOT_PRESENT)) {
+            if (!GhostStorage::copyImportedSlotName(index, name,
+                                                    sizeof(name))) {
+                strncpy(name, "Unnamed ghost", sizeof(name));
+                name[sizeof(name) - 1] = '\0';
+            }
+            snprintf(label, sizeof(label), "%02d %s %s", index + 1,
+                     regionTag(info->region), name);
+            ILing::formatTime(static_cast<s32>(info->durationQf), value,
+                              sizeof(value));
+            shownValue = value;
+            if (GhostStorage::loadedImportedSlot() == index &&
+                Ghost::playbackPinned()) {
+                shownValue = "RACING";
+            }
+            if (mChoice == CHOICE_SECOND &&
+                mPrimaryRef.selection == IMPORTED_SELECTION_FIRST + index) {
+                shownValue = "GHOST 1";
+            }
+        } else {
+            snprintf(label, sizeof(label), "%02d (empty)", index + 1);
+        }
+        drawValueRow(menu, x, y, w, label, shownValue,
+                     isImportedSlot() && selectedImportedSlot() == index,
+                     false, true);
+    }
+
+    void drawActionChoice(Menu *menu, int x, int y, int w) const {
+        char name[48];
+        if (!copyRefName(mPrimaryRef, name, sizeof(name))) {
+            strncpy(name, "Selected ghost", sizeof(name));
+            name[sizeof(name) - 1] = '\0';
+        }
+        const char *title = "What should this ghost do?";
+        const char *actions =
+            SUSAMUNE_GLYPH_A " Race   " SUSAMUNE_GLYPH_Y " Watch   "
+            SUSAMUNE_GLYPH_X " Watch 2";
+        const char *note = "Watch is visual-only for this loaded area";
+        const char *cancel = SUSAMUNE_GLYPH_B " Cancel";
+        menu->fillBox(x, y + 24, w, 150,
+                      JUtility::TColor(18, 32, 46, 245));
+        menu->fillBox(x, y + 24, w, 3, cAccent());
+        menu->drawText(title,
+                       x + (w - Menu::textWidth(title, ROW_SZ)) / 2,
+                       y + 42, ROW_SZ, ROW_SZ, cRowSel());
+        menu->drawText(name,
+                       x + (w - Menu::textWidth(name, ROW_SZ)) / 2,
+                       y + 68, ROW_SZ, ROW_SZ, cValue());
+        menu->drawText(actions,
+                       x + (w - Menu::textWidth(actions, ROW_SZ)) / 2,
+                       y + 100, ROW_SZ, ROW_SZ, cRowSel());
+        menu->drawText(note,
+                       x + (w - Menu::textWidth(note, FOOT_SZ)) / 2,
+                       y + 128, FOOT_SZ, FOOT_SZ, cRowDim());
+        menu->drawText(cancel,
+                       x + (w - Menu::textWidth(cancel, FOOT_SZ)) / 2,
+                       y + 150, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void drawPBConfirmation(Menu *menu, int x, int y, int w) const {
+        const char *title = "Discard unsaved PB ghost?";
+        const char *note = "The selected ghost action will destroy it.";
+        const char *hint = SUSAMUNE_GLYPH_A " Discard & continue    "
+                           SUSAMUNE_GLYPH_B " Cancel";
+        menu->fillBox(x, y + 24, w, 150,
+                      JUtility::TColor(36, 30, 20, 245));
+        menu->fillBox(x, y + 24, w, 3, cAccent());
+        menu->drawText(title,
+                       x + (w - Menu::textWidth(title, ROW_SZ)) / 2,
+                       y + 42, ROW_SZ, ROW_SZ, cRowSel());
+        int nameSize = ROW_SZ;
+        while (nameSize > 12 &&
+               Menu::textWidth(mPBName, nameSize) > w - 16) {
+            nameSize--;
+        }
+        menu->drawText(mPBName,
+                       x + (w - Menu::textWidth(mPBName, nameSize)) / 2,
+                       y + 70, nameSize, nameSize, cValue());
+        menu->drawText(note,
+                       x + (w - Menu::textWidth(note, FOOT_SZ)) / 2,
+                       y + 104, FOOT_SZ, FOOT_SZ, cRowDim());
+        menu->drawText(hint,
+                       x + (w - Menu::textWidth(hint, FOOT_SZ)) / 2,
+                       y + 140, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void drawWatchLoading(Menu *menu, int x, int y, int w) const {
+        const char *title = mLaunch == LAUNCH_TWO_SECONDARY
+            ? "Loading visual ghost 2 of 2..."
+            : mLaunch == LAUNCH_TWO_PRIMARY
+                ? "Loading visual ghost 1 of 2..."
+                : "Loading visual ghost...";
+        const char *note = "Recording is paused while Watch prepares";
+        const char *cancel = SUSAMUNE_GLYPH_B " Cancel";
+        menu->fillBox(x, y + 34, w, 112,
+                      JUtility::TColor(18, 32, 46, 245));
+        menu->fillBox(x, y + 34, w, 3, cAccent());
+        menu->drawText(title,
+                       x + (w - Menu::textWidth(title, ROW_SZ)) / 2,
+                       y + 56, ROW_SZ, ROW_SZ, cRowSel());
+        menu->drawText(note,
+                       x + (w - Menu::textWidth(note, FOOT_SZ)) / 2,
+                       y + 88, FOOT_SZ, FOOT_SZ, cRowDim());
+        menu->drawText(cancel,
+                       x + (w - Menu::textWidth(cancel, FOOT_SZ)) / 2,
+                       y + 116, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void drawDeleteConfirmation(Menu *menu, int x, int y, int w) const {
+        char name[40];
+        const bool copied = mDeleteImported
+            ? GhostStorage::copyImportedSlotName(mDeleteSlot, name,
+                                                 sizeof(name))
+            : GhostStorage::copySlotName(mDeleteSlot, name, sizeof(name));
+        if (!copied) {
+            strncpy(name, "Selected ghost", sizeof(name));
+            name[sizeof(name) - 1] = '\0';
+        }
+        const char *question = mDeleteImported
+            ? "Delete imported file from SD?" : "Delete ghost from SD?";
+        const char *hint = SUSAMUNE_GLYPH_A " Yes    " SUSAMUNE_GLYPH_B " No";
+        menu->fillBox(x, y + 34, w, 104, JUtility::TColor(36, 30, 20, 245));
+        menu->fillBox(x, y + 34, w, 3, cAccent());
+        menu->drawText(question,
+                       x + (w - Menu::textWidth(question, ROW_SZ)) / 2,
+                       y + 52, ROW_SZ, ROW_SZ, cRowSel());
+        menu->drawText(name,
+                       x + (w - Menu::textWidth(name, ROW_SZ)) / 2,
+                       y + 78, ROW_SZ, ROW_SZ, cValue());
+        menu->drawText(hint,
+                       x + (w - Menu::textWidth(hint, FOOT_SZ)) / 2,
+                       y + 112, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void drawSaveConfirmation(Menu *menu, int x, int y, int w) const {
+        char question[SUSAMUNE_GHOST_NAME_SIZE + 8];
+        snprintf(question, sizeof(question), "Save %s?", mSaveName);
+        int textSize = ROW_SZ;
+        while (textSize > 12 &&
+               Menu::textWidth(question, textSize) > w - 16) {
+            textSize--;
+        }
+        char destination[32];
+        snprintf(destination, sizeof(destination), "Personal slot %02d",
+                 mSaveSlot + 1);
+        const char *hint = SUSAMUNE_GLYPH_A " Yes    " SUSAMUNE_GLYPH_B " No";
+        menu->fillBox(x, y + 34, w, 104, JUtility::TColor(22, 34, 42, 245));
+        menu->fillBox(x, y + 34, w, 3, cAccent());
+        menu->drawText(question,
+                       x + (w - Menu::textWidth(question, textSize)) / 2,
+                       y + 52, textSize, textSize, cRowSel());
+        menu->drawText(destination,
+                       x + (w - Menu::textWidth(destination, ROW_SZ)) / 2,
+                       y + 80, ROW_SZ, ROW_SZ, cValue());
+        menu->drawText(hint,
+                       x + (w - Menu::textWidth(hint, FOOT_SZ)) / 2,
+                       y + 112, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    void drawProtectedPBSave(Menu *menu, int x, int y, int w) const {
+        if (mProtectedDeleteConfirm) {
+            drawDeleteConfirmation(menu, x, y, w);
+            return;
+        }
+        const bool noSlot = mSaveSlot == -1;
+        const char *title = mProtectedDeletePending
+            ? "Deleting ghost to free a slot..."
+            : mProtectedSavePending
+                ? "Saving protected PB ghost..."
+                : noSlot ? "All personal ghost slots are full"
+                         : "Preparing protected PB save...";
+        char selected[48];
+        const char *note = storageStatus();
+        if (noSlot) {
+            char name[32];
+            if (!GhostStorage::copySlotName(selectedPersonalSlot(), name,
+                                            sizeof(name))) {
+                strncpy(name, "Saved ghost", sizeof(name));
+                name[sizeof(name) - 1] = '\0';
+            }
+            snprintf(selected, sizeof(selected), "Slot %02d: %s",
+                     selectedPersonalSlot() + 1, name);
+            note = selected;
+        }
+        const char *hint = noSlot
+            ? SUSAMUNE_GLYPH_C " Up/Down Choose  " SUSAMUNE_GLYPH_X
+              " Delete  " SUSAMUNE_GLYPH_B " Back"
+            : SUSAMUNE_GLYPH_B " Back to PB protection";
+        menu->fillBox(x, y + 34, w, 112,
+                      JUtility::TColor(22, 34, 42, 245));
+        menu->fillBox(x, y + 34, w, 3, cAccent());
+        menu->drawText(title,
+                       x + (w - Menu::textWidth(title, ROW_SZ)) / 2,
+                       y + 54, ROW_SZ, ROW_SZ, cRowSel());
+        menu->drawText(note,
+                       x + (w - Menu::textWidth(note, FOOT_SZ)) / 2,
+                       y + 86, FOOT_SZ, FOOT_SZ, cRowDim());
+        menu->drawText(hint,
+                       x + (w - Menu::textWidth(hint, FOOT_SZ)) / 2,
+                       y + 116, FOOT_SZ, FOOT_SZ, cFooter());
+    }
+
+    int mSel;
+    bool mConfirmDelete;
+    bool mDeleteImported;
+    int mDeleteSlot;
+    bool mConfirmSave;
+    int mSaveSlot;
+    u32 mSaveIdentity;
+    char mSaveName[SUSAMUNE_GHOST_NAME_SIZE];
+    Choice mChoice;
+    Launch mLaunch;
+    PBAction mPBAction;
+    u32 mPBToken;
+    char mPBName[SUSAMUNE_GHOST_NAME_SIZE];
+    u32 mProtectedPBToken;
+    bool mProtectedSavePending;
+    bool mProtectedDeleteConfirm;
+    bool mProtectedDeletePending;
+    RawPromptInput mPromptInput;
+    GhostRef mPrimaryRef;
+    GhostRef mSecondaryRef;
 };
 
 // ---------------------------------------------------------------------
@@ -890,7 +2325,7 @@ private:
         drawValueRow(menu, x, y + ROW_H * 4, w, "Unlock popup & chime",
                      gSettings.valueLabel(SETTING_ACHIEVEMENT_NOTIFICATIONS),
                      mSel == 4, false, true);
-        menu->drawText("V1.2.0 - Trial By Sunshine",
+        menu->drawText("V2.0.0 - Ghosts of Delfino",
                        x + 4, y + h - 44, FOOT_SZ, FOOT_SZ, cRowDim());
         menu->drawText(storageStatus(), x + 4, y + h - 24,
                        FOOT_SZ, FOOT_SZ,
@@ -1021,12 +2456,13 @@ private:
     void drawOverview(Menu *menu, int x, int y, int w, int h) const {
         static const char names[] =
             "Time played\0Attempts\0ILs finished\0PBs earned\0Deaths\0"
-            "Creation time";
-        static const u8 offsets[] = {0, 12, 21, 34, 45, 52};
+            "Creation time\0Ghosts saved\0Ghost time saved";
+        static const u8 offsets[] = {0, 12, 21, 34, 45, 52, 66, 79};
         static const u8 stats[] = {
             Records::STAT_PLAY_SECONDS, Records::STAT_ATTEMPTS,
             Records::STAT_IL_FINISHES, Records::STAT_PBS_EARNED,
             Records::STAT_DEATHS, Records::STAT_CREATION_SECONDS,
+            Records::STAT_GHOSTS_SAVED, Records::STAT_GHOST_TIME_SAVED_QF,
         };
         char value[24];
         const RecordsPersistence::Scope scope =
@@ -1041,6 +2477,10 @@ private:
             if (stats[i] == Records::STAT_PLAY_SECONDS ||
                 stats[i] == Records::STAT_CREATION_SECONDS) {
                 formatDuration(amount, value, sizeof(value));
+            } else if (stats[i] == Records::STAT_GHOST_TIME_SAVED_QF) {
+                const u32 seconds = static_cast<u32>(
+                    static_cast<u64>(amount) * 1001u / 120000u);
+                formatDuration(seconds, value, sizeof(value));
             } else if (stats[i] == Records::STAT_IL_FINISHES) {
                 const u32 attempts = RecordsPersistence::stat(
                     scope, Records::STAT_ATTEMPTS);
@@ -1676,7 +3116,7 @@ private:
         ROW_INPUT_END = ROW_INPUT_FIRST + InputDisplay::MENU_ROW_COUNT,
         ROW_METADATA_HEADER = ROW_INPUT_END,
         ROW_METADATA_FIRST,
-        ROW_METADATA_END = ROW_METADATA_FIRST + MetadataDisplay::FIELD_COUNT + 4,
+        ROW_METADATA_END = ROW_METADATA_FIRST + MetadataDisplay::menuRowCount(),
         ROW_EXTRAS_FIRST = ROW_METADATA_END,
         ROW_COUNT = ROW_EXTRAS_FIRST + CreationExtras::MENU_ROW_COUNT,
     };
@@ -1801,7 +3241,7 @@ private:
 
     static int metadataRow(int row) {
         const int local = row - ROW_METADATA_FIRST;
-        const int style = 2 + MetadataDisplay::FIELD_COUNT;
+        const int style = 3 + MetadataDisplay::FIELD_COUNT;
         if (local == 0) return style;
         if (local <= style) return local - 1;
         return style + 1;
@@ -1993,11 +3433,11 @@ void drawAchievementBanner(Menu *menu) {
     }
 
     const CreationStyle &style = gCreationExtras.achievementBannerStyle();
-    const int scale = style.scale;
+    const int scale = clampi(style.scale, 50, 156);
     const int w = 410 * scale / 100;
     const int h = 58 * scale / 100;
-    const int x = style.x;
-    const int y = style.y;
+    const int x = w < 640 ? clampi(style.x, 0, 640 - w) : 0;
+    const int y = h < 480 ? clampi(style.y, 0, 480 - h) : 0;
     const int border = 4 * scale / 100;
     const int pad = 14 * scale / 100;
     const int labelSize = 12 * scale / 100;
@@ -2039,6 +3479,7 @@ struct __attribute__((aligned(8))) MenuRuntime {
     u8 timer[sizeof(CategorySettingsTab)] __attribute__((aligned(8)));
     u8 creation[sizeof(CreationTab)] __attribute__((aligned(8)));
     u8 iling[sizeof(ILingTab)] __attribute__((aligned(8)));
+    u8 ghosts[sizeof(GhostsTab)] __attribute__((aligned(8)));
     u8 records[sizeof(RecordsTab)] __attribute__((aligned(8)));
     u8 binds[sizeof(BindsTab)] __attribute__((aligned(8)));
     u8 menu[sizeof(Menu)] __attribute__((aligned(8)));
@@ -2062,6 +3503,7 @@ static_assert(sizeof(MenuRuntime) <= SUSAMUNE_MENU_RUNTIME_SIZE,
 #define sTimerBuf sMenuRuntime.timer
 #define sCreationBuf sMenuRuntime.creation
 #define sILingBuf sMenuRuntime.iling
+#define sGhostsBuf sMenuRuntime.ghosts
 #define sRecordsBuf sMenuRuntime.records
 #define sBindsBuf sMenuRuntime.binds
 #define sMenuBuf sMenuRuntime.menu
@@ -2116,6 +3558,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
         new (sStarredBuf) CategorySettingsTab(TITLE_STARRED, kStarredCategory);
     mTabs[mNumTabs++] = new (sMiscBuf) CategorySettingsTab(TITLE_MISC, SETTING_CAT_MISC);
     mTabs[mNumTabs++] = new (sILingBuf) ILingTab();
+    mTabs[mNumTabs++] = new (sGhostsBuf) GhostsTab();
     mTabs[mNumTabs++] = new (sTimerBuf) CategorySettingsTab(TITLE_TIMER, SETTING_CAT_TIMER);
     mTabs[mNumTabs++] =
         new (sSavestateBuf) CategorySettingsTab(TITLE_SAVESTATE, SETTING_CAT_SAVESTATE);
@@ -2126,6 +3569,20 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] = new (sCreationBuf) CreationTab();
     mTabs[mNumTabs++] = new (sRecordsBuf) RecordsTab();
     mTabs[mNumTabs++] = new (sBindsBuf) BindsTab();
+}
+
+bool Menu::openGhostPBSave(u32 token) {
+    for (int i = 0; i < mNumTabs; i++) {
+        if (strcmp(mTabs[i]->title(), "Ghosts") != 0) continue;
+        GhostsTab *ghosts = static_cast<GhostsTab *>(mTabs[i]);
+        if (!ghosts->beginProtectedPBSave(this, token)) return false;
+        mCurTab = i;
+        mTabFirst = 0;
+        mCRepeatFrames = 0;
+        mShown = true;
+        return true;
+    }
+    return false;
 }
 
 int Menu::textWidth(const char *s, int sizeX) {
@@ -2265,23 +3722,17 @@ void Menu::drawToast() {
     if (mToastFrames <= 0 || mToastBuf[0] == '\0') {
         return;
     }
-
-    const int sz   = 16;
-    const int padX = 10;
-    const int padY = 6;
-    const int x    = 20;
-    const int y    = 412;
-    const int w    = textWidth(mToastBuf, sz) + padX * 2;
-    const int h    = sz + padY * 2;
-
-    // Background first: the text is drawn over gameplay with the menu closed,
-    // so without a panel behind it it is unreadable on a bright stage.
-    fillBox(x, y, w, h, col(0, 0, 0, 200));
-    fillBox(x, y, 3, h, cAccent());  // accent edge, matching the menu panel
-    drawText(mToastBuf, x + padX, y + padY, sz, sz, col(255, 255, 255, 255));
+    gCreationExtras.drawToast(this, mToastBuf);
 }
 
 void Menu::requestSettingsSave() {
+    // The console kernel reads this mailbox asynchronously. Keep its staged
+    // payload immutable; dirty edits are queued after the current ack.
+    if (gSettings.saveState() == SETTINGS_SAVE_PENDING) {
+        mSaveWatch = true;
+        toast("Saving settings...");
+        return;
+    }
     gSettings.save();
     if (gSettings.saveState() == SETTINGS_SAVE_UNSUPPORTED) {
         const char *error = settingsStorageError(gSettings.lastError());
@@ -2316,10 +3767,17 @@ __attribute__((noinline)) static void drawValueRow(
 }
 
 void Menu::factoryReset() {
+    if (gSettings.saveState() == SETTINGS_SAVE_PENDING) {
+        mSaveWatch = true;
+        toast("Wait for settings save");
+        return;
+    }
     gCreationExtras.restoreHudDefaults();
     gSettings.resetDefaults();
     requestSettingsSave();
 }
+
+void Menu::scheduleSettingsSave() { requestSettingsSave(); }
 
 void Menu::hide() {
     mShown = false;
@@ -2345,7 +3803,16 @@ void Menu::pollSettingsSave() {
     mSaveWatch = false;
     switch (st) {
     case SETTINGS_SAVE_OK:
-        toast("Settings saved");
+        // A guarded IL start can be cancelled while its first settings write
+        // is in flight. Persist the restored value instead of acknowledging a
+        // stale snapshot and leaving the dirty correction only in RAM.
+        if (gSettings.dirty() || gBinds.dirty() ||
+            gInputDisplay.dirty() || gMetadataDisplay.dirty() ||
+            gQftDisplay.dirty() || gCreationExtras.dirty()) {
+            requestSettingsSave();
+        } else {
+            toast("Settings saved");
+        }
         break;
     case SETTINGS_SAVE_ERROR: {
         const char *error = settingsStorageError(gSettings.lastError());
@@ -2420,9 +3887,12 @@ int Menu::tabWidth(int i) const {
     return textWidth(mTabs[i]->title(), TAB_SZ) + TAB_INNER * 2;
 }
 
-void Menu::update(TMarioGamePad *pad) {
-    u32 rapid = pad->mButtons.mRapidInput;
+bool Menu::suppressesBinds() const {
+    return WarpWheel::promptPending() ||
+           (mShown && mTabs[mCurTab]->suppressesBinds());
+}
 
+void Menu::update(TMarioGamePad *pad) {
     updateAchievementBanner();
 
     // Toast bookkeeping runs whether or not the menu is open -- the save it
@@ -2431,6 +3901,13 @@ void Menu::update(TMarioGamePad *pad) {
         mToastFrames--;
     }
     pollSettingsSave();
+
+    if (WarpWheel::promptShown()) {
+        mCRepeatFrames = 0;
+        return;
+    }
+
+    u32 rapid = pad->mButtons.mRapidInput;
 
     // A tab recording a button combo owns the pad outright: the close combo and
     // the tab-switch buttons are all bindable, so nothing else may look at them.
@@ -2469,6 +3946,7 @@ void Menu::update(TMarioGamePad *pad) {
 void Menu::draw(J2DOrthoGraph *ortho) {
     mOrtho = ortho;  // used by fillBox() to re-enter 2D state
     if (!mShown) {
+        Ghost::draw(this);
         gInputDisplay.draw(this);
         gMetadataDisplay.draw(this);
         gQFTTimer.draw(this);

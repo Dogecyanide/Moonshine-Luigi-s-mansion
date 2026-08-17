@@ -49,7 +49,7 @@ public:
     bool dirty() const { return mDirty; }
     void clearDirty() { mDirty = false; }
 
-    static int         menuRowCount() { return FIELD_COUNT + 4; }
+    static constexpr int menuRowCount() { return FIELD_COUNT + 5; }
     static const char *menuRowName(int row);
     const char        *menuRowValue(int row) const;
     void               adjustMenuRow(int row, int dir);

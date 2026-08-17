@@ -20,9 +20,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
 #include <gccore.h>
-#include <ogc/audio.h>
 #include <ogc/consol.h>
-#include <ogc/dsp.h>
 #include <ogc/es.h>
 #include <ogc/gx_struct.h>
 #include <ogc/lwp_threads.h>
@@ -40,6 +38,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "global.h"
 #include "font_zip.h"
 #include "dip.h"
+#include "SusamuneMusic.h"
+#include "SusamuneTheme.h"
 #include "unzip/unzip.h"
 
 // Background image.
@@ -178,12 +178,9 @@ static unsigned int font_ttf_size = 0;
 void Initialise(bool autoboot)
 {
 	int i;
-	AUDIO_Init(NULL);
-	DSP_Init();
-	AUDIO_StopDMA();
-	AUDIO_RegisterDMACallback(NULL);
 	CheckForGecko();
 	gprintf("GRRLIB_Init = %i\r\n", GRRLIB_Init());
+	SusamuneMusicInit();
 	unzip_data(font_zip, font_zip_size, &font_ttf, &font_ttf_size);
 	gprintf("Decompressed font.ttf with %i bytes\r\n", font_ttf_size);
 	myFont = GRRLIB_LoadTTF(font_ttf, font_ttf_size);
@@ -271,11 +268,13 @@ void ExitToLoader(int ret)
 {
 	extern vu32 KernelLoaded;
 
+	SusamuneMusicShutdown();
 	UpdateScreen();
 	UpdateScreen(); // Triple render to ensure it gets seen
 	GRRLIB_Render();
 	gprintf("Exiting Nintendont...\r\n");
 	sleep(3);
+	SusamuneThemeShutdown(&background);
 	GRRLIB_FreeTexture(background);
 	GRRLIB_FreeTexture(screen_buffer);
 	GRRLIB_FreeTTF(myFont);
@@ -304,6 +303,8 @@ void ExitToLoader(int ret)
 
 void LoaderShutdown()
 {
+	SusamuneMusicShutdown();
+	SusamuneThemeShutdown(&background);
 	GRRLIB_FreeTexture(background);
 	GRRLIB_FreeTexture(screen_buffer);
 	GRRLIB_FreeTTF(myFont);
@@ -361,13 +362,15 @@ bool LoadNinCFG(void)
 
 inline void ClearScreen()
 {
+	SusamuneMusicService();
 	if (bg_isWidescreen)
 	{
 		// Clear the sides.
 		GRRLIB_Rectangle(0, 0, 80, 480, RGBA(222, 223, 224, 255), true);
 		GRRLIB_Rectangle(80+480, 0, 80, 480, RGBA(222, 223, 224, 255), true);
 	}
-	GRRLIB_DrawImg(bg_xPos, 0, background, 0, bg_xScale, 1, RGBA(255, 255, 255, 255));
+	if (!SusamuneThemeDrawBackground(255, bg_xScale, bg_xPos))
+		GRRLIB_DrawImg(bg_xPos, 0, background, 0, bg_xScale, 1, RGBA(255, 255, 255, 255));
 }
 
 static inline char ascii(char s)
