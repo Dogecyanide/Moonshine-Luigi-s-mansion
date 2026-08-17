@@ -17,6 +17,7 @@
 #include "susamune/addresses.hxx"  // SUSAMUNE_MEM1_ADDR
 #include "susamune/binds.hxx"
 #include "susamune/features.hxx"  // writeGameCode, branchWord
+#include "susamune/iling.hxx"
 
 #include "Dolphin/OS.h"  // DCFlushRange, ICInvalidateRange
 #include "SMS/MapObj/MapObjBase.hxx"
@@ -284,6 +285,8 @@ void fastForward(bool allowBinds) {
     }
 
     if (want != gFfLast) {
+        // The patched budget affects the next direct(), so revoke credit now.
+        if (want != gFfOrig) ILing::invalidateForAssist();
         writeGameCode(kFfSite, want);
         gFfLast = want;
     }
@@ -321,4 +324,8 @@ void actionsApply(bool allowBinds) {
     if (gEggKillFrames > 0) {
         gEggKillFrames--;
     }
+}
+
+bool actionsFastForwardActive() {
+    return gFfCaptured && gFfLast != gFfOrig;
 }

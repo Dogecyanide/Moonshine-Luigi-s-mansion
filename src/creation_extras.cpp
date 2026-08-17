@@ -65,7 +65,8 @@ constexpr char kMenuText[] =
     "Word 1 text\0Word 1 style\0Word 1 visible\0"
     "Word 2 text\0Word 2 style\0Word 2 visible\0"
     "Word 3 text\0Word 3 style\0Word 3 visible\0"
-    "MOD MENU\0Menu background";
+    "MOD MENU\0Menu background\0Achievement popup\0"
+    "System notifications\0IL PB popup";
 
 const u32 kPreviewRootTags[] = {
     '\0t_0', '\0c_0', '\0r_0', '\0d_0', '\0m_0', '\0s_0',
@@ -219,6 +220,27 @@ static CreationStyle defaultSavestateFeedbackStyle() {
     };
 }
 
+static CreationStyle defaultAchievementBannerStyle() {
+    return CreationStyle{
+        115, 96, 100, 255,
+        0, 0, 0, 225, 100, 4,
+    };
+}
+
+static CreationStyle defaultToastStyle() {
+    return CreationStyle{
+        20, 412, 100, 255,
+        0, 0, 0, 200, 100, 6,
+    };
+}
+
+static CreationStyle defaultPbBannerStyle() {
+    return CreationStyle{
+        320, 42, 100, 255,
+        90, 58, 4, 230, 100, 10,
+    };
+}
+
 CreationStyle CreationExtras::defaultWallkickStyle() {
     return CreationStyle{
         300, 106, 90, 255,
@@ -246,6 +268,9 @@ void CreationExtras::resetDefaults() {
     Creation::fillWhite(mSavestateFeedbackRgb, 1);
     mWallkickStyle = defaultWallkickStyle();
     Creation::fillWhite(mWallkickRgb, SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT);
+    mAchievementBannerStyle = defaultAchievementBannerStyle();
+    mToastStyle = defaultToastStyle();
+    mPbBannerStyle = defaultPbBannerStyle();
     for (u32 i = 0; i < sizeof(mHudPictures) / sizeof(mHudPictures[0]); i++)
         mHudPictures[i] = nullptr;
     mHudScreen = nullptr;
@@ -314,6 +339,13 @@ void CreationExtras::adopt(const volatile SusamuneCreationCfg *src) {
         memcpy(mSavestateFeedbackRgb, (const void *)src->savestateTextRgb,
                sizeof(mSavestateFeedbackRgb));
     }
+    if (src->achievementStyleMagic ==
+        SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC) {
+        mAchievementBannerStyle.x = src->achievementX;
+        mAchievementBannerStyle.y = src->achievementY;
+        mAchievementBannerStyle.scale = src->achievementScale;
+        clampStyle(mAchievementBannerStyle);
+    }
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         const volatile SusamuneCreationWordCfg &in = src->words[word];
         loadStyle(mWordStyle[word], &in.x);
@@ -359,14 +391,33 @@ void CreationExtras::stageInto(volatile SusamuneCreationCfg *dst) const {
     storeStyle(&dst->savestateX, mSavestateFeedbackStyle);
     memcpy((void *)dst->savestateTextRgb, mSavestateFeedbackRgb,
            sizeof(mSavestateFeedbackRgb));
+    dst->achievementStyleMagic =
+        SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC;
+    dst->reservedAchievement0 = 0;
+    dst->achievementX = mAchievementBannerStyle.x;
+    dst->achievementY = mAchievementBannerStyle.y;
+    dst->achievementScale = mAchievementBannerStyle.scale;
+    memset((void *)dst->reserved3, 0, sizeof(dst->reserved3));
 }
 
 void CreationExtras::adoptWallkick(
     const volatile SusamuneWallkickStyleCfg *src) {
     if (!src || src->magic != SUSAMUNE_WALLKICK_STYLE_MAGIC ||
-        src->version != SUSAMUNE_WALLKICK_STYLE_VERSION) return;
+        src->version == 0 || src->version > SUSAMUNE_WALLKICK_STYLE_VERSION)
+        return;
     loadStyle(mWallkickStyle, &src->x);
     memcpy(mWallkickRgb, (const void *)src->rgb, sizeof(mWallkickRgb));
+    if (src->version >= 2 &&
+        src->notificationStyleMagic == SUSAMUNE_NOTIFICATION_STYLE_MAGIC) {
+        mToastStyle.x = src->toastX;
+        mToastStyle.y = src->toastY;
+        mToastStyle.scale = src->toastScale;
+        mPbBannerStyle.x = src->pbPopupX;
+        mPbBannerStyle.y = src->pbPopupY;
+        mPbBannerStyle.scale = src->pbPopupScale;
+        clampStyle(mToastStyle);
+        clampStyle(mPbBannerStyle);
+    }
 }
 
 void CreationExtras::stageWallkickInto(
@@ -376,6 +427,14 @@ void CreationExtras::stageWallkickInto(
     dst->reserved0 = 0;
     storeStyle(&dst->x, mWallkickStyle);
     memcpy((void *)dst->rgb, mWallkickRgb, sizeof(mWallkickRgb));
+    dst->notificationStyleMagic = SUSAMUNE_NOTIFICATION_STYLE_MAGIC;
+    dst->toastX = mToastStyle.x;
+    dst->toastY = mToastStyle.y;
+    dst->toastScale = mToastStyle.scale;
+    dst->reservedNotification0 = 0;
+    dst->pbPopupX = mPbBannerStyle.x;
+    dst->pbPopupY = mPbBannerStyle.y;
+    dst->pbPopupScale = mPbBannerStyle.scale;
     memset((void *)dst->reserved1, 0, sizeof(dst->reserved1));
 }
 
@@ -609,6 +668,42 @@ void CreationExtras::beginWallkickEditor() {
                   CreationEditor::CAP_ALL);
 }
 
+void CreationExtras::beginAchievementBannerEditor() {
+    if (editing()) return;
+    mDirtyBeforeEdit = mDirty;
+    mEditMode = EDIT_ACHIEVEMENT_BANNER;
+    mEditFirst = 0;
+    mEditCount = 1;
+    mEditTitle = "Achievement popup";
+    mEditor.begin(&mAchievementBannerStyle, mRecentIlRgb, mRecentIlBackup,
+                  1, 0, nullptr,
+                  CreationEditor::CAP_POSITION | CreationEditor::CAP_SCALE);
+}
+
+void CreationExtras::beginToastEditor() {
+    if (editing()) return;
+    mDirtyBeforeEdit = mDirty;
+    mEditMode = EDIT_TOAST;
+    mEditFirst = 0;
+    mEditCount = 1;
+    mEditTitle = "System notifications";
+    mEditor.begin(&mToastStyle, mRecentIlRgb, mRecentIlBackup,
+                  1, 0, nullptr,
+                  CreationEditor::CAP_POSITION | CreationEditor::CAP_SCALE);
+}
+
+void CreationExtras::beginPbBannerEditor() {
+    if (editing()) return;
+    mDirtyBeforeEdit = mDirty;
+    mEditMode = EDIT_PB_BANNER;
+    mEditFirst = 0;
+    mEditCount = 1;
+    mEditTitle = "IL PB popup";
+    mEditor.begin(&mPbBannerStyle, mRecentIlRgb, mRecentIlBackup,
+                  1, 0, nullptr,
+                  CreationEditor::CAP_POSITION | CreationEditor::CAP_SCALE);
+}
+
 void CreationExtras::drawSavestateFeedback(Menu *menu,
                                            const char *message) const {
     Creation::drawTextBox(menu, mSavestateFeedbackStyle,
@@ -621,6 +716,44 @@ void CreationExtras::drawWallkickDisplay(Menu *menu, const char *message,
     color = clampi(color, 0, SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT - 1);
     Creation::drawTextBox(menu, mWallkickStyle, mWallkickRgb + color, 1,
                           message);
+}
+
+void CreationExtras::drawToast(Menu *menu, const char *message) const {
+    if (!menu || !message || !message[0]) return;
+    const int scale = mToastStyle.scale;
+    int size = clampi((16 * scale + 50) / 100, 8, 32);
+    const int padX = (10 * scale + 50) / 100;
+    const int padY = (6 * scale + 50) / 100;
+    while (size > 8 && Menu::textWidth(message, size) + padX * 2 > 640)
+        size--;
+    const int w = Menu::textWidth(message, size) + padX * 2;
+    const int h = size + padY * 2;
+    const int x = clampi(mToastStyle.x, 0, 640 - w);
+    const int y = clampi(mToastStyle.y, 0, 480 - h);
+    menu->fillBox(x, y, w, h, Color(0, 0, 0, 200));
+    menu->fillBox(x, y, clampi((3 * scale + 50) / 100, 1, 6), h,
+                  Color(90, 170, 255, 255));
+    menu->drawText(message, x + padX, y + padY, size, size,
+                   Color(255, 255, 255, 255));
+}
+
+void CreationExtras::drawPbBanner(Menu *menu, const char *message) const {
+    if (!menu || !message || !message[0]) return;
+    const int scale = mPbBannerStyle.scale;
+    int size = clampi((22 * scale + 50) / 100, 11, 44);
+    const int padX = (14 * scale + 50) / 100;
+    const int textY = (10 * scale + 50) / 100;
+    while (size > 11 && Menu::textWidth(message, size) + padX * 2 > 640)
+        size--;
+    const int w = Menu::textWidth(message, size) + padX * 2;
+    const int h = (42 * scale + 50) / 100;
+    const int x = clampi((int)mPbBannerStyle.x - w / 2, 0, 640 - w);
+    const int y = clampi(mPbBannerStyle.y, 0, 480 - h);
+    menu->fillBox(x, y, w, h, Color(90, 58, 4, 230));
+    menu->fillBox(x, y, clampi((4 * scale + 50) / 100, 1, 8), h,
+                  Color(255, 196, 40, 255));
+    menu->drawText(message, x + padX, y + textY, size, size,
+                   Color(255, 239, 178, 255));
 }
 
 void CreationExtras::toggleTimerLabel() {
@@ -671,6 +804,12 @@ void CreationExtras::adjustMenuRow(int row, int direction) {
         }
     } else if (row == 19) {
         beginColorEditor(SUSAMUNE_CREATION_MENU_BG, 1, menuRowName(row));
+    } else if (row == 20) {
+        beginAchievementBannerEditor();
+    } else if (row == 21) {
+        beginToastEditor();
+    } else if (row == 22) {
+        beginPbBannerEditor();
     }
 }
 
@@ -683,7 +822,10 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
     static const u8 kOverlayDefaults[1][3] = {{255, 255, 255}};
     const bool overlayStyle = mEditMode == EDIT_RECENT_ILS ||
                               mEditMode == EDIT_SAVESTATE_FEEDBACK ||
-                              mEditMode == EDIT_WALLKICK;
+                              mEditMode == EDIT_WALLKICK ||
+                              mEditMode == EDIT_ACHIEVEMENT_BANNER ||
+                              mEditMode == EDIT_TOAST ||
+                              mEditMode == EDIT_PB_BANNER;
     const u8 (*defaults)[3] = mEditMode == EDIT_WORD_STYLE
                                   ? mDefaultColors
         : overlayStyle ? kOverlayDefaults : mDefaultColors + mEditFirst;
@@ -692,7 +834,11 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
         : mEditMode == EDIT_RECENT_ILS ? defaultRecentIlStyle()
         : mEditMode == EDIT_SAVESTATE_FEEDBACK
               ? defaultSavestateFeedbackStyle()
-        : mEditMode == EDIT_WALLKICK ? defaultWallkickStyle() : mColorStyle;
+        : mEditMode == EDIT_WALLKICK ? defaultWallkickStyle()
+        : mEditMode == EDIT_ACHIEVEMENT_BANNER
+              ? defaultAchievementBannerStyle()
+        : mEditMode == EDIT_TOAST ? defaultToastStyle()
+        : mEditMode == EDIT_PB_BANNER ? defaultPbBannerStyle() : mColorStyle;
     const u8 result = mEditor.update(
         pad, defaultStyle, defaults,
         mEditMode != EDIT_WORD_STYLE && !overlayStyle ? mEditCount : 1);
@@ -822,6 +968,20 @@ void CreationExtras::drawEditor(Menu *menu) const {
         const char *preview = wallkickDisplayLabel(color);
         drawWallkickDisplay(menu, preview, color);
         mEditor.draw(menu, mEditTitle, preview);
+        return;
+    }
+    if (mEditMode == EDIT_ACHIEVEMENT_BANNER) {
+        mEditor.draw(menu, mEditTitle, "Achievement preview");
+        return;
+    }
+    if (mEditMode == EDIT_TOAST) {
+        drawToast(menu, "System notification preview");
+        mEditor.draw(menu, mEditTitle, "System notification preview");
+        return;
+    }
+    if (mEditMode == EDIT_PB_BANNER) {
+        drawPbBanner(menu, "New PB!  1:23.456");
+        mEditor.draw(menu, mEditTitle, "New PB!  1:23.456");
         return;
     }
     mEditor.draw(menu, mEditTitle, mEditTitle);

@@ -13,7 +13,7 @@ class AttemptCounter {
 public:
     void init();
     void onStageSetup(TMarDirector *director);
-    void update();
+    void update(bool observerFrame);
     void draw(Menu *menu) const;
 
 private:

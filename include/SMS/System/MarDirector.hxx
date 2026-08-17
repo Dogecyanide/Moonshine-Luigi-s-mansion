@@ -136,8 +136,13 @@ public:
     // savestate.cpp's save_time correction.
     OSStopwatch mStopwatch;               // 0x00E8
     int _14;                              // 0x0120
-    u8 mNextStateA;                       // 0x0124 ?
-    u32 _15[0x12C / 4];                   // 0x0128
+    u8 mDemoState;                        // 0x0124
+    u8 mPreviousDemoState;                // 0x0125
+    u8 mNextDemoState;                    // 0x0126
+    u8 _127;
+    u16 _128;
+    u16 _12A;
+    u32 _15[0x128 / 4];                   // 0x012C
     TDemoCannon *mCannonObj;              // 0x0254
     u32 _16;                              // 0x0258
     TShine *mCollectedShine;              // 0x025C
@@ -146,6 +151,11 @@ public:
     u8 _262[2];
     u32 _264;
 };
+
+static_assert(__builtin_offsetof(TMarDirector, mDemoState) == 0x124,
+              "TMarDirector demo state offset changed");
+static_assert(__builtin_offsetof(TMarDirector, mCannonObj) == 0x254,
+              "TMarDirector demo block size changed");
 
 extern TMarDirector *gpMarDirector;
 extern f32 gEffectCoronaScale;

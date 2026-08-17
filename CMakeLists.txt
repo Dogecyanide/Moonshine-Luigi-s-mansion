@@ -71,7 +71,13 @@ string(TOUPPER "${VERS_PRIMARY}" VERS_PRIMARY_UPPER)
 
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "Where to load the iso from by default in meta.xml")
 set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
-set(LAUNCHER_VERSION "V1.2.0" CACHE STRING
+if(LAUNCHER_VERSION STREQUAL "V1.2.0" OR
+   LAUNCHER_VERSION MATCHES "^V2\\.0\\.0 Gate [0-9]+" OR
+   LAUNCHER_VERSION MATCHES "^V2\\.0\\.0 .*Pre-release [0-9]+$" OR
+   LAUNCHER_VERSION MATCHES "^V2\\.0\\.0 .*Release Candidate [0-9]+$")
+    unset(LAUNCHER_VERSION CACHE)
+endif()
+set(LAUNCHER_VERSION "V2.0.0 \"Ghosts of Delfino\"" CACHE STRING
     "Version shown in the packaged launcher meta.xml")
 
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
@@ -350,14 +356,15 @@ ExternalProject_Add(nintendont_launcher
     CMAKE_GENERATOR "${CMAKE_GENERATOR}"
     LIST_SEPARATOR |
     CMAKE_ARGS
+        "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
         "-DLAUNCHER_PYTHON=${VENV_PYTHON}"
         "-DLAUNCHER_SCRIPTS_DIR=${CMAKE_SOURCE_DIR}/scripts"
         "-DSUSAMUNE_MOD_BINS=${_mod_bins_arg}"
         "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
         "-DLAUNCHER_VERSION=${LAUNCHER_VERSION}"
-        "-DLAUNCHER_TEST_LOG=${CMAKE_SOURCE_DIR}/doc/v1.2.0-testing.md"
-        "-DLAUNCHER_CHANGELOG=${CMAKE_SOURCE_DIR}/changelogs and testlogs/V1.2.0 - CHANGELOG.md"
+        "-DLAUNCHER_TEST_LOG=${CMAKE_SOURCE_DIR}/doc/v2.0.0-testing.md"
+        "-DLAUNCHER_CHANGELOG=${CMAKE_SOURCE_DIR}/doc/v2.0.0-changelog.md"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
     DEPENDS mod_bins launcher_build_id
     BUILD_ALWAYS ON

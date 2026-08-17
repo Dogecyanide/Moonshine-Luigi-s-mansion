@@ -3,7 +3,7 @@
 It implements most of the [GCT generator](https://gct.zint.ch/) practice codes, adds emulator-like savestates to console (Wii through Nintendont), and more. It supports JP 1.0, US, and PAL versions.
 
 <p align="center">
-  <a href="doc/screenshot">
+  <a href="doc/showcase.webp">
     <img src="doc/showcase.webp" alt="Susamune menus and practice features">
   </a>
 </p>

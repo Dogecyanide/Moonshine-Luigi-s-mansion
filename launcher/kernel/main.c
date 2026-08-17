@@ -37,6 +37,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "TRI.h"
 #include "Patch.h"
 #include "SusamuneCfg.h"
+#include "SusamuneCrash.h"
+#include "SusamuneGhost.h"
 #include "susamune/susamune_cfg.h"
 
 #include "diskio.h"
@@ -389,6 +391,8 @@ int _main( int argc, char *argv[] )
 	// drawn. Nothing else touches FatFS at this point -- the DI thread exists
 	// but is parked on its queue until the game starts asking for reads.
 	SusamuneCfgInit();
+	SusamuneGhostInit();
+	SusamuneCrashInit();
 
 	BootStatus(10, s_size, s_cnt);
 
@@ -520,10 +524,10 @@ int _main( int argc, char *argv[] )
 			else
 				udelay(200); //let the driver load data
 		}
-		/* Same constraint as the card save below: FatFS is shared with the DI
-		 * thread, so only touch the SD card when no async read is in flight.
-		 * Ahead of SaveCard because that one sits on a 60 second timer and
-		 * would otherwise starve Susamune writes for a minute. */
+		else if(SusamuneCrashPending())
+		{
+			SusamuneCrashService();
+		}
 		else if(SusamunePbPending())
 		{
 			SusamunePbService();
@@ -531,6 +535,12 @@ int _main( int argc, char *argv[] )
 		else if(SusamuneCfgPending())
 		{
 			SusamuneCfgService();
+		}
+		/* FatFS is shared with the DI thread, so process one bounded ghost
+		 * slice only when no async read or existing Susamune journal is ready. */
+		else if(SusamuneGhostPending())
+		{
+			SusamuneGhostService();
 		}
 		else if(SaveCard == true) /* DI IRQ indicates we might read async, so dont write at the same time */
 		{

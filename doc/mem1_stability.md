@@ -1,7 +1,7 @@
 # MEM1 stability test
 
-The 128 KiB build moves the game heap floor up by 32 KiB relative to the
-console-tested 96 KiB checkpoint. Console results are authoritative; Dolphin
+The 512 KiB build moves the game heap floor up by 384 KiB relative to the
+console-tested 128 KiB checkpoint. Console results are authoritative; Dolphin
 can miss real overlap and cache failures.
 
 ## Diagnostic overlay
@@ -16,12 +16,12 @@ cmake --build build_memdiag --target mod_bins
 The overlay is always visible in this build and allocates no heap:
 
 ```text
-MEM R:80446020 E:80446020 F:OK C:OK
+MEM R:804A6020 E:804A6020 F:OK C:OK
 ST 7/0 F:1234K I:1250K M:1210K H:OK
 ```
 
 - `R`: root-heap object address.
-- `E`: exclusive end of the 128 KiB mod region.
+- `E`: exclusive end of the 512 KiB mod region.
 - `F`: root heap and its first usable byte are outside the mod region.
 - `C`: the unused scratch-tail canary has never changed.
 - `ST`: current area and episode.
@@ -33,13 +33,14 @@ ST 7/0 F:1234K I:1250K M:1210K H:OK
 
 Any `BAD` is a failure. Photograph the overlay after a fresh load and again at
 the lowest observed `M`. A minimum below 32 KiB is a warning that needs an A/B
-check against the console-tested 96 KiB build even if the stage still runs.
+check against the console-tested 128 KiB build even if the stage still runs.
 
 ## Primary JP and PAL stress
 
 Test JP first because it is the main run version, then repeat the same sequence
-on PAL because its blob is largest. The fixed QFT scratch changes signed
-low-half behavior again in the 128 KiB layout, so both regions remain mandatory.
+on PAL for the independent regional layout. The fixed QFT scratch keeps the
+128 KiB layout's signed-low-half split at new addresses, so both regions remain
+mandatory.
 
 For both Sirena 1 (Phantamanta) and Pinna Park interior:
 
@@ -76,7 +77,7 @@ Run this on JP and PAL before a long soak:
    dialogue must restore exactly. On PAL, repeat in English and French.
 
 If the regional DPad Functions Gecko code is used, test it separately with
-native Fast Text off. The launcher should relocate it by `0x22000`.
+native Fast Text off. The launcher should relocate it by `0x82000`.
 
 ## Closing coverage
 
@@ -106,3 +107,14 @@ With otherwise identical allocations, the extra 32 KiB reservation predicts
 
 The JP build booted and Bianco 5 reached 1381 KiB exactly as predicted, with
 no observed instability or diagnostic failure.
+
+## 512 KiB console result
+
+The historical pressure build at `ba85cfa` was filled to about 500 KiB by
+`90ca792`. Dogecyanide reports that padded build was console-tested without a
+failure, proving the near-full launcher staging copy and MEM1 reservation path.
+The exact regional and stage coverage was not recorded here, so V2 still needs
+the full stress matrix above with its real code and runtime ghost buffers.
+
+With otherwise identical stage allocations, the extra 384 KiB reservation
+predicts prior worst-case minima near 997 KiB for JP and 1022 KiB for PAL.

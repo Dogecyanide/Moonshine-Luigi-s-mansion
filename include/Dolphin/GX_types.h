@@ -1279,7 +1279,7 @@ typedef union _wgpipe {
 /*! \typedef struct _gx_color GXColor
  * \brief Structure used to pass colors to some GX functions.
  */
-typedef struct _gx_color {
+typedef struct _GXColor {
     u8 r; /*!< Red color component. */
     u8 g; /*!< Green color component. */
     u8 b; /*!< Blue alpha component. */

@@ -58,10 +58,13 @@
 #include "susamune/addresses.hxx"
 #include "susamune/binds.hxx"
 #include "susamune/creation_extras.hxx"
+#include "susamune/ghost.hxx"
+#include "susamune/ghost_storage.hxx"
 #include "susamune/mem2_map.h"
 #include "susamune/qft_timer.hxx"
 #include "susamune/iling.hxx"
 #include "susamune/records.hxx"
+#include "susamune/warp_wheel.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/settings.hxx"
 #if ENABLE_SAVESTATE_DBG
@@ -214,7 +217,7 @@ const int kNumPointedAllocs = sizeof(kPointedAllocs) / sizeof(kPointedAllocs[0])
 // One header lives at the very start of the snapshot buffer; the saved
 // bytes follow at kHeaderSize.
 const u32 kSnapshotMagic   = 0x53555341u; // 'SUSA'
-const u32 kSnapshotVersion = 10u;         // 128 KiB mod region: the stage heap moved
+const u32 kSnapshotVersion = 11u;         // 512 KiB mod region: the stage heap moved
 const u32 kHeaderSize      = 0x100u;
 // One slot per static range, one per pointed alloc, plus one for the heap.
 const int kMaxRegions      = kNumStaticRanges + kNumPointedAllocs + 1;
@@ -637,6 +640,11 @@ bool SavestateManager::loadState() {
     OSRestoreInterrupts(ints);
 
     gQFTTimer.onSavestateLoaded();
+    Ghost::onSavestateLoaded();
+    GhostStorage::onSavestateLoaded();
+    // An armed warp lives in mod BSS, outside the restored game snapshot.
+    // Cancel it before ILing adopts the save-time attempt state.
+    LevelWarp::cancelPending();
     ILing::onSavestateLoaded();
     Records::onSavestateLoaded();
     feedback("loaded", "Savestate loaded");
@@ -658,9 +666,16 @@ void SavestateManager::updateHook() {
         counterControls && gBinds.get(BIND_ATTEMPT_ADD) != 0 &&
         gBinds.get(BIND_ATTEMPT_ADD) == gBinds.get(BIND_SAVESTATE_LOAD);
 
-    if (!counterOwnsSave && gBinds.wasPressed(BIND_SAVESTATE_SAVE)) {
+    const bool approvedLoad = WarpWheel::takeSavestateLoadApproval();
+    if (approvedLoad) {
+        mLoadPending = true;
+        SET_STATUS("loading");
+    } else if (!counterOwnsSave &&
+               gBinds.wasPressed(BIND_SAVESTATE_SAVE)) {
         saveState();
-    } else if (!counterOwnsLoad && gBinds.wasPressed(BIND_SAVESTATE_LOAD)) {
+    } else if (!counterOwnsLoad &&
+               gBinds.wasPressed(BIND_SAVESTATE_LOAD) &&
+               WarpWheel::requestSavestateLoad()) {
         // TApplication still runs the fader and gpMSound->mainLoop(), then
         // submits the rest of the frame after this hook returns. Restoring here
         // made those systems consume half-live/half-restored state. Defer the

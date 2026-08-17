@@ -155,10 +155,12 @@ struct SusamuneInputStyleCfg {
 #define SUSAMUNE_CREATION_MENU_BG           24u
 #define SUSAMUNE_CREATION_RECENT_STYLE_MAGIC 0x5249u  // 'RI'
 #define SUSAMUNE_CREATION_SAVESTATE_STYLE_MAGIC 0x5353u  // 'SS'
+#define SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC 0x4150u  // 'AP'
 
 #define SUSAMUNE_WALLKICK_STYLE_MAGIC       0x53574B44u  // 'SWKD'
-#define SUSAMUNE_WALLKICK_STYLE_VERSION     1u
+#define SUSAMUNE_WALLKICK_STYLE_VERSION     2u
 #define SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT 7u
+#define SUSAMUNE_NOTIFICATION_STYLE_MAGIC   0x4Eu  // 'N'
 
 struct SusamuneCreationWordCfg {
     unsigned short x;
@@ -217,7 +219,13 @@ struct SusamuneCreationCfg {
     unsigned char  savestateTextBrightness;
     unsigned char  savestatePadding;
     unsigned char  savestateTextRgb[3];
-    unsigned char  reserved3[15];
+    // Position/scale-only achievement banner style in the old reserved tail.
+    unsigned char  reservedAchievement0;
+    unsigned short achievementStyleMagic;
+    unsigned short achievementX;
+    unsigned short achievementY;
+    unsigned char  achievementScale;
+    unsigned char  reserved3[7];
 };
 
 struct SusamuneWallkickStyleCfg {
@@ -235,7 +243,17 @@ struct SusamuneWallkickStyleCfg {
     unsigned char  textBrightness;
     unsigned char  padding;
     unsigned char  rgb[SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT][3];
-    unsigned char  reserved1[23];
+    // V2 reuses the old reserved tail. Keep the explicit pad: the shared C,
+    // PPC and ARM toolchains must agree on the established 64-byte layout.
+    unsigned char  notificationStyleMagic;
+    unsigned short toastX;
+    unsigned short toastY;
+    unsigned char  toastScale;
+    unsigned char  reservedNotification0;
+    unsigned short pbPopupX;
+    unsigned short pbPopupY;
+    unsigned char  pbPopupScale;
+    unsigned char  reserved1[11];
 };
 
 // Metadata Display keeps a compact in-game configuration plus an optional
@@ -641,7 +659,12 @@ typedef char susamune_metadata_style_slots_check[(__builtin_offsetof(struct Susa
 typedef char susamune_input_style_cfg_size_check[(sizeof(struct SusamuneInputStyleCfg) == 64) ? 1 : -1];
 typedef char susamune_creation_word_cfg_size_check[(sizeof(struct SusamuneCreationWordCfg) == 144) ? 1 : -1];
 typedef char susamune_creation_cfg_size_check[(sizeof(struct SusamuneCreationCfg) == 576) ? 1 : -1];
+typedef char susamune_achievement_style_offset_check[(__builtin_offsetof(struct SusamuneCreationCfg, achievementStyleMagic) == 562) ? 1 : -1];
+typedef char susamune_achievement_x_offset_check[(__builtin_offsetof(struct SusamuneCreationCfg, achievementX) == 564) ? 1 : -1];
 typedef char susamune_wallkick_style_cfg_size_check[(sizeof(struct SusamuneWallkickStyleCfg) == 64) ? 1 : -1];
+typedef char susamune_notification_style_offset_check[(__builtin_offsetof(struct SusamuneWallkickStyleCfg, notificationStyleMagic) == 41) ? 1 : -1];
+typedef char susamune_notification_toast_offset_check[(__builtin_offsetof(struct SusamuneWallkickStyleCfg, toastX) == 42) ? 1 : -1];
+typedef char susamune_notification_pb_offset_check[(__builtin_offsetof(struct SusamuneWallkickStyleCfg, pbPopupX) == 48) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_ack_check[(__builtin_offsetof(struct SusamuneILingPbCfg, ackSeq) == 32) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_values_check[(__builtin_offsetof(struct SusamuneILingPbCfg, values) == 64) ? 1 : -1];
 typedef char susamune_iling_pb_cfg_size_check[(sizeof(struct SusamuneILingPbCfg) == 576) ? 1 : -1];

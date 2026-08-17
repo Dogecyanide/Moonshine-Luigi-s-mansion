@@ -9,6 +9,7 @@ set(_sources
     start.s common.c alloc.c GCAM.c JVSIO.c JVSIOMessage.c FST.c DI.c RealDI.c
     Patch.c PatchTimers.c TRI.c PatchWidescreen.c ISO.c Stream.c adp.c
     EXI.c SRAM.c GCNCard.c SI.c HID.c diskio.c Config.c SusamuneCfg.c
+    SusamuneGhost.c SusamuneCrash.c
     utils_asm.S ES.c NAND.c
     main.c syscalls.s ReadSpeed.c vsprintf.c string.c prs.c
     SDI.c usb.c usbstorage.c wdvd.c

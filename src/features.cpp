@@ -16,6 +16,7 @@
 // =====================================================================
 
 #include "susamune/features.hxx"
+#include "susamune/ghost.hxx"
 #include "susamune/settings.hxx"
 #include "susamune/addresses.hxx"  // SUSAMUNE_MEM1_ADDR
 #include "susamune/mem2_map.h"
@@ -215,14 +216,14 @@ Patch gFeaturePatches[] = {
     FBEGIN(SETTING_MUTE_BGM, 0x8017FF58, 0x80016A34, 0x80016A90,
            0xFC210828),
 
-// Shine Outfit: force Mario's outfit id to the shine-shirt value.
+// Shine Outfit: force Mario's outfit id to the shine-shirt value. The shirt
+// branch itself is owned by the appearance choice writer below so legacy and
+// tri-state settings cannot race over the same instruction.
 //   jp 04120D1C / us 04241FD4 / pal 04239C88 = 60000004 (ori r0,r0,4)
 //   jp 04120D20 / us 04241FD8 / pal 04239C8C = B01D0004 (sth r0,4(r29))
-//   jp 0412C9B0 / us 0424D4DC / pal 04245268 = 60000000 (nop)
     FBEGIN(SETTING_SHINE_OUTFIT, 0x80120D1C, 0x80241FD4, 0x80239C88,
            0x60000004),
     FWORD(0x80120D20, 0x80241FD8, 0x80239C8C, 0xB01D0004),
-    FWORD(0x8012C9B0, 0x8024D4DC, 0x80245268, 0x60000000),
 
 // Shiny Shines: branch (b +0x4C) past the "already collected?" test so every
 // shine renders yellow.
@@ -320,10 +321,10 @@ constexpr int kNumFeaturePatches =
 constexpr int kNumEarlyPatches = 7;
 constexpr int kNumPatches      = kNumFeaturePatches - kNumEarlyPatches;
 #if defined(SUSAMUNE_VERSION_JP)
-static_assert(kNumFeaturePatches == 43 && kNumPatches == 36,
+static_assert(kNumFeaturePatches == 42 && kNumPatches == 35,
               "JP patch stream shape changed");
 #else
-static_assert(kNumFeaturePatches == 41 && kNumPatches == 34,
+static_assert(kNumFeaturePatches == 40 && kNumPatches == 33,
               "US/PAL patch stream shape changed");
 #endif
 
@@ -658,7 +659,7 @@ constexpr u8 kHookOn     = 0x80u;
 // console, so try the unreserved address as well rather than pick one blind.
 void resolveFastTextPalMsg() {
     constexpr int kFastTextMsgPatch = kNumFeaturePatches - 2;
-    static_assert(kFastTextMsgPatch == 39,
+    static_assert(kFastTextMsgPatch == 38,
                   "PAL Fast Text message row moved");
     Patch &row = gFeaturePatches[kFastTextMsgPatch];
     if (row.addrState & kPatchAddrMask) {
@@ -784,6 +785,10 @@ void applyHooks() {
         bool on = id == SETTING_FAST_PIANTISSIMO
                       ? piantissimoMode != 0
                       : gSettings.getBool(id);
+        // Watch owns its destination and cannot wait on secret-stage input.
+        if (id == SETTING_STAGE_INTRO_SKIP && Ghost::observerActive()) {
+            on = true;
+        }
         if (on == ((state & kHookOn) != 0) && !piantissimoChanged) {
             continue;
         }
@@ -801,10 +806,8 @@ void applyHooks() {
 }
 
 // =====================================================================
-// Choice features: multi-state options carved out of the multi-feature gecko
-// codes (Nozzle Lock, DPad Functions' FLUDD-in-secrets). Choice 0 must be the
-// game default -- it restores the captured original; higher choices write
-// their explicit instruction.
+// Choice features: multi-state options carved out of Gecko codes. Choice 0
+// restores the captured original; higher choices write explicit instructions.
 // =====================================================================
 
 // Nozzle Lock. One site: the game's "current nozzle" load becomes li r31,<id>.
@@ -818,14 +821,41 @@ constexpr u32 kChoiceSites[] = {
     SUSAMUNE_MEM1_ADDR(0x801494D4u, 0x80269F50u, 0x80261CDCu),
     SUSAMUNE_MEM1_ADDR(0x80198784u, 0x801C0910u, 0x801B87C8u),
     SUSAMUNE_MEM1_ADDR(0x800EC0F4u, 0x80298B88u, 0x80290A20u),
+
+    // Helmet. QbeRoot's generator says 801211AC for JP's third site, but
+    // that is its preceding rlwinm.; the retail branch is at 801211B0.
+    SUSAMUNE_MEM1_ADDR(0x80120FB8u, 0x80241E78u, 0x80239C04u),
+    SUSAMUNE_MEM1_ADDR(0x8012112Cu, 0x80241FECu, 0x80239D78u),
+    SUSAMUNE_MEM1_ADDR(0x801211B0u, 0x80242070u, 0x80239DFCu),
+    // Cap.
+    SUSAMUNE_MEM1_ADDR(0x80120D34u, 0x80241BF4u, 0x80239980u),
+    // Shades.
+    SUSAMUNE_MEM1_ADDR(0x80121054u, 0x80241F14u, 0x80239CA0u),
+    SUSAMUNE_MEM1_ADDR(0x80121160u, 0x80242020u, 0x80239DACu),
+    SUSAMUNE_MEM1_ADDR(0x801211E4u, 0x802420A4u, 0x80239E30u),
+    // Shine shirt.
+    SUSAMUNE_MEM1_ADDR(0x8012C9B0u, 0x8024D4DCu, 0x80245268u),
 };
 constexpr u8 kNozzleIds[] = {1, 5, 4};
+constexpr u8 kAppearanceFirst[] = {3, 6, 7, 10, 11};
+constexpr int kCoreChoicePatches = kAppearanceFirst[0];
 
 constexpr int kNumChoicePatches =
     (int)(sizeof(kChoiceSites) / sizeof(kChoiceSites[0]));
-static_assert(kNumChoicePatches == 3, "choice patch sites changed");
+constexpr int kNumAppearances =
+    (int)(sizeof(kAppearanceFirst) / sizeof(kAppearanceFirst[0])) - 1;
+static_assert(kNumChoicePatches == 11, "choice patch sites changed");
+static_assert(kNumAppearances == 4 &&
+                  kAppearanceFirst[kNumAppearances] == kNumChoicePatches,
+              "appearance ranges must tile the appended choice sites");
 static_assert(sizeof(kNozzleIds) / sizeof(kNozzleIds[0]) == 3,
               "nozzle choices changed");
+static_assert(SETTING_CAP_APPEARANCE == SETTING_HELMET_APPEARANCE + 1 &&
+                  SETTING_SHADES_APPEARANCE ==
+                      SETTING_HELMET_APPEARANCE + 2 &&
+                  SETTING_SHINE_SHIRT_APPEARANCE ==
+                      SETTING_HELMET_APPEARANCE + 3,
+              "appearance setting ids must stay contiguous");
 
 #define gChoiceOrig (*reinterpret_cast<u32 (*)[kNumChoicePatches]>( \
     SUSAMUNE_MEM2_FEATURE_RUNTIME_PPC_BASE + \
@@ -835,11 +865,15 @@ static_assert(sizeof(u32) *
                   SUSAMUNE_FEATURE_RUNTIME_SIZE,
               "feature originals exceed their MEM2 runtime window");
 u8  gChoiceState;
+u8  gAppearanceState;
 
 constexpr u8 kChoiceNozzleMask = 0x03u;
 constexpr u8 kChoiceFluddMask  = 0x0Cu;
 constexpr u8 kChoiceFluddShift = 2u;
 constexpr u8 kChoiceCaptured   = 0x10u;
+constexpr u8 kAppearanceMask   = 0x03u;
+constexpr u8 kAppearanceAlways = 1u;
+constexpr u8 kAppearanceNever  = 2u;
 
 void applyChoices() {
     if (!(gChoiceState & kChoiceCaptured)) {
@@ -862,7 +896,7 @@ void applyChoices() {
     u8 fludd = gSettings.get(SETTING_FLUDD_SECRETS);
     u8 currentFludd = (gChoiceState & kChoiceFluddMask) >> kChoiceFluddShift;
     if (fludd != currentFludd) {
-        for (int i = 1; i < kNumChoicePatches; i++) {
+        for (int i = 1; i < kCoreChoicePatches; i++) {
             u32 word = gChoiceOrig[i];
             if (fludd == 1) {
                 word = 0x60000000u;
@@ -873,6 +907,37 @@ void applyChoices() {
         }
         gChoiceState = (gChoiceState & ~kChoiceFluddMask) |
                        (fludd << kChoiceFluddShift);
+    }
+
+    for (int appearance = 0; appearance < kNumAppearances; appearance++) {
+        const u8 shift = (u8)(appearance * 2);
+        u8 mode = gSettings.get((SettingId)(SETTING_HELMET_APPEARANCE +
+                                             appearance));
+        if (mode > kAppearanceNever) {
+            mode = 0;
+        }
+        if (appearance == kNumAppearances - 1 && mode == 0 &&
+            gSettings.getBool(SETTING_SHINE_OUTFIT)) {
+            mode = kAppearanceAlways;
+        }
+
+        const u8 current = (gAppearanceState >> shift) & kAppearanceMask;
+        if (mode == current) {
+            continue;
+        }
+
+        for (int i = kAppearanceFirst[appearance];
+             i < kAppearanceFirst[appearance + 1]; i++) {
+            u32 word = gChoiceOrig[i];
+            if (mode == kAppearanceAlways) {
+                word = 0x60000000u;
+            } else if (mode == kAppearanceNever) {
+                word = 0x48000000u | (word & 0x0000FFFFu);
+            }
+            writeGameCode(kChoiceSites[i], word);
+        }
+        gAppearanceState =
+            (gAppearanceState & ~(kAppearanceMask << shift)) | (mode << shift);
     }
 }
 

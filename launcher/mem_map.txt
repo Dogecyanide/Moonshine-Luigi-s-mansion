@@ -11,11 +11,12 @@ MEM2
 0x91300000-0x91400000=Triforce SegaBoot IPL
 0x91400000-0x91700000=Triforce DIMM memory
 0x91700000-0x91780000=temporary DI/DSP patch buffer
-0x91780000-0x91900000=PPC loader-only real-disc DMA buffer
-0x91900000-0x91EDF000=patch.bin / patch.txt loader-to-kernel handoff
-0x91EDF000-0x91F00000=Susamune mod_<region>.bin staging (same handoff lifetime; dead once PatchSusamune has copied it to MEM1)
+0x91780000-0x91900000=PPC loader-only real-disc DMA buffer; three 512 KiB Susamune ghost slots after boot
+0x91900000-0x91E7F000=patch.bin / patch.txt loader-to-kernel handoff
+0x91E7F000-0x91F00000=Susamune mod_<region>.bin staging (same handoff lifetime; dead once PatchSusamune has copied it to MEM1)
 0x91F00000-0x92EF0000=Susamune savestate snapshot (dedicated)
 0x92EF0000-0x92EFF800=Susamune settings block (susamune.ini/PB handoff + save doorbells)
+0x92EF4400-0x92EF5400=Susamune exception capture mailbox (inside the settings-block runtime gap)
 0x92EFF800-0x92F00000=Susamune PPC-only live PB profiles
 
 0x92F00000-0x93000000=Nintendont kernel

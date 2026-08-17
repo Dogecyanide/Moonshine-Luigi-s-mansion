@@ -51,7 +51,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "vi_encoder.h"
 #include "SusamuneMod.h"
 #include "SusamuneIni.h"
+#include "SusamuneGhostDirs.h"
 #include "SusamuneMenu.h"
+#include "SusamuneMusic.h"
+#include "SusamuneShadowAsset.h"
+#include "SusamuneTheme.h"
 #include "susamune/mem2_map.h"
 
 #include "ff_utf8.h"
@@ -1748,6 +1752,20 @@ int main(int argc, char **argv)
 	free(fontbuffer);
 	//gprintf("Font: 0x1AFF00 starts with %.4s, 0x1FCF00 with %.4s\n", (char*)0x93100000, (char*)0x93100000 + 0x4D000);
 
+	// Keep the optional texture behind every mandatory startup allocation.
+	SusamuneThemeLoad(GetRootDevice(), launch_dir, &background);
+	if (SusamuneThemeWarning()[0] != '\0')
+	{
+		ShowMessageScreen(SusamuneThemeWarning());
+		usleep(2500000);
+	}
+	SusamuneMusicLoad(GetRootDevice(), launch_dir);
+	if (SusamuneMusicWarning()[0] != '\0')
+	{
+		ShowMessageScreen(SusamuneMusicWarning());
+		usleep(2500000);
+	}
+
 	// Update meta.xml.
 	updateMetaXml();
 
@@ -1761,6 +1779,8 @@ int main(int argc, char **argv)
 	// Can the ini be written back? Probe once so the menu can say so up front
 	// rather than only failing when the user changes something.
 	bool LauncherCanSave = SusamuneIniWritable(GetRootDevice());
+	if (!SusamuneGhostEnsureDirectories(GetRootDevice()))
+		gprintf("Susamune: ghost directories are unavailable\n");
 	if (LauncherCanSave && SusamuneIniNeedsWrite())
 	{
 		// First run on this card: author [nintendont] so the keys are there to
@@ -2216,6 +2236,11 @@ int main(int argc, char **argv)
 	srand (time (0));
 	SetFilePatches();
 
+	// Last disc/FAT read into the loader-only buffer. The payload is flushed
+	// before its ready header and survives the handoff as the ghost record slot.
+	SusamuneStageShadowAsset(GetRootDevice(), ncfg->GamePath, CurDICMD,
+		ISOShift, wiiVCInternal);
+
 	//stage mod_<region>.bin for this disc; the kernel copies it into MEM1
 	SusamuneLoadMod(ncfg->GameID);
 	
@@ -2406,6 +2431,8 @@ int main(int argc, char **argv)
 	GRRLIB_Render();
 	DrawBuffer(); // Draw all status messages
 //	memcpy( (void*)0x80000000, (void*)0x90140000, 0x1200000 );
+	SusamuneMusicShutdown();
+	SusamuneThemeShutdown(&background);
 	GRRLIB_FreeTexture(background);
 	GRRLIB_FreeTexture(screen_buffer);
 	GRRLIB_FreeTTF(myFont);

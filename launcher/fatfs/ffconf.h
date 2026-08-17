@@ -19,8 +19,9 @@
 // Nintendont loader: Enable all functionality.
 #define _FS_MINIMIZE	0
 #else /* !__PPC__ */
-// Nintendont kernel: Use minimize level 2.
-#define _FS_MINIMIZE	2
+// Ghost imports need bounded directory enumeration and explicit deletion.
+// Calls remain serialized behind the kernel's async-DI idle guard.
+#define _FS_MINIMIZE	0
 #endif /* __PPC__ */
 /* This option defines minimization level to remove some basic API functions.
 /

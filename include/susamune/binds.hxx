@@ -67,6 +67,10 @@ public:
     // onUpdate, before any action reads a bind.
     void update();
 
+    // A modal prompt still reads A/B directly, but no configured action may
+    // inherit that press. Binds resume after the physical pad is released.
+    void suppressUntilRelease() { mRecSilent = true; }
+
     // Bindable buttons currently held (raw, unaffected by suppression).
     u16 held() const { return mHeld; }
 
@@ -126,9 +130,8 @@ private:
     u16  mRecAccum;
     u8   mRecState;
     u8   mRecTarget;
-    // Binds stay dead from the moment the recorder is armed until the pad is
-    // released again. Without it a four-button combo -- which commits while
-    // still held -- would fire the very action it was just bound to.
+    // Binds stay dead after the recorder or a modal prompt consumes a press,
+    // until the physical pad is released again.
     bool mRecSilent;
     bool mDirty;
 };

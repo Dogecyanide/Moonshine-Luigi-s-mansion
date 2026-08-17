@@ -24,7 +24,7 @@ const char *wallkickDisplayLabel(int index);
 class CreationExtras {
 public:
     enum {
-        MENU_ROW_COUNT = 20,
+        MENU_ROW_COUNT = 23,
         HUD_PANE_COUNT = 25,
         PREVIEW_PANE_COUNT = 2,
     };
@@ -43,15 +43,28 @@ public:
     void beginRecentIlEditor();
     void beginSavestateFeedbackEditor();
     void beginWallkickEditor();
+    void beginAchievementBannerEditor();
+    void beginToastEditor();
+    void beginPbBannerEditor();
     void beginColorEditor(int first, int count, const char *title,
                           const char *names = nullptr);
     void toggleTimerLabel();
     bool timerLabelVisible() const { return mTimerLabelVisible != 0; }
     const CreationStyle &recentIlStyle() const { return mRecentIlStyle; }
     const u8 *recentIlTextRgb() const { return mRecentIlRgb[0]; }
+    const CreationStyle &achievementBannerStyle() const {
+        return mAchievementBannerStyle;
+    }
+    bool editingAchievementBanner() const {
+        return mEditMode == EDIT_ACHIEVEMENT_BANNER && mEditor.editing();
+    }
+    const CreationStyle &toastStyle() const { return mToastStyle; }
+    const CreationStyle &pbBannerStyle() const { return mPbBannerStyle; }
     void drawSavestateFeedback(Menu *menu, const char *message) const;
     void drawWallkickDisplay(Menu *menu, const char *message,
                              int color) const;
+    void drawToast(Menu *menu, const char *message) const;
+    void drawPbBanner(Menu *menu, const char *message) const;
 
     static int menuRowCount() { return MENU_ROW_COUNT; }
     static bool menuRowSeparator(int row);
@@ -77,6 +90,9 @@ private:
         EDIT_RECENT_ILS,
         EDIT_SAVESTATE_FEEDBACK,
         EDIT_WALLKICK,
+        EDIT_ACHIEVEMENT_BANNER,
+        EDIT_TOAST,
+        EDIT_PB_BANNER,
     };
 
     static CreationStyle defaultWordStyle(int index);
@@ -95,6 +111,9 @@ private:
     CreationStyle mRecentIlStyle;
     CreationStyle mSavestateFeedbackStyle;
     CreationStyle mWallkickStyle;
+    CreationStyle mAchievementBannerStyle;
+    CreationStyle mToastStyle;
+    CreationStyle mPbBannerStyle;
     CreationStyle mColorStyle;
     u8 mColors[SUSAMUNE_CREATION_COLOR_COUNT][3];
     u8 mDefaultColors[SUSAMUNE_CREATION_COLOR_COUNT][3];

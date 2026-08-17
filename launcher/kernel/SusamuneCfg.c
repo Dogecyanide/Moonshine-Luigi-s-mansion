@@ -1408,6 +1408,22 @@ static void ApplyCreationKey(struct SusamuneCreationCfg *cfg,
 		cfg->savestatePadding = v8;
 		return;
 	}
+	if (strcmp(key, "achievement_popup_x") == 0 && ParseU16(text, &v16))
+	{
+		cfg->achievementX = v16;
+		return;
+	}
+	if (strcmp(key, "achievement_popup_y") == 0 && ParseU16(text, &v16))
+	{
+		cfg->achievementY = v16;
+		return;
+	}
+	if (strcmp(key, "achievement_popup_scale") == 0 &&
+	    ParseQftU8(text, &v8))
+	{
+		cfg->achievementScale = v8;
+		return;
+	}
 	if (!ParseCreationWordKey(key, &word, &field))
 		return;
 	if (strcmp(field, "text") == 0)
@@ -1469,6 +1485,12 @@ static void ApplyWallkickStyleKey(struct SusamuneWallkickStyleCfg *cfg,
 	if (strcmp(key, "wallkick_x") == 0 && ParseU16(text, &v16)) cfg->x = v16;
 	else if (strcmp(key, "wallkick_y") == 0 && ParseU16(text, &v16)) cfg->y = v16;
 	else if (strcmp(key, "wallkick_scale") == 0 && ParseQftU8(text, &v8)) cfg->scale = v8;
+	else if (strcmp(key, "notification_x") == 0 && ParseU16(text, &v16)) cfg->toastX = v16;
+	else if (strcmp(key, "notification_y") == 0 && ParseU16(text, &v16)) cfg->toastY = v16;
+	else if (strcmp(key, "notification_scale") == 0 && ParseQftU8(text, &v8)) cfg->toastScale = v8;
+	else if (strcmp(key, "il_pb_popup_x") == 0 && ParseU16(text, &v16)) cfg->pbPopupX = v16;
+	else if (strcmp(key, "il_pb_popup_y") == 0 && ParseU16(text, &v16)) cfg->pbPopupY = v16;
+	else if (strcmp(key, "il_pb_popup_scale") == 0 && ParseQftU8(text, &v8)) cfg->pbPopupScale = v8;
 	else if (strcmp(key, "wallkick_text_alpha") == 0 && ParseQftU8(text, &v8)) cfg->textA = v8;
 	else if (strcmp(key, "wallkick_background_rgb") == 0 && ParseQftRgb(text, rgb))
 	{
@@ -1956,6 +1978,17 @@ static void EmitCreationSection(FIL *f, int *err,
 			line, "savestate_feedback_padding = %u\r\n",
 			d->savestatePadding));
 	}
+	if (d->achievementStyleMagic ==
+	    SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC)
+	{
+		Emit(f, err, line, (u32)_sprintf(
+			line, "achievement_popup_x = %u\r\n", d->achievementX));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "achievement_popup_y = %u\r\n", d->achievementY));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "achievement_popup_scale = %u\r\n",
+			d->achievementScale));
+	}
 	{
 		const struct SusamuneWallkickStyleCfg *w = &cfg->wallkickStyle;
 		Emit(f, err, line, (u32)_sprintf(line, "wallkick_x = %u\r\n", w->x));
@@ -1974,6 +2007,18 @@ static void EmitCreationSection(FIL *f, int *err,
 			Emit(f, err, line, (u32)_sprintf(
 				line, "wallkick_%u_rgb = %u,%u,%u\r\n", i + 1,
 				w->rgb[i][0], w->rgb[i][1], w->rgb[i][2]));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "notification_x = %u\r\n", w->toastX));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "notification_y = %u\r\n", w->toastY));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "notification_scale = %u\r\n", w->toastScale));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "il_pb_popup_x = %u\r\n", w->pbPopupX));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "il_pb_popup_y = %u\r\n", w->pbPopupY));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "il_pb_popup_scale = %u\r\n", w->pbPopupScale));
 	}
 	for (word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++)
 	{
@@ -2239,6 +2284,12 @@ static void InitCreationDefaults(struct SusamuneCreationCfg *cfg)
 	cfg->savestateTextRgb[0] = 255;
 	cfg->savestateTextRgb[1] = 255;
 	cfg->savestateTextRgb[2] = 255;
+	cfg->achievementStyleMagic =
+		SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC;
+	cfg->reservedAchievement0 = 0;
+	cfg->achievementX = 115;
+	cfg->achievementY = 96;
+	cfg->achievementScale = 100;
 	memset(cfg->reserved3, 0, sizeof(cfg->reserved3));
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
@@ -2280,6 +2331,13 @@ static void InitWallkickStyleDefaults(struct SusamuneWallkickStyleCfg *cfg)
 	cfg->bgA = 185;
 	cfg->textBrightness = 100;
 	cfg->padding = 5;
+	cfg->notificationStyleMagic = SUSAMUNE_NOTIFICATION_STYLE_MAGIC;
+	cfg->toastX = 20;
+	cfg->toastY = 412;
+	cfg->toastScale = 100;
+	cfg->pbPopupX = 320;
+	cfg->pbPopupY = 42;
+	cfg->pbPopupScale = 100;
 	for (i = 0; i < SUSAMUNE_WALLKICK_STYLE_COLOR_COUNT; i++)
 		cfg->rgb[i][0] = cfg->rgb[i][1] = cfg->rgb[i][2] = 255;
 }
