@@ -1424,6 +1424,30 @@ static void ApplyCreationKey(struct SusamuneCreationCfg *cfg,
 		cfg->achievementScale = v8;
 		return;
 	}
+	if (strcmp(key, "stage_session_counter_x") == 0 &&
+	    ParseU16(text, &v16))
+	{
+		cfg->stageSessionStyleMagic =
+			SUSAMUNE_CREATION_STAGE_SESSION_STYLE_MAGIC;
+		cfg->stageSessionX = v16;
+		return;
+	}
+	if (strcmp(key, "stage_session_counter_y") == 0 &&
+	    ParseU16(text, &v16))
+	{
+		cfg->stageSessionStyleMagic =
+			SUSAMUNE_CREATION_STAGE_SESSION_STYLE_MAGIC;
+		cfg->stageSessionY = v16;
+		return;
+	}
+	if (strcmp(key, "stage_session_counter_scale") == 0 &&
+	    ParseQftU8(text, &v8))
+	{
+		cfg->stageSessionStyleMagic =
+			SUSAMUNE_CREATION_STAGE_SESSION_STYLE_MAGIC;
+		cfg->stageSessionScale = v8;
+		return;
+	}
 	if (!ParseCreationWordKey(key, &word, &field))
 		return;
 	if (strcmp(field, "text") == 0)
@@ -1989,6 +2013,19 @@ static void EmitCreationSection(FIL *f, int *err,
 			line, "achievement_popup_scale = %u\r\n",
 			d->achievementScale));
 	}
+	if (d->stageSessionStyleMagic ==
+	    SUSAMUNE_CREATION_STAGE_SESSION_STYLE_MAGIC)
+	{
+		Emit(f, err, line, (u32)_sprintf(
+			line, "stage_session_counter_x = %u\r\n",
+			d->stageSessionX));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "stage_session_counter_y = %u\r\n",
+			d->stageSessionY));
+		Emit(f, err, line, (u32)_sprintf(
+			line, "stage_session_counter_scale = %u\r\n",
+			d->stageSessionScale));
+	}
 	{
 		const struct SusamuneWallkickStyleCfg *w = &cfg->wallkickStyle;
 		Emit(f, err, line, (u32)_sprintf(line, "wallkick_x = %u\r\n", w->x));
@@ -2290,7 +2327,12 @@ static void InitCreationDefaults(struct SusamuneCreationCfg *cfg)
 	cfg->achievementX = 115;
 	cfg->achievementY = 96;
 	cfg->achievementScale = 100;
-	memset(cfg->reserved3, 0, sizeof(cfg->reserved3));
+	cfg->stageSessionStyleMagic =
+		SUSAMUNE_CREATION_STAGE_SESSION_STYLE_MAGIC;
+	cfg->stageSessionX = 570;
+	cfg->stageSessionY = 40;
+	cfg->stageSessionScale = 100;
+	cfg->stageSessionReserved = 0;
 	for (i = 0; i < SUSAMUNE_CREATION_COLOR_COUNT; i++)
 	{
 		cfg->rgb[i][0] = 255;

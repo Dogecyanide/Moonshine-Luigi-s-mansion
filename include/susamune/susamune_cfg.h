@@ -156,6 +156,7 @@ struct SusamuneInputStyleCfg {
 #define SUSAMUNE_CREATION_RECENT_STYLE_MAGIC 0x5249u  // 'RI'
 #define SUSAMUNE_CREATION_SAVESTATE_STYLE_MAGIC 0x5353u  // 'SS'
 #define SUSAMUNE_CREATION_ACHIEVEMENT_STYLE_MAGIC 0x4150u  // 'AP'
+#define SUSAMUNE_CREATION_STAGE_SESSION_STYLE_MAGIC 0x53u  // 'S'
 
 #define SUSAMUNE_WALLKICK_STYLE_MAGIC       0x53574B44u  // 'SWKD'
 #define SUSAMUNE_WALLKICK_STYLE_VERSION     2u
@@ -225,7 +226,12 @@ struct SusamuneCreationCfg {
     unsigned short achievementX;
     unsigned short achievementY;
     unsigned char  achievementScale;
-    unsigned char  reserved3[7];
+    // Position/scale-only stage-session counter style in the final V1 tail.
+    unsigned char  stageSessionStyleMagic;
+    unsigned short stageSessionX;
+    unsigned short stageSessionY;
+    unsigned char  stageSessionScale;
+    unsigned char  stageSessionReserved;
 };
 
 struct SusamuneWallkickStyleCfg {
@@ -661,6 +667,11 @@ typedef char susamune_creation_word_cfg_size_check[(sizeof(struct SusamuneCreati
 typedef char susamune_creation_cfg_size_check[(sizeof(struct SusamuneCreationCfg) == 576) ? 1 : -1];
 typedef char susamune_achievement_style_offset_check[(__builtin_offsetof(struct SusamuneCreationCfg, achievementStyleMagic) == 562) ? 1 : -1];
 typedef char susamune_achievement_x_offset_check[(__builtin_offsetof(struct SusamuneCreationCfg, achievementX) == 564) ? 1 : -1];
+typedef char susamune_stage_session_magic_offset_check[(__builtin_offsetof(struct SusamuneCreationCfg, stageSessionStyleMagic) == 569) ? 1 : -1];
+typedef char susamune_stage_session_x_offset_check[(__builtin_offsetof(struct SusamuneCreationCfg, stageSessionX) == 570) ? 1 : -1];
+typedef char susamune_stage_session_y_offset_check[(__builtin_offsetof(struct SusamuneCreationCfg, stageSessionY) == 572) ? 1 : -1];
+typedef char susamune_stage_session_scale_offset_check[(__builtin_offsetof(struct SusamuneCreationCfg, stageSessionScale) == 574) ? 1 : -1];
+typedef char susamune_stage_session_tail_offset_check[(__builtin_offsetof(struct SusamuneCreationCfg, stageSessionReserved) == 575) ? 1 : -1];
 typedef char susamune_wallkick_style_cfg_size_check[(sizeof(struct SusamuneWallkickStyleCfg) == 64) ? 1 : -1];
 typedef char susamune_notification_style_offset_check[(__builtin_offsetof(struct SusamuneWallkickStyleCfg, notificationStyleMagic) == 41) ? 1 : -1];
 typedef char susamune_notification_toast_offset_check[(__builtin_offsetof(struct SusamuneWallkickStyleCfg, toastX) == 42) ? 1 : -1];

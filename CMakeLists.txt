@@ -41,7 +41,11 @@ if(CMAKE_GENERATOR MATCHES "Visual Studio")
 endif()
 
 set(VENV_DIR "${CMAKE_SOURCE_DIR}/venv")
-if(CMAKE_HOST_WIN32)
+set(SUSAMUNE_PYTHON "" CACHE FILEPATH
+    "Explicit Python runtime for Susamune build scripts")
+if(SUSAMUNE_PYTHON)
+    set(VENV_PYTHON "${SUSAMUNE_PYTHON}")
+elseif(CMAKE_HOST_WIN32)
     set(VENV_PYTHON "${VENV_DIR}/Scripts/python.exe")
 else()
     set(VENV_PYTHON "${VENV_DIR}/bin/python")
@@ -72,10 +76,11 @@ string(TOUPPER "${VERS_PRIMARY}" VERS_PRIMARY_UPPER)
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "Where to load the iso from by default in meta.xml")
 set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
 if(LAUNCHER_VERSION STREQUAL "V1.2.0" OR
-   LAUNCHER_VERSION MATCHES "^V2\\.0\\.0")
+   LAUNCHER_VERSION MATCHES "^V2\\.0\\.0" OR
+   LAUNCHER_VERSION MATCHES "^V2\\.1\\.0 Pre-Release 1")
     unset(LAUNCHER_VERSION CACHE)
 endif()
-set(LAUNCHER_VERSION "V2.1.0 Pre-Release 1 \"Hot Streak\"" CACHE STRING
+set(LAUNCHER_VERSION "V2.1.0 Pre-Release 2 \"Hot Streak\"" CACHE STRING
     "Version shown in the packaged launcher meta.xml")
 
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
@@ -361,8 +366,8 @@ ExternalProject_Add(nintendont_launcher
         "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
         "-DLAUNCHER_VERSION=${LAUNCHER_VERSION}"
-        "-DLAUNCHER_TEST_LOG=${CMAKE_SOURCE_DIR}/doc/v2.1.0-pr1-testing.md"
-        "-DLAUNCHER_CHANGELOG=${CMAKE_SOURCE_DIR}/doc/v2.1.0-pr1-changelog.md"
+        "-DLAUNCHER_TEST_LOG=${CMAKE_SOURCE_DIR}/doc/v2.1.0-pr2-testing.md"
+        "-DLAUNCHER_CHANGELOG=${CMAKE_SOURCE_DIR}/doc/v2.1.0-pr2-changelog.md"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
     DEPENDS mod_bins launcher_build_id
     BUILD_ALWAYS ON

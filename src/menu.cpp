@@ -2330,7 +2330,7 @@ private:
         drawValueRow(menu, x, y + ROW_H * 4, w, "Unlock popup & chime",
                      gSettings.valueLabel(SETTING_ACHIEVEMENT_NOTIFICATIONS),
                      mSel == 4, false, true);
-        menu->drawText("V2.1.0 Pre-Release 1 \"Hot Streak\"",
+        menu->drawText("V2.1.0 Pre-Release 2 \"Hot Streak\"",
                        x + 4, y + h - 44, FOOT_SZ, FOOT_SZ, cRowDim());
         menu->drawText(storageStatus(), x + 4, y + h - 24,
                        FOOT_SZ, FOOT_SZ,
@@ -2637,6 +2637,7 @@ public:
             mSel = wrap(mSel + 1, Warp::kNumPresets);
         if (rapid & TMarioGamePad::A) {
             const WarpDescriptor &d = Warp::kPresets[mSel];
+            StageLoader::cancel();
             Warp::request(d.area, d.episode, d.overrideArea, d.extraFlag);
             menu->hide();
         }
@@ -2680,6 +2681,7 @@ public:
         else if (rapid & TMarioGamePad::CSTICK_RIGHT)
             mEpisode = wrap(mEpisode + 1, WARP_NUM_EPISODES);
         if (rapid & TMarioGamePad::A) {
+            StageLoader::cancel();
             Warp::request(mArea, mEpisode, -1, -1);
             menu->hide();
         }
@@ -3362,37 +3364,37 @@ private:
 class StageLoaderTab final : public MenuTab {
 public:
     StageLoaderTab()
-        : mSel(0), mGoal(5), mTargetQf(-1), mStreaking(false),
-          mEditingTime(false), mTimeCursor(0), mTimePage(1),
-          mTimeLength(0), mTimeUpper(false) {
-        mTimeText[0] = '\0';
+        : mSel(0), mGoal(5), mTargetQf(-1), mStreakEntry(0),
+          mStreaking(false), mEditor(EDIT_NONE), mTextCursor(0),
+          mTextPage(1), mTextLength(0), mTextUpper(false) {
+        mText[0] = '\0';
     }
 
     const char *title() const override { return "Stage Loader"; }
-    bool grabsInput() const override { return mEditingTime; }
+    bool grabsInput() const override { return mEditor != EDIT_NONE; }
     bool suppressesBinds() const override {
-        if (mEditingTime) return true;
+        if (mEditor != EDIT_NONE) return true;
         const u16 held = JUTGamePad::mPadStatus[0].mButton;
         return (held & (JUTGamePad::A | JUTGamePad::X)) != 0;
     }
-    bool fullScreen() const override { return mEditingTime; }
+    bool fullScreen() const override { return mEditor != EDIT_NONE; }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
-        if (mEditingTime) {
-            updateTimeEditor(menu, pad);
+        if (mEditor != EDIT_NONE) {
+            updateTextEditor(menu);
             return;
         }
 
-        const int count = OPTION_COUNT + ILing::count();
+        const int count = selectionCount();
         const u32 rapid = menu->navigationInput(pad);
         if (rapid & TMarioGamePad::CSTICK_UP) {
             mSel = wrap(mSel - 1, count);
         } else if (rapid & TMarioGamePad::CSTICK_DOWN) {
             mSel = wrap(mSel + 1, count);
         } else if (rapid & TMarioGamePad::CSTICK_LEFT) {
-            adjustOption(-1);
+            moveHorizontal(-1);
         } else if (rapid & TMarioGamePad::CSTICK_RIGHT) {
-            adjustOption(+1);
+            moveHorizontal(+1);
         }
 
         if ((rapid & TMarioGamePad::X) && mSel == OPTION_TARGET &&
@@ -3403,40 +3405,46 @@ public:
         }
         if (!(rapid & TMarioGamePad::A)) return;
 
-        if (mSel == OPTION_MODE) {
-            toggleMode();
-            return;
-        }
-        if (mSel == OPTION_FINISHES) {
-            if (mStreaking) adjustGoal(+1);
-            return;
-        }
-        if (mSel == OPTION_TARGET) {
-            if (mStreaking) beginTimeEditor();
+        if (isOption()) {
+            activateOption(menu);
             return;
         }
 
-        const int entry = selectedEntry();
-        bool started;
-        if (mStreaking) {
-            started = StageLoader::start(entry, mGoal, mTargetQf);
-        } else {
-            StageLoader::cancel();
-            started = WarpWheel::requestILStart(entry);
+        if (isQueueRow()) {
+            const int position = queuePosition();
+            if (StageLoader::removeQueue(position)) {
+                if (mSel >= selectionCount()) mSel = selectionCount() - 1;
+                menu->toast("Removed from playlist");
+            }
+            return;
         }
-        if (started) {
-            menu->hide();
+
+        const int entry = catalogueEntry();
+        if (mStreaking) {
+            mStreakEntry = entry;
+            menu->toast("Streak level selected");
         } else {
-            menu->toast("Warps disabled");
+            if (StageLoader::appendQueue(entry)) {
+                // The inserted queue row shifts the catalogue selection down.
+                mSel++;
+                menu->toast("Added to playlist");
+            } else {
+                menu->toast("Playlist is full");
+            }
         }
     }
 
     void draw(Menu *menu, int x, int y, int w, int h) override {
-        if (mEditingTime) {
+        if (mEditor != EDIT_NONE) {
             drawCreationKeyboard(
-                menu, "Set streak target time",
-                mTimeText[0] ? mTimeText : "(blank = any finish)",
-                mTimePage, mTimeUpper, mTimeCursor);
+                menu,
+                mEditor == EDIT_FINISHES ? "Set streak finishes"
+                                         : "Set streak target time",
+                mText[0] ? mText
+                         : mEditor == EDIT_FINISHES
+                               ? "(enter 1-999)"
+                               : "(blank = any finish)",
+                mTextPage, mTextUpper, mTextCursor);
             return;
         }
 
@@ -3451,7 +3459,10 @@ public:
 
         char goal[8];
         char target[24];
+        char queued[16];
         snprintf(goal, sizeof(goal), "%u", (unsigned)mGoal);
+        snprintf(queued, sizeof(queued), "%d / %d",
+                 StageLoader::queueCount(), StageLoader::QUEUE_CAPACITY);
         if (mTargetQf < 0) {
             strcpy(target, "Any finish");
         } else {
@@ -3462,18 +3473,61 @@ public:
         int row = 0;
         for (int option = 0; option < OPTION_COUNT; option++, row++) {
             if (row < start || row >= end) continue;
-            const char *name = option == OPTION_MODE ? "Mode"
-                               : option == OPTION_FINISHES ? "Finishes"
-                                                          : "Target time";
-            const char *value = option == OPTION_MODE
-                                    ? (mStreaking ? "Streaking"
-                                                  : "Stageloader")
-                                : !mStreaking ? "--"
-                                : option == OPTION_FINISHES ? goal : target;
+            const char *name;
+            const char *value;
+            if (option == OPTION_MODE) {
+                name = "Mode";
+                value = mStreaking ? "Streaking" : "Stageloader";
+            } else if (option == OPTION_RUN) {
+                name = mStreaking ? "Start streak" : "Run playlist";
+                value = mStreaking ? ILing::shortLabel(mStreakEntry) : "Start";
+            } else if (option == OPTION_FINISHES) {
+                name = mStreaking ? "Finishes" : "Playlist entries";
+                value = mStreaking ? goal : queued;
+            } else {
+                name = mStreaking ? "Target time" : "Clear playlist";
+                value = mStreaking ? target : "Clear";
+            }
             drawValueRow(menu, x, ry, w, name, value, mSel == option,
                          false, true);
             ry += ROW_H;
         }
+
+        if (!mStreaking) {
+            if (row >= start && row < end) {
+                drawSectionHeader(menu, x, ry, w, "PLAYLIST");
+                ry += ROW_H;
+            }
+            row++;
+
+            const int count = StageLoader::queueCount();
+            if (!count) {
+                if (row >= start && row < end) {
+                    menu->drawText("(empty - add levels below)", x + 4, ry + 3,
+                                   13, 13, cRowDim());
+                    ry += ROW_H;
+                }
+                row++;
+            } else {
+                for (int position = 0; position < count; position++, row++) {
+                    if (row < start || row >= end) continue;
+                    char label[80];
+                    snprintf(label, sizeof(label), "%02d. %s", position + 1,
+                             ILing::label(StageLoader::queueEntry(position)));
+                    drawValueRow(menu, x, ry, w, label, nullptr,
+                                 mSel == OPTION_COUNT + position,
+                                 false, true);
+                    ry += ROW_H;
+                }
+            }
+        }
+
+        if (row >= start && row < end) {
+            drawSectionHeader(menu, x, ry, w,
+                              mStreaking ? "SELECT LEVEL" : "ADD LEVELS");
+            ry += ROW_H;
+        }
+        row++;
 
         for (int entry = 0; entry < entries && row < end; entry++) {
             if (ILing::beginsGroup(entry)) {
@@ -3489,20 +3543,28 @@ public:
                 row++;
                 continue;
             }
-            drawValueRow(menu, x, ry, w, ILing::label(entry), nullptr,
-                         !isOption() && selectedEntry() == entry,
+            const char *value = mStreaking && entry == mStreakEntry
+                                    ? "Selected"
+                                    : !mStreaking ? "Add" : nullptr;
+            drawValueRow(menu, x, ry, w, ILing::label(entry), value,
+                         isCatalogueRow() && catalogueEntry() == entry,
                          false, true);
             ry += ROW_H;
             row++;
         }
 
         drawScrollHints(menu, x, y, w, listH, start, end, rows);
-        const char *hint = isOption()
-            ? SUSAMUNE_GLYPH_A " Change   " SUSAMUNE_GLYPH_X
-              " Clear time   " SUSAMUNE_GLYPH_C " U"
-              SUSAMUNE_GLYPH_SLASH "D Select"
-            : SUSAMUNE_GLYPH_A " Start   " SUSAMUNE_GLYPH_C " U"
-              SUSAMUNE_GLYPH_SLASH "D Select";
+        const char *hint = isQueueRow()
+            ? SUSAMUNE_GLYPH_A " Remove   " SUSAMUNE_GLYPH_C
+              " L" SUSAMUNE_GLYPH_SLASH "R Reorder"
+            : isCatalogueRow()
+                  ? mStreaking
+                        ? SUSAMUNE_GLYPH_A " Select   " SUSAMUNE_GLYPH_C
+                          " L" SUSAMUNE_GLYPH_SLASH "R World"
+                        : SUSAMUNE_GLYPH_A " Add   " SUSAMUNE_GLYPH_C
+                          " L" SUSAMUNE_GLYPH_SLASH "R World"
+                  : SUSAMUNE_GLYPH_A " Select   " SUSAMUNE_GLYPH_C
+                    " L" SUSAMUNE_GLYPH_SLASH "R Levels";
         menu->drawText(hint, x + 4, y + h - FOOT_SZ,
                        FOOT_SZ, FOOT_SZ, cFooter());
     }
@@ -3510,68 +3572,147 @@ public:
 private:
     enum Option {
         OPTION_MODE,
+        OPTION_RUN,
         OPTION_FINISHES,
         OPTION_TARGET,
         OPTION_COUNT,
     };
 
+    enum Editor {
+        EDIT_NONE,
+        EDIT_FINISHES,
+        EDIT_TARGET,
+    };
+
     bool isOption() const { return mSel < OPTION_COUNT; }
-    int selectedEntry() const { return mSel - OPTION_COUNT; }
+    int catalogueFirst() const {
+        return OPTION_COUNT + (mStreaking ? 0 : StageLoader::queueCount());
+    }
+    bool isQueueRow() const {
+        return !mStreaking && mSel >= OPTION_COUNT &&
+               mSel < catalogueFirst();
+    }
+    bool isCatalogueRow() const { return mSel >= catalogueFirst(); }
+    int queuePosition() const { return mSel - OPTION_COUNT; }
+    int catalogueEntry() const { return mSel - catalogueFirst(); }
+    int selectionCount() const {
+        return catalogueFirst() + ILing::count();
+    }
 
-    void adjustOption(int direction) {
+    void activateOption(Menu *menu) {
         if (mSel == OPTION_MODE) {
-            toggleMode();
-        } else if (mSel == OPTION_FINISHES && mStreaking) {
-            adjustGoal(direction);
+            mStreaking = !mStreaking;
+            mSel = OPTION_MODE;
+            return;
+        }
+        if (mSel == OPTION_RUN) {
+            if (!mStreaking && StageLoader::queueCount() == 0) {
+                menu->toast("Playlist is empty");
+                return;
+            }
+            const bool started = mStreaking
+                                     ? StageLoader::startStreak(
+                                           mStreakEntry, mGoal, mTargetQf)
+                                     : StageLoader::startLoader();
+            if (started) {
+                menu->hide();
+            } else {
+                menu->toast("Session could not start");
+            }
+            return;
+        }
+        if (mSel == OPTION_FINISHES) {
+            if (mStreaking) beginTextEditor(EDIT_FINISHES);
+            return;
+        }
+        if (mStreaking) {
+            beginTextEditor(EDIT_TARGET);
+        } else if (StageLoader::queueCount()) {
+            StageLoader::clearQueue();
+            menu->toast("Playlist cleared");
+        } else {
+            menu->toast("Playlist is already empty");
         }
     }
 
-    void toggleMode() {
-        mStreaking = !mStreaking;
-        if (!mStreaking) StageLoader::cancel();
-    }
-
-    void adjustGoal(int direction) {
-        int next = (int)mGoal + direction;
-        if (next < 1) next = 99;
-        if (next > 99) next = 1;
-        mGoal = (u16)next;
-    }
-
-    void beginTimeEditor() {
-        mTimeText[0] = '\0';
-        if (mTargetQf >= 0) {
-            ILing::formatTime(mTargetQf, mTimeText, sizeof(mTimeText));
+    void moveHorizontal(int direction) {
+        if (isOption()) {
+            jumpFromOptions(direction);
+        } else if (isQueueRow()) {
+            const int position = queuePosition();
+            if (StageLoader::moveQueue(position, direction)) {
+                mSel += direction < 0 ? -1 : 1;
+            }
+        } else {
+            jumpCatalogue(direction);
         }
-        mTimeLength = (u8)strlen(mTimeText);
-        mTimeCursor = 0;
-        mTimePage = 1;
-        mTimeUpper = false;
-        mTimeInput.begin(keyboardMask());
-        mEditingTime = true;
     }
 
-    void updateTimeEditor(Menu *menu, TMarioGamePad *) {
-        const u16 pressed = mTimeInput.update();
+    void jumpCatalogue(int direction) {
+        const int entry = catalogueEntry();
+        int groupFirst = entry;
+        while (groupFirst > 0 && !ILing::beginsGroup(groupFirst)) groupFirst--;
+        const int destination = ILing::jumpGroup(entry, direction);
+        if ((direction < 0 && groupFirst == 0) ||
+            (direction > 0 && destination == 0)) {
+            mSel = OPTION_MODE;
+            return;
+        }
+        mSel = catalogueFirst() + destination;
+    }
+
+    void jumpFromOptions(int direction) {
+        const int entry = direction > 0 ? 0 : ILing::jumpGroup(0, -1);
+        mSel = catalogueFirst() + entry;
+    }
+
+    void beginTextEditor(Editor editor) {
+        mText[0] = '\0';
+        if (editor == EDIT_FINISHES) {
+            snprintf(mText, sizeof(mText), "%u", (unsigned)mGoal);
+        } else if (mTargetQf >= 0) {
+            ILing::formatTime(mTargetQf, mText, sizeof(mText));
+        }
+        mTextLength = (u8)strlen(mText);
+        mTextCursor = 0;
+        mTextPage = 1;
+        mTextUpper = false;
+        mTextInput.begin(keyboardMask());
+        mEditor = editor;
+    }
+
+    void updateTextEditor(Menu *menu) {
+        const u16 pressed = mTextInput.update();
         if (pressed & JUTGamePad::START) {
             if (JUTGamePad::mPadStatus[0].mButton & JUTGamePad::X) {
-                mEditingTime = false;
+                mEditor = EDIT_NONE;
                 return;
             }
-            s32 parsed;
-            if (!parseTarget(mTimeText, &parsed)) {
-                menu->toast("Use M:SS.mmm, or leave blank");
-                return;
+            if (mEditor == EDIT_FINISHES) {
+                u16 parsed;
+                if (!parseFinishes(mText, &parsed)) {
+                    menu->toast("Enter a number from 1 to 999");
+                    return;
+                }
+                mGoal = parsed;
+                mEditor = EDIT_NONE;
+                menu->toast("Finish count set");
+            } else {
+                s32 parsed;
+                if (!parseTarget(mText, &parsed)) {
+                    menu->toast("Use M:SS.mmm, or leave blank");
+                    return;
+                }
+                mTargetQf = parsed;
+                mEditor = EDIT_NONE;
+                menu->toast(parsed < 0 ? "Any finish counts"
+                                       : "Target time set");
             }
-            mTargetQf = parsed;
-            mEditingTime = false;
-            menu->toast(parsed < 0 ? "Any finish counts"
-                                   : "Target time set");
             return;
         }
         if (pressed & JUTGamePad::Z) {
-            mTimeLength = 0;
-            mTimeText[0] = '\0';
+            mTextLength = 0;
+            mText[0] = '\0';
             return;
         }
         updateTimeKeyboard(pressed);
@@ -3588,35 +3729,48 @@ private:
     void updateTimeKeyboard(u16 pressed) {
         const int count = 32;
         if (pressed & JUTGamePad::DPAD_LEFT)
-            mTimeCursor = (u8)((mTimeCursor + count - 1) % count);
+            mTextCursor = (u8)((mTextCursor + count - 1) % count);
         else if (pressed & JUTGamePad::DPAD_RIGHT)
-            mTimeCursor = (u8)((mTimeCursor + 1) % count);
+            mTextCursor = (u8)((mTextCursor + 1) % count);
         else if (pressed & JUTGamePad::DPAD_UP)
-            mTimeCursor = (u8)((mTimeCursor + count - 8) % count);
+            mTextCursor = (u8)((mTextCursor + count - 8) % count);
         else if (pressed & JUTGamePad::DPAD_DOWN)
-            mTimeCursor = (u8)((mTimeCursor + 8) % count);
+            mTextCursor = (u8)((mTextCursor + 8) % count);
         if (pressed & (JUTGamePad::L | JUTGamePad::R)) {
-            mTimePage ^= 1;
-            mTimeCursor = 0;
+            mTextPage ^= 1;
+            mTextCursor = 0;
         }
-        if (pressed & JUTGamePad::Y) mTimeUpper = !mTimeUpper;
-        if ((pressed & JUTGamePad::B) && mTimeLength) {
-            mTimeText[--mTimeLength] = '\0';
+        if (pressed & JUTGamePad::Y) mTextUpper = !mTextUpper;
+        if ((pressed & JUTGamePad::B) && mTextLength) {
+            mText[--mTextLength] = '\0';
         }
         if ((pressed & JUTGamePad::X) &&
-            mTimeLength + 1 < sizeof(mTimeText)) {
-            mTimeText[mTimeLength++] = ' ';
-            mTimeText[mTimeLength] = '\0';
+            mTextLength + 1 < sizeof(mText)) {
+            mText[mTextLength++] = ' ';
+            mText[mTextLength] = '\0';
         }
         if ((pressed & JUTGamePad::A) &&
-            mTimeLength + 1 < sizeof(mTimeText)) {
-            const char *characters = mTimePage ? gCreationSymbols
-                                              : mTimeUpper
+            mTextLength + 1 < sizeof(mText)) {
+            const char *characters = mTextPage ? gCreationSymbols
+                                              : mTextUpper
                                                     ? gCreationLettersUpper
                                                     : gCreationLettersLower;
-            mTimeText[mTimeLength++] = characters[mTimeCursor];
-            mTimeText[mTimeLength] = '\0';
+            mText[mTextLength++] = characters[mTextCursor];
+            mText[mTextLength] = '\0';
         }
+    }
+
+    static bool parseFinishes(const char *text, u16 *out) {
+        if (!text[0]) return false;
+        u32 value = 0;
+        for (const char *p = text; *p; p++) {
+            if (*p < '0' || *p > '9') return false;
+            value = value * 10 + (u32)(*p - '0');
+            if (value > 999) return false;
+        }
+        if (value == 0) return false;
+        *out = (u16)value;
+        return true;
     }
 
     static bool parseTarget(const char *text, s32 *out) {
@@ -3673,35 +3827,49 @@ private:
         return true;
     }
 
-    static int menuRowForEntry(int entry) {
-        int row = OPTION_COUNT + entry;
+    static int catalogueRowForEntry(int entry) {
+        int row = entry;
         for (int i = 0; i <= entry; i++) {
             if (ILing::beginsGroup(i)) row++;
         }
         return row;
     }
 
-    static int menuRowCount(int entries) {
-        return menuRowForEntry(entries - 1) + 1;
+    int catalogueBaseRow() const {
+        int row = OPTION_COUNT;
+        if (!mStreaking) {
+            row += 1 + (StageLoader::queueCount()
+                            ? StageLoader::queueCount()
+                            : 1);
+        }
+        return row + 1;
     }
 
-    static int menuRowForSelection(int selection) {
-        return selection < OPTION_COUNT
-                   ? selection
-                   : menuRowForEntry(selection - OPTION_COUNT);
+    int menuRowCount(int entries) const {
+        return catalogueBaseRow() + catalogueRowForEntry(entries - 1) + 1;
+    }
+
+    int menuRowForSelection(int selection) const {
+        if (selection < OPTION_COUNT) return selection;
+        if (!mStreaking && selection < catalogueFirst()) {
+            return OPTION_COUNT + 1 + selection - OPTION_COUNT;
+        }
+        return catalogueBaseRow() +
+               catalogueRowForEntry(selection - catalogueFirst());
     }
 
     int mSel;
     u16 mGoal;
     s32 mTargetQf;
+    int mStreakEntry;
     bool mStreaking;
-    bool mEditingTime;
-    u8 mTimeCursor;
-    u8 mTimePage;
-    u8 mTimeLength;
-    bool mTimeUpper;
-    char mTimeText[16];
-    RawPromptInput mTimeInput;
+    u8 mEditor;
+    u8 mTextCursor;
+    u8 mTextPage;
+    u8 mTextLength;
+    bool mTextUpper;
+    char mText[16];
+    RawPromptInput mTextInput;
 };
 
 class ILSegmentsTab final : public MenuTab {
@@ -3718,8 +3886,10 @@ public:
 // The top level stays small while existing stateful pages remain persistent.
 class NestedMenuTab final : public MenuTab {
 public:
-    NestedMenuTab(const char *name, MenuTab *const *children, int count)
-        : mName(name), mCount((u8)count), mSel(0), mPage(-1) {
+    NestedMenuTab(const char *name, MenuTab *const *children, int count,
+                  bool settingsSections = false)
+        : mName(name), mCount((u8)count), mSel(0), mPage(-1),
+          mSettingsSections(settingsSections) {
         for (int i = 0; i < MAX_CHILDREN; i++) {
             mChildren[i] = i < count ? children[i] : nullptr;
         }
@@ -3794,6 +3964,11 @@ public:
         if (!child) {
             int ry = y;
             for (int i = 0; i < mCount; i++) {
+                const char *section = settingsSection(i);
+                if (section) {
+                    drawSectionHeader(menu, x, ry, w, section);
+                    ry += ROW_H;
+                }
                 drawValueRow(menu, x, ry, w, mChildren[i]->title(), nullptr,
                              i == mSel, false, true);
                 ry += ROW_H;
@@ -3820,11 +3995,20 @@ private:
         return mPage >= 0 && mPage < mCount ? mChildren[mPage] : nullptr;
     }
 
+    const char *settingsSection(int child) const {
+        if (!mSettingsSections) return nullptr;
+        if (child == 0) return "PRACTICE & GAMEPLAY";
+        if (child == 4) return "PRESENTATION";
+        if (child == 6) return "TOOLS & CONTROLS";
+        return nullptr;
+    }
+
     const char *mName;
     MenuTab *mChildren[MAX_CHILDREN];
     u8 mCount;
     u8 mSel;
     s8 mPage;
+    bool mSettingsSections;
     RawPromptInput mNavInput;
 };
 
@@ -4069,21 +4253,24 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
 
     MenuTab *settingsChildren[] = {
         practice, savestate, timer, gameplay,
-        display, cosmetics, binds,
+        display, cosmetics, creation, binds,
     };
     MenuTab *ilChildren[] = {
         iling, ghosts, stageLoader, segments,
     };
+    static_assert(sizeof(settingsChildren) / sizeof(settingsChildren[0]) <= 8,
+                  "Settings hub exceeds nested menu capacity");
+    static_assert(sizeof(ilChildren) / sizeof(ilChildren[0]) <= 8,
+                  "IL hub exceeds nested menu capacity");
 
     mTabs[mNumTabs++] = starred;
     mTabs[mNumTabs++] =
         new (sSettingsHubBuf) NestedMenuTab(
             "Settings", settingsChildren,
-            sizeof(settingsChildren) / sizeof(settingsChildren[0]));
+            sizeof(settingsChildren) / sizeof(settingsChildren[0]), true);
     mTabs[mNumTabs++] =
         new (sILsHubBuf) NestedMenuTab(
             "ILs", ilChildren, sizeof(ilChildren) / sizeof(ilChildren[0]));
-    mTabs[mNumTabs++] = creation;
     mTabs[mNumTabs++] = records;
 }
 

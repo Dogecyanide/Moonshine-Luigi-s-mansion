@@ -159,7 +159,9 @@
     /* -- Ghost model selection (append-only persisted id) -- */               \
     X(SETTING_GHOST_APPEARANCE,          "ghost_appearance")                  \
     /* -- Automatic ghost target policy (append-only persisted id) -- */       \
-    X(SETTING_GHOST_LAST_SUCCESS,        "ghost_last_success")
+    X(SETTING_GHOST_LAST_SUCCESS,        "ghost_last_success")               \
+    /* -- Stage-session presentation (append-only persisted id) -- */          \
+    X(SETTING_STAGE_SESSION_DISPLAY,     "stage_session_display")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

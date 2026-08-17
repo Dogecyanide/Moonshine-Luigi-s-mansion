@@ -103,6 +103,8 @@ bool promptShown();
 // A prompt suspended in the Ghosts save flow still owns the destructive
 // action and silences configured binds, even though its overlay is hidden.
 bool promptPending();
+// Keep the raw B+D-up selector latched while another global modal owns input.
+void suppressClassicInstantUntilRelease();
 // Return an exact token-bound Ghosts save flow to its original confirmation.
 bool resumePBPrompt(u32 token);
 // Call after Menu::draw(), which is what leaves the 2D state set up.

@@ -23,6 +23,7 @@
 #include "susamune/qft_timer.hxx"
 #include "susamune/raw_prompt_input.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/stage_loader.hxx"
 
 namespace {
 
@@ -79,6 +80,7 @@ bool             sLastValid;
 bool             sTailPending;
 bool             sClassicInstantHeld;
 bool             sClassicInstantPending;
+bool             sClassicInstantSuppressed;
 bool             sDeathSequence;
 bool             sWaitForSave;
 u8               sSaveIdleFrames;
@@ -526,6 +528,7 @@ void updatePrompt() {
 bool requestCourseWarp(const LevelWarp::Dest &dest) {
     // A new explicit destination replaces any still-card-delayed command now,
     // even if this request itself opens the PB guard.
+    StageLoader::cancel();
     if (sArmed) cancelArmedCourseWarp();
     if (beginPrompt(PROMPT_WARP, dest)) return true;
     LevelWarp::warpToGuarded(dest, 0, false);
@@ -552,6 +555,14 @@ void requestRestart(bool full, bool afterSave) {
 
 bool updateClassicInstant(TMarioGamePad *pad) {
     const u16 buttons = JUTGamePad::mPadStatus[0].mButton;
+    if (sClassicInstantSuppressed) {
+        sClassicInstantHeld = false;
+        sClassicInstantPending = false;
+        if ((buttons & kInstantBase) == 0) {
+            sClassicInstantSuppressed = false;
+        }
+        return false;
+    }
     const bool held = (buttons & kInstantBase) == kInstantBase;
     if (!held) {
         sClassicInstantHeld = false;
@@ -727,6 +738,8 @@ SelectorResult applyTransitionSelector() {
     LevelWarp::Dest selected;
     ClassicCommand command =
         resolveClassicSelector(gpApplication.mGamePads[0], false, &selected);
+    const bool restartCommand = command == CLASSIC_RESTART_DEFAULT ||
+                                command == CLASSIC_RESTART_PARENT;
     bool parentRestart = false;
     if (command == CLASSIC_RESTART_DEFAULT) {
         selected = currentDest(false);
@@ -745,6 +758,7 @@ SelectorResult applyTransitionSelector() {
         if (gMenu) gMenu->toast("Save PB ghost before chart warp");
         return SELECTOR_BLOCKED;
     }
+    if (!restartCommand) StageLoader::cancel();
     applyDest(selected);
     if (parentRestart) overrideSourceForDefaultSpawn(selected);
     return SELECTOR_REDIRECTED;
@@ -1438,6 +1452,12 @@ bool promptShown() {
 
 bool promptPending() { return sPrompt.action != PROMPT_NONE; }
 
+void suppressClassicInstantUntilRelease() {
+    sClassicInstantSuppressed = true;
+    sClassicInstantHeld = false;
+    sClassicInstantPending = false;
+}
+
 bool resumePBPrompt(u32 token) {
     if (!sPromptSaving || sPrompt.action == PROMPT_NONE ||
         token == 0 || token != sPrompt.token ||
@@ -1457,6 +1477,7 @@ u8 guardExitArea(u8 nextState) {
     if (nextState != kPauseTitle && nextState != kPauseExitArea)
         return nextState;
 
+    StageLoader::cancel();
     LevelWarp::Dest dest = {0, 0, 0};
     PromptAction action = PROMPT_TITLE;
     if (nextState == kPauseExitArea) {

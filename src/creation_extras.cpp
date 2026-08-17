@@ -66,7 +66,7 @@ constexpr char kMenuText[] =
     "Word 2 text\0Word 2 style\0Word 2 visible\0"
     "Word 3 text\0Word 3 style\0Word 3 visible\0"
     "MOD MENU\0Menu background\0Achievement popup\0"
-    "System notifications\0IL PB popup";
+    "System notifications\0IL PB popup\0Stage session counter";
 
 const u32 kPreviewRootTags[] = {
     '\0t_0', '\0c_0', '\0r_0', '\0d_0', '\0m_0', '\0s_0',
@@ -241,6 +241,13 @@ static CreationStyle defaultPbBannerStyle() {
     };
 }
 
+static CreationStyle defaultStageSessionStyle() {
+    return CreationStyle{
+        570, 40, 100, 255,
+        8, 12, 20, 210, 100, 8,
+    };
+}
+
 CreationStyle CreationExtras::defaultWallkickStyle() {
     return CreationStyle{
         300, 106, 90, 255,
@@ -271,6 +278,7 @@ void CreationExtras::resetDefaults() {
     mAchievementBannerStyle = defaultAchievementBannerStyle();
     mToastStyle = defaultToastStyle();
     mPbBannerStyle = defaultPbBannerStyle();
+    mStageSessionStyle = defaultStageSessionStyle();
     for (u32 i = 0; i < sizeof(mHudPictures) / sizeof(mHudPictures[0]); i++)
         mHudPictures[i] = nullptr;
     mHudScreen = nullptr;
@@ -346,6 +354,13 @@ void CreationExtras::adopt(const volatile SusamuneCreationCfg *src) {
         mAchievementBannerStyle.scale = src->achievementScale;
         clampStyle(mAchievementBannerStyle);
     }
+    if (src->stageSessionStyleMagic ==
+        SUSAMUNE_CREATION_STAGE_SESSION_STYLE_MAGIC) {
+        mStageSessionStyle.x = src->stageSessionX;
+        mStageSessionStyle.y = src->stageSessionY;
+        mStageSessionStyle.scale = src->stageSessionScale;
+        clampStyle(mStageSessionStyle);
+    }
     for (int word = 0; word < SUSAMUNE_CREATION_WORD_COUNT; word++) {
         const volatile SusamuneCreationWordCfg &in = src->words[word];
         loadStyle(mWordStyle[word], &in.x);
@@ -397,7 +412,12 @@ void CreationExtras::stageInto(volatile SusamuneCreationCfg *dst) const {
     dst->achievementX = mAchievementBannerStyle.x;
     dst->achievementY = mAchievementBannerStyle.y;
     dst->achievementScale = mAchievementBannerStyle.scale;
-    memset((void *)dst->reserved3, 0, sizeof(dst->reserved3));
+    dst->stageSessionStyleMagic =
+        SUSAMUNE_CREATION_STAGE_SESSION_STYLE_MAGIC;
+    dst->stageSessionX = mStageSessionStyle.x;
+    dst->stageSessionY = mStageSessionStyle.y;
+    dst->stageSessionScale = mStageSessionStyle.scale;
+    dst->stageSessionReserved = 0;
 }
 
 void CreationExtras::adoptWallkick(
@@ -704,6 +724,18 @@ void CreationExtras::beginPbBannerEditor() {
                   CreationEditor::CAP_POSITION | CreationEditor::CAP_SCALE);
 }
 
+void CreationExtras::beginStageSessionEditor() {
+    if (editing()) return;
+    mDirtyBeforeEdit = mDirty;
+    mEditMode = EDIT_STAGE_SESSION;
+    mEditFirst = 0;
+    mEditCount = 1;
+    mEditTitle = "Stage session counter";
+    mEditor.begin(&mStageSessionStyle, mRecentIlRgb, mRecentIlBackup,
+                  1, 0, nullptr,
+                  CreationEditor::CAP_POSITION | CreationEditor::CAP_SCALE);
+}
+
 void CreationExtras::drawSavestateFeedback(Menu *menu,
                                            const char *message) const {
     Creation::drawTextBox(menu, mSavestateFeedbackStyle,
@@ -754,6 +786,26 @@ void CreationExtras::drawPbBanner(Menu *menu, const char *message) const {
                   Color(255, 196, 40, 255));
     menu->drawText(message, x + padX, y + textY, size, size,
                    Color(255, 239, 178, 255));
+}
+
+void CreationExtras::drawStageSessionCounter(Menu *menu,
+                                              const char *message) const {
+    if (!menu || !message || !message[0]) return;
+    const int scale = mStageSessionStyle.scale;
+    const int size = clampi((18 * scale + 50) / 100, 9, 36);
+    const int padX = (9 * scale + 50) / 100;
+    const int padY = (5 * scale + 50) / 100;
+    const int w = Menu::textWidth(message, size) + padX * 2;
+    const int h = size + padY * 2;
+    const int x = clampi(mStageSessionStyle.x, 0, 640 - w);
+    const int y = clampi(mStageSessionStyle.y, 0, 480 - h);
+    const int bar = clampi((3 * scale + 50) / 100, 1, 6);
+    menu->fillBox(x, y, w, h,
+                  Color(mStageSessionStyle.bgR, mStageSessionStyle.bgG,
+                        mStageSessionStyle.bgB, mStageSessionStyle.bgA));
+    menu->fillBox(x, y, bar, h, Color(80, 180, 255, 255));
+    menu->drawText(message, x + padX, y + padY, size, size,
+                   Color(255, 255, 255, mStageSessionStyle.textA));
 }
 
 void CreationExtras::toggleTimerLabel() {
@@ -810,6 +862,8 @@ void CreationExtras::adjustMenuRow(int row, int direction) {
         beginToastEditor();
     } else if (row == 22) {
         beginPbBannerEditor();
+    } else if (row == 23) {
+        beginStageSessionEditor();
     }
 }
 
@@ -825,7 +879,8 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
                               mEditMode == EDIT_WALLKICK ||
                               mEditMode == EDIT_ACHIEVEMENT_BANNER ||
                               mEditMode == EDIT_TOAST ||
-                              mEditMode == EDIT_PB_BANNER;
+                              mEditMode == EDIT_PB_BANNER ||
+                              mEditMode == EDIT_STAGE_SESSION;
     const u8 (*defaults)[3] = mEditMode == EDIT_WORD_STYLE
                                   ? mDefaultColors
         : overlayStyle ? kOverlayDefaults : mDefaultColors + mEditFirst;
@@ -838,7 +893,9 @@ void CreationExtras::updateEditor(TMarioGamePad *pad) {
         : mEditMode == EDIT_ACHIEVEMENT_BANNER
               ? defaultAchievementBannerStyle()
         : mEditMode == EDIT_TOAST ? defaultToastStyle()
-        : mEditMode == EDIT_PB_BANNER ? defaultPbBannerStyle() : mColorStyle;
+        : mEditMode == EDIT_PB_BANNER ? defaultPbBannerStyle()
+        : mEditMode == EDIT_STAGE_SESSION ? defaultStageSessionStyle()
+                                          : mColorStyle;
     const u8 result = mEditor.update(
         pad, defaultStyle, defaults,
         mEditMode != EDIT_WORD_STYLE && !overlayStyle ? mEditCount : 1);
@@ -982,6 +1039,11 @@ void CreationExtras::drawEditor(Menu *menu) const {
     if (mEditMode == EDIT_PB_BANNER) {
         drawPbBanner(menu, "New PB!  1:23.456");
         mEditor.draw(menu, mEditTitle, "New PB!  1:23.456");
+        return;
+    }
+    if (mEditMode == EDIT_STAGE_SESSION) {
+        drawStageSessionCounter(menu, "3/5");
+        mEditor.draw(menu, mEditTitle, "3/5");
         return;
     }
     mEditor.draw(menu, mEditTitle, mEditTitle);

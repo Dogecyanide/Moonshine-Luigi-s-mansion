@@ -24,7 +24,7 @@ const char *wallkickDisplayLabel(int index);
 class CreationExtras {
 public:
     enum {
-        MENU_ROW_COUNT = 23,
+        MENU_ROW_COUNT = 24,
         HUD_PANE_COUNT = 25,
         PREVIEW_PANE_COUNT = 2,
     };
@@ -60,11 +60,15 @@ public:
     }
     const CreationStyle &toastStyle() const { return mToastStyle; }
     const CreationStyle &pbBannerStyle() const { return mPbBannerStyle; }
+    const CreationStyle &stageSessionStyle() const {
+        return mStageSessionStyle;
+    }
     void drawSavestateFeedback(Menu *menu, const char *message) const;
     void drawWallkickDisplay(Menu *menu, const char *message,
                              int color) const;
     void drawToast(Menu *menu, const char *message) const;
     void drawPbBanner(Menu *menu, const char *message) const;
+    void drawStageSessionCounter(Menu *menu, const char *message) const;
 
     static int menuRowCount() { return MENU_ROW_COUNT; }
     static bool menuRowSeparator(int row);
@@ -93,11 +97,13 @@ private:
         EDIT_ACHIEVEMENT_BANNER,
         EDIT_TOAST,
         EDIT_PB_BANNER,
+        EDIT_STAGE_SESSION,
     };
 
     static CreationStyle defaultWordStyle(int index);
     static CreationStyle defaultWallkickStyle();
     void beginWordEditor(int index);
+    void beginStageSessionEditor();
     void beginKeyboard(int index);
     void updateKeyboard(TMarioGamePad *pad);
     void drawKeyboard(Menu *menu) const;
@@ -114,6 +120,7 @@ private:
     CreationStyle mAchievementBannerStyle;
     CreationStyle mToastStyle;
     CreationStyle mPbBannerStyle;
+    CreationStyle mStageSessionStyle;
     CreationStyle mColorStyle;
     u8 mColors[SUSAMUNE_CREATION_COLOR_COUNT][3];
     u8 mDefaultColors[SUSAMUNE_CREATION_COLOR_COUNT][3];
