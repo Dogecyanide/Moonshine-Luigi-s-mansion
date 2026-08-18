@@ -159,6 +159,9 @@ static u32 ValidationSample;
 static u32 ValidationSegmentDuration;
 static u16 ValidationSegment;
 static u16 ValidationSegmentCount;
+static u16 ValidationVersion;
+static u8 ValidationAttachmentCount;
+static u16 ValidationAttachmentFlags;
 
 static const char *GhostRegion;
 static u8 GhostRegionId;
@@ -312,6 +315,44 @@ static bool HeaderTextIsValid(const u8 *field, u32 capacity, u32 length,
 	return true;
 }
 
+static bool V4AttachmentsAreValid(const u8 *header)
+{
+	u8 count = header[SUSAMUNE_GHOST_V4_ATTACHMENT_COUNT_OFFSET];
+	u16 flags = ReadBe16(header + SUSAMUNE_GHOST_V4_ATTACHMENT_FLAGS_OFFSET);
+	u32 i;
+	u32 prior;
+	const u8 *descriptor;
+
+	if (count > SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_COUNT ||
+	    header[SUSAMUNE_GHOST_V4_ATTACHMENT_SIZE_OFFSET] !=
+	        SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE ||
+	    (flags & ~SUSAMUNE_GHOST_V4_ATTACHMENT_FLAGS) != 0 ||
+	    ReadBe16(header + SUSAMUNE_GHOST_V4_ATTACHMENT_RESERVED_OFFSET) != 0)
+		return false;
+	for (i = 0; i < SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_COUNT; i++)
+	{
+		descriptor = header + SUSAMUNE_GHOST_V4_ATTACHMENT_TABLE_OFFSET +
+		             i * SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE;
+		if (i < count)
+		{
+			if (BytesAreZero(descriptor,
+			                 SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE))
+				return false;
+			for (prior = 0; prior < i; prior++)
+				if (memcmp(descriptor,
+				           header + SUSAMUNE_GHOST_V4_ATTACHMENT_TABLE_OFFSET +
+				               prior * SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE,
+				           SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE) == 0)
+					return false;
+		}
+		else if (!BytesAreZero(
+		             descriptor,
+		             SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE))
+			return false;
+	}
+	return true;
+}
+
 static enum ValidateResult ValidateCanonicalHeader(const u8 *header,
 	                                                u32 available,
 	                                                u16 profile,
@@ -337,7 +378,8 @@ static enum ValidateResult ValidateCanonicalHeader(const u8 *header,
 	if (ReadBe32(header) != SUSAMUNE_GHOST_FILE_MAGIC)
 		return VALIDATE_INVALID;
 	version = ReadBe16(header + 4);
-	if (version != SUSAMUNE_GHOST_FILE_VERSION_V3)
+	if (version != SUSAMUNE_GHOST_FILE_VERSION_V3 &&
+	    version != SUSAMUNE_GHOST_FILE_VERSION_V4)
 		return VALIDATE_FORWARD;
 	if (ReadBe16(header + 6) != SUSAMUNE_GHOST_FILE_HEADER_SIZE)
 		return VALIDATE_INVALID;
@@ -350,39 +392,48 @@ static enum ValidateResult ValidateCanonicalHeader(const u8 *header,
 	payloadSize = ReadBe32(header + 72);
 	sampleCount = ReadBe32(header + 68);
 	required = ReadBe32(header + 24);
-	if ((required & ~SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V3) != 0)
+	if ((required & ~(version == SUSAMUNE_GHOST_FILE_VERSION_V4
+	                    ? SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V4
+	                    : SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V3)) != 0)
 		return VALIDATE_FORWARD;
+	if (version == SUSAMUNE_GHOST_FILE_VERSION_V4 &&
+	    required != SUSAMUNE_GHOST_REQUIRED_EXTENDED_CODEC)
+		return VALIDATE_INVALID;
 
 	if (sampleCount < SUSAMUNE_GHOST_MIN_SAMPLE_COUNT ||
 	    sampleCount > SUSAMUNE_GHOST_MAX_SAMPLE_COUNT)
 		return VALIDATE_INVALID;
 	segmentCount = ReadBe16(
-		header + SUSAMUNE_GHOST_V3_SEGMENT_COUNT_OFFSET);
+		header + SUSAMUNE_GHOST_V4_SEGMENT_COUNT_OFFSET);
 	if (segmentCount == 0 ||
-	    segmentCount > SUSAMUNE_GHOST_V3_MAX_SEGMENTS ||
-	    ReadBe16(header + SUSAMUNE_GHOST_V3_SEGMENT_SIZE_OFFSET) !=
-	        SUSAMUNE_GHOST_V3_SEGMENT_SIZE ||
+	    segmentCount > SUSAMUNE_GHOST_V4_MAX_SEGMENTS ||
+	    ReadBe16(header + SUSAMUNE_GHOST_V4_SEGMENT_SIZE_OFFSET) !=
+	        SUSAMUNE_GHOST_V4_SEGMENT_SIZE ||
 	    ReadBe32(header +
-	             SUSAMUNE_GHOST_V3_SEGMENT_TABLE_OFFSET_FIELD) !=
-	        SUSAMUNE_GHOST_V3_SEGMENT_TABLE_OFFSET ||
+	             SUSAMUNE_GHOST_V4_SEGMENT_TABLE_OFFSET_FIELD) !=
+	        SUSAMUNE_GHOST_V4_SEGMENT_TABLE_OFFSET ||
 	    ReadBe32(header +
-	             SUSAMUNE_GHOST_V3_SEGMENT_TABLE_SIZE_OFFSET) !=
-	        SUSAMUNE_GHOST_V3_SEGMENT_TABLE_SIZE ||
+	             SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE_OFFSET) !=
+	        SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE ||
 	    ReadBe32(header +
-	             SUSAMUNE_GHOST_V3_SAMPLE_DATA_OFFSET_FIELD) !=
-	        SUSAMUNE_GHOST_V3_SAMPLE_DATA_OFFSET ||
+	             SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET_FIELD) !=
+	        SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET ||
 	    ReadBe32(header +
-	             SUSAMUNE_GHOST_V3_SAMPLE_DATA_SIZE_OFFSET) !=
+	             SUSAMUNE_GHOST_V4_SAMPLE_DATA_SIZE_OFFSET) !=
 	        sampleCount * SUSAMUNE_GHOST_POSE_SAMPLE_SIZE ||
-	    payloadSize != SUSAMUNE_GHOST_V3_SEGMENT_TABLE_SIZE +
+	    payloadSize != SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE +
 	        sampleCount * SUSAMUNE_GHOST_POSE_SAMPLE_SIZE ||
-	    fileSize != SUSAMUNE_GHOST_V3_SAMPLE_DATA_OFFSET +
+	    fileSize != SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET +
 	        sampleCount * SUSAMUNE_GHOST_POSE_SAMPLE_SIZE ||
-	    fileSize > SUSAMUNE_GHOST_V3_MAX_FILE_SIZE ||
-	    !BytesAreZero(header +
+	    fileSize > SUSAMUNE_GHOST_V4_MAX_FILE_SIZE)
+		return VALIDATE_INVALID;
+	if ((version == SUSAMUNE_GHOST_FILE_VERSION_V3 &&
+	     !BytesAreZero(header +
 	                         SUSAMUNE_GHOST_V3_SEGMENT_CHECKSUM_OFFSET + 4,
-	                    SUSAMUNE_GHOST_FILE_HEADER_SIZE -
-	                        SUSAMUNE_GHOST_V3_SEGMENT_CHECKSUM_OFFSET - 4))
+	                   SUSAMUNE_GHOST_FILE_HEADER_SIZE -
+	                       SUSAMUNE_GHOST_V3_SEGMENT_CHECKSUM_OFFSET - 4)) ||
+	    (version == SUSAMUNE_GHOST_FILE_VERSION_V4 &&
+	     !V4AttachmentsAreValid(header)))
 		return VALIDATE_INVALID;
 
 	sourceGameId = ReadBe32(header + 32);
@@ -397,7 +448,9 @@ static enum ValidateResult ValidateCanonicalHeader(const u8 *header,
 	      header[38] >= SUSAMUNE_GHOST_PROFILE_COUNT)))
 		return VALIDATE_INVALID;
 	if (header[39] != SUSAMUNE_GHOST_RECORDING_POSE_QF ||
-	    header[40] != SUSAMUNE_GHOST_CODEC_RAW ||
+	    header[40] != (version == SUSAMUNE_GHOST_FILE_VERSION_V4
+	                      ? SUSAMUNE_GHOST_CODEC_POSE_ATTACHMENTS
+	                      : SUSAMUNE_GHOST_CODEC_RAW) ||
 	    header[41] != SUSAMUNE_GHOST_POSE_SAMPLE_SIZE ||
 	    ReadBe16(header + 42) != SUSAMUNE_GHOST_TRANSFORM_INTERVAL_QF)
 		return VALIDATE_INVALID;
@@ -526,7 +579,7 @@ static enum ValidateResult BeginCanonicalValidation(const u8 *bytes,
 
 	ValidationBytes = bytes;
 	ValidationSize = size;
-	ValidationOffset = SUSAMUNE_GHOST_V3_SAMPLE_DATA_OFFSET;
+	ValidationOffset = SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET;
 	ValidationPayloadCrc = SUSAMUNE_GHOST_CRC32_INIT;
 	ValidationFileCrc = CrcUpdateHeader(SUSAMUNE_GHOST_CRC32_INIT,
 	                                    bytes, 12, 16);
@@ -548,7 +601,14 @@ static enum ValidateResult BeginCanonicalValidation(const u8 *bytes,
 	ValidationSegmentDuration = 0;
 	ValidationSegment = 0;
 	ValidationSegmentCount = ReadBe16(
-		bytes + SUSAMUNE_GHOST_V3_SEGMENT_COUNT_OFFSET);
+		bytes + SUSAMUNE_GHOST_V4_SEGMENT_COUNT_OFFSET);
+	ValidationVersion = ReadBe16(bytes + 4);
+	ValidationAttachmentCount =
+		ValidationVersion == SUSAMUNE_GHOST_FILE_VERSION_V4
+			? bytes[SUSAMUNE_GHOST_V4_ATTACHMENT_COUNT_OFFSET] : 0;
+	ValidationAttachmentFlags =
+		ValidationVersion == SUSAMUNE_GHOST_FILE_VERSION_V4
+			? ReadBe16(bytes + SUSAMUNE_GHOST_V4_ATTACHMENT_FLAGS_OFFSET) : 0;
 	return VALIDATE_OK;
 }
 
@@ -566,6 +626,8 @@ static int ContinueCanonicalValidation(void)
 	bool segmentLast;
 	s32 position;
 	u32 animation;
+	u8 yoshi;
+	u8 held;
 	const u8 *sample;
 	const u8 *segment;
 
@@ -592,9 +654,25 @@ static int ContinueCanonicalValidation(void)
 		    position > SUSAMUNE_GHOST_MAX_POSITION_FIXED)
 			return VALIDATE_INVALID;
 		animation = ReadBe24(sample + 13);
-		if ((animation & SUSAMUNE_GHOST_ANIMATION_RESERVED_MASK) != 0 ||
-		    (animation >> 15) > SUSAMUNE_GHOST_ANIMATION_ID_MAX)
+		if ((animation >> 15) > SUSAMUNE_GHOST_ANIMATION_ID_MAX)
 			return VALIDATE_INVALID;
+		if (ValidationVersion == SUSAMUNE_GHOST_FILE_VERSION_V3)
+		{
+			if ((animation & SUSAMUNE_GHOST_ANIMATION_RESERVED_MASK) != 0)
+				return VALIDATE_INVALID;
+		}
+		else
+		{
+			yoshi = (animation >> SUSAMUNE_GHOST_V4_YOSHI_SHIFT) &
+			        SUSAMUNE_GHOST_V4_YOSHI_MASK;
+			held = animation & SUSAMUNE_GHOST_V4_HELD_INDEX_MASK;
+			if (yoshi > SUSAMUNE_GHOST_V4_YOSHI_UNKNOWN ||
+			    (held != 0 && held > ValidationAttachmentCount &&
+			     !(held == SUSAMUNE_GHOST_V4_HELD_UNKNOWN &&
+			       (ValidationAttachmentFlags &
+			        SUSAMUNE_GHOST_V4_ATTACHMENT_HELD_OVERFLOW) != 0)))
+				return VALIDATE_INVALID;
+		}
 
 		delta = ReadBe16(sample + 2);
 		if (ValidationSegment >= ValidationSegmentCount)

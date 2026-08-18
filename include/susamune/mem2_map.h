@@ -47,8 +47,8 @@
 
 // mod_<region>.bin staging (struct SusamuneModHeader, mod_bin.h). The PPC
 // loader reads the file for the detected disc here before booting the kernel;
-// PatchSusamune() copies the code out into MEM1 and nothing reads it again, so
-// the mod is resident in exactly one place for the rest of the session.
+// PatchSusamune() copies the code out into MEM1. PatchGame can consume this
+// staging prefix again after an in-session reset, so it remains immutable.
 //
 // It shares the file-patch buffer's lifetime -- both are loader-to-kernel
 // handoffs consumed at PatchGame time -- so it is carved off that buffer's tail
@@ -58,6 +58,13 @@
 #define SUSAMUNE_MEM2_MODBIN_PHYS_BASE       0x11E7F000u
 #define SUSAMUNE_MEM2_MODBIN_PPC_BASE        0x91E7F000u
 #define SUSAMUNE_MEM2_MODBIN_SIZE            0x00081000u
+
+// PatchGame can consume the staged mod again after an in-session reset, so
+// its header/code/write list must end before this visual-only runtime heap.
+// The official packer and both launcher CPUs enforce this ceiling.
+#define SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE         0x0003F000u
+#define SUSAMUNE_GHOST_ATTACHMENT_HEAP_OFFSET     0x0003F000u
+#define SUSAMUNE_GHOST_ATTACHMENT_HEAP_SIZE       0x00020000u
 
 // PatchSusamune consumes the complete mod staging file before the kernel
 // publishes immutable retail model assets into its now-dead tail.
@@ -102,6 +109,7 @@
 #define SUSAMUNE_DOLPHIN_GHOST_RECORD_PPC_BASE  0x71000000u
 #define SUSAMUNE_DOLPHIN_GHOST_PLAY_PPC_BASE    0x71080000u
 #define SUSAMUNE_DOLPHIN_GHOST_TRANSFER_PPC_BASE 0x71100000u
+#define SUSAMUNE_DOLPHIN_GHOST_ATTACHMENT_PPC_BASE 0x71180000u
 
 // J3D allocations for the visual-only ghost live in the unused gap between
 // the maximum 15-minute sample payload and the V2 segment table. The fixed
@@ -193,6 +201,14 @@
 #define SUSAMUNE_GHOST_SECONDARY_HEAP_PPC_BASE \
     (SUSAMUNE_GHOST_TRANSFER_PPC_BASE + \
      SUSAMUNE_GHOST_SECONDARY_HEAP_OFFSET)
+#if IS_EMULATOR
+#define SUSAMUNE_GHOST_ATTACHMENT_HEAP_PPC_BASE \
+    SUSAMUNE_DOLPHIN_GHOST_ATTACHMENT_PPC_BASE
+#else
+#define SUSAMUNE_GHOST_ATTACHMENT_HEAP_PPC_BASE \
+    (SUSAMUNE_MEM2_MODBIN_PPC_BASE + \
+     SUSAMUNE_GHOST_ATTACHMENT_HEAP_OFFSET)
+#endif
 
 #if SUSAMUNE_GHOST_MODEL_HEAP_OFFSET + SUSAMUNE_GHOST_MODEL_HEAP_SIZE > SUSAMUNE_GHOST_SEGMENT_TABLE_OFFSET
 #error "ghost model heap overlaps the playback segment table"
@@ -205,6 +221,12 @@
 #endif
 #if SUSAMUNE_GHOST_ASSET_VAULT_OFFSET + SUSAMUNE_GHOST_ASSET_VAULT_SIZE != SUSAMUNE_MEM2_MODBIN_SIZE || SUSAMUNE_GHOST_SHADOW_MASTER_OFFSET + SUSAMUNE_GHOST_SHADOW_MASTER_SIZE != SUSAMUNE_GHOST_PIANTA_MASTER_OFFSET || SUSAMUNE_GHOST_PIANTA_MASTER_OFFSET + SUSAMUNE_GHOST_PIANTA_MASTER_SIZE != SUSAMUNE_GHOST_ASSET_VAULT_SIZE
 #error "ghost model asset vault must exactly consume the mod staging tail"
+#endif
+#if SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE != SUSAMUNE_GHOST_ATTACHMENT_HEAP_OFFSET || SUSAMUNE_GHOST_ATTACHMENT_HEAP_OFFSET + SUSAMUNE_GHOST_ATTACHMENT_HEAP_SIZE != SUSAMUNE_GHOST_ASSET_VAULT_OFFSET
+#error "mod file, attachment heap, and ghost asset vault must be adjacent"
+#endif
+#if (SUSAMUNE_GHOST_ATTACHMENT_HEAP_OFFSET & 31u) != 0 || (SUSAMUNE_GHOST_ATTACHMENT_HEAP_SIZE & 31u) != 0
+#error "ghost attachment heap must be cache-line aligned"
 #endif
 
 #if SUSAMUNE_CONFIG_SETTINGS_OFFSET + SUSAMUNE_CONFIG_SETTINGS_SIZE > SUSAMUNE_CONFIG_BINDS_OFFSET || SUSAMUNE_CONFIG_BINDS_OFFSET + SUSAMUNE_CONFIG_BINDS_SIZE > SUSAMUNE_CONFIG_INPUT_OFFSET || SUSAMUNE_CONFIG_INPUT_OFFSET + SUSAMUNE_CONFIG_INPUT_SIZE > SUSAMUNE_CONFIG_QFT_OFFSET || SUSAMUNE_CONFIG_QFT_OFFSET + SUSAMUNE_CONFIG_QFT_SIZE > SUSAMUNE_CONFIG_ATTEMPTS_OFFSET || SUSAMUNE_CONFIG_ATTEMPTS_OFFSET + SUSAMUNE_CONFIG_ATTEMPTS_SIZE > SUSAMUNE_CONFIG_RUNTIME_SIZE
@@ -262,6 +284,9 @@
 #endif
 #if SUSAMUNE_DOLPHIN_GHOST_RECORD_PPC_BASE != 0x71000000u || SUSAMUNE_DOLPHIN_GHOST_RECORD_PPC_BASE + SUSAMUNE_GHOST_SLOT_SIZE != SUSAMUNE_DOLPHIN_GHOST_PLAY_PPC_BASE || SUSAMUNE_DOLPHIN_GHOST_PLAY_PPC_BASE + SUSAMUNE_GHOST_SLOT_SIZE != SUSAMUNE_DOLPHIN_GHOST_TRANSFER_PPC_BASE
 #error "Dolphin ghost slots must be adjacent"
+#endif
+#if SUSAMUNE_DOLPHIN_GHOST_TRANSFER_PPC_BASE + SUSAMUNE_GHOST_SLOT_SIZE != SUSAMUNE_DOLPHIN_GHOST_ATTACHMENT_PPC_BASE
+#error "Dolphin attachment heap must follow the ghost slots"
 #endif
 #if SUSAMUNE_DOLPHIN_PERSIST_PPC_BASE < SUSAMUNE_DOLPHIN_RUNTIME_PPC_BASE || SUSAMUNE_DOLPHIN_PERSIST_PPC_BASE + SUSAMUNE_DOLPHIN_PERSIST_SIZE > SUSAMUNE_DOLPHIN_PB_LIVE_PPC_BASE
 #error "Dolphin persistence state overlaps another MEM2 window"

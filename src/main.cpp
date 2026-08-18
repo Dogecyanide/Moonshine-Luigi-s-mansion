@@ -262,9 +262,11 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     gQFTTimer.update();
     GhostModel::beginFrame();
     // Before direct(): while the wheel is open it takes the pad away from
-    // the game.
+    // the game. A PB save can hide the prompt behind the Ghosts tab, but its
+    // held action still needs storage ACK polling when warps are disabled.
     if (!creationEditing &&
-        (!gSettings.getBool(SETTING_DISABLE_WARPS) || WarpWheel::shown()))
+        (!gSettings.getBool(SETTING_DISABLE_WARPS) || WarpWheel::shown() ||
+         WarpWheel::promptPending()))
         WarpWheel::update(gpApplication.mGamePads[0]);
     PatternSelector::update(!creationEditing);
 

@@ -1,13 +1,15 @@
 # Ghost file format
 
-Status: experimental V3 format. V1/V2 test ghosts are intentionally refused;
-V3 adds recorded base-body animation and always uses bounded route segments.
+Status: V4 format. V3 ghosts remain readable with their original byte
+semantics; V1/V2 test ghosts are intentionally refused. V4 retains V3's
+bounded route segments and records attachment state without increasing the
+sample stride, file limit, or runtime buffers.
 
 ## Scope
 
 `SGHF` is the canonical, path-independent ghost object. It contains one raw
 pose track and enough metadata to reject the wrong game, route, or decoder.
-V3 partitions one absolute-QFT track into up to 64 ordered route segments; it
+V3/V4 partition one absolute-QFT track into up to 64 ordered route segments; it
 does not reset time at a stage load. It contains no console slot number,
 storage generation, or filename.
 
@@ -32,25 +34,26 @@ host validator.
 
 ## Canonical ghost header (`SGHF`)
 
-The V3 header is exactly `0x100` bytes.
+The V4 header is exactly `0x100` bytes. Fields through `0xcf` retain V3's
+offsets.
 
-| Offset | Size | Field | V3 rule |
+| Offset | Size | Field | V4 rule |
 |---:|---:|---|---|
 | `0x00` | 4 | `magic` | ASCII `SGHF` |
-| `0x04` | 2 | `version` | `3` |
+| `0x04` | 2 | `version` | `4` |
 | `0x06` | 2 | `headerSize` | `0x100` |
 | `0x08` | 4 | `fileSize` | Exact byte length; max `0x69ee0` |
 | `0x0c` | 4 | `fileChecksum` | CRC-32 of the complete file |
 | `0x10` | 4 | `headerChecksum` | CRC-32 of the header |
 | `0x14` | 4 | `payloadChecksum` | CRC-32 of the sample payload |
-| `0x18` | 4 | `requiredFeatures` | No bits are supported by V3 |
+| `0x18` | 4 | `requiredFeatures` | Extended-codec bit `0x00000001` |
 | `0x1c` | 4 | `runFlags` | Advisory eligibility metadata |
 | `0x20` | 4 | `gameId` | `GMSJ`, `GMSE`, or `GMSP` |
 | `0x24` | 1 | `discRevision` | `0` |
 | `0x25` | 1 | `region` | JP `0`, US `1`, PAL `2`; must match `gameId` |
 | `0x26` | 1 | `sourceProfile` | `0` through `3` |
 | `0x27` | 1 | `recordingMode` | Raw pose/QFT mode `2` |
-| `0x28` | 1 | `sampleCodec` | Raw codec `0` |
+| `0x28` | 1 | `sampleCodec` | Pose/attachment codec `1` |
 | `0x29` | 1 | `sampleStride` | `16` |
 | `0x2a` | 2 | `sampleIntervalQf` | `4` |
 | `0x2c` | 1 | `routeArea` | Game area ID, at most `0x3c`; segment zero |
@@ -73,7 +76,7 @@ The V3 header is exactly `0x100` bytes.
 | `0x60` | 24 | `author` | Length-delimited display text |
 | `0x78` | 48 | `name` | Length-delimited display text |
 | `0xa8` | 16 | `profileName` | Length-delimited display text |
-| `0xb8` | 72 | extension | V3 segment layout below |
+| `0xb8` | 72 | extension | V4 segment/attachment layout below |
 
 `startQf` and `endQf` are bounded to `0x7fffffff`, matching the signed runtime
 clock. `endQf` must not precede `startQf`. A present `resultQf` must lie inside
@@ -85,7 +88,7 @@ scenario selector that distinguishes internal routes sharing an area ID.
 `routeParentArea` records the logical parent when it can be resolved. Route flag
 `0x01` marks an internal scene and must be set exactly when `routeParentArea` is
 not `0xff`. Flag `0x02` marks parent-start route identity and is invalid without
-that parent area. V3 validates this tuple structurally but deliberately does not
+that parent area. V3/V4 validate this tuple structurally but deliberately do not
 embed a game-specific child-to-parent lookup table; custom parent mappings stay
 valid within the same area and variant bounds. Unknown route flags are invalid
 instead of being guessed.
@@ -96,11 +99,11 @@ paths. Bytes after each declared length must be zero. This deliberately avoids
 an ARM-side Unicode decoder and region-font differences; UTF-8 would require a
 later version or required feature.
 
-## V3 segment extension and table
+## V4 segment and attachment extension
 
-V3 gives the header's final 72 bytes this exact layout:
+V4 gives the header's final 72 bytes this exact layout:
 
-| Offset | Size | Field | V3 rule |
+| Offset | Size | Field | V4 rule |
 |---:|---:|---|---|
 | `0xb8` | 2 | `segmentCount` | `1` through `64` |
 | `0xba` | 2 | `segmentSize` | `0x20` |
@@ -109,7 +112,24 @@ V3 gives the header's final 72 bytes this exact layout:
 | `0xc4` | 4 | `sampleDataOffset` | `0x900` |
 | `0xc8` | 4 | `sampleDataSize` | `sampleCount * 16` |
 | `0xcc` | 4 | `segmentTableChecksum` | CRC-32 of the complete `0x800` table |
-| `0xd0` | 48 | reserved | All zero |
+| `0xd0` | 1 | `attachmentCount` | `0` through `7` |
+| `0xd1` | 1 | `attachmentSize` | `6` |
+| `0xd2` | 2 | `attachmentFlags` | Only held-overflow bit `0x0001` |
+| `0xd4` | 2 | reserved | Zero |
+| `0xd6` | 42 | attachment descriptors | Seven fixed six-byte rows |
+
+Each active attachment descriptor is a big-endian `u32 mObjectID` followed by
+the actor's big-endian `u16 JDrama::TNameRef::mKeyCode`. These values are
+address-free source-game identifiers. They are interpreted together with the
+header's source region; no vtable, pointer, or code address enters the file.
+Active descriptors must be nonzero and unique. Rows after `attachmentCount`
+must be zero.
+
+The held-overflow flag permits held index `15` and records that the writer
+encountered an unrepresentable identity. This can happen after seven distinct
+identities or when the live actor exposes the unidentifiable all-zero pair.
+It may remain set if a later end-QF trim removes the relevant sample; overflow
+never fails or stops a recording.
 
 The segment table always reserves 64 descriptors. Descriptors after
 `segmentCount` are zero. This fixed 2 KiB cost keeps every offset bounded and
@@ -141,12 +161,12 @@ one absolute timeline lets playback wait when live QFT is early or seek into a
 saved segment when live QFT is late.
 
 Writers always emit the fixed table, including for a one-segment route. This
-keeps one canonical offset and makes every older V1/V2 library incompatible by
-design; PR3 requires clearing the experimental library before testing.
+keeps one canonical offset. V3 uses the same segment fields and offsets but
+requires all 48 bytes after the segment-table checksum to be zero.
 
 ## Pose payload
 
-The `0x800` segment table occupies `0x100-0x900`, and V3 sample data begins at
+The `0x800` segment table occupies `0x100-0x900`, and V4 sample data begins at
 `0x900`. Every sample is exactly 16 bytes:
 
 | Offset | Size | Type | Meaning |
@@ -156,7 +176,7 @@ The `0x800` segment table occupies `0x100-0x900`, and V3 sample data begins at
 | `0x04` | 3 | signed BE24 | X position multiplied by 8 |
 | `0x07` | 3 | signed BE24 | Y position multiplied by 8 |
 | `0x0a` | 3 | signed BE24 | Z position multiplied by 8 |
-| `0x0d` | 3 | BE24 | Animation ID 9, phase 12, reserved zero 3 |
+| `0x0d` | 3 | BE24 | Animation ID 9, phase 8, Yoshi state 3, held index 4 |
 
 The first sample of every segment has delta zero. Later deltas are at
 least four QF, except that each segment's terminal sample may use one through
@@ -169,28 +189,51 @@ QFT alignment in `startQf`. Writers must emit the final transform at `endQf`;
 readers do not extrapolate a missing tail.
 
 Fixed positions are limited to `-8000000` through `8000000`, equivalent to
-plus or minus 1,000,000 game units. V3 allows cadence gaps, including lag, as
+plus or minus 1,000,000 game units. V3/V4 allow cadence gaps, including lag, as
 long as an individual `u16` delta can represent the gap. A ghost is a visual
 reference, not a deterministic simulation; the format makes no promise about
 RNG, objects, or physics state.
 
-The logical animation ID is `0..335`, the shared `gMarioAnimeData` index. The
-phase is normalized modulo 4096 and mapped to the running region's BCK frame
-count. Equal-ID samples interpolate phase along the shortest modular path;
-an ID change steps at its recorded four-QF boundary. The three low bits must
-be zero. JP/US/PAL retail animation maps were verified byte-identical, while
-the file remains independent of region-specific animation pointers.
+The animation field is `0..335`. When the Yoshi field is zero it is the shared
+`gMarioAnimeData` logical index. Mounted samples instead store the direct
+retail rider BCK ID in `0xB6..0xC6`; retail bypasses `gMarioAnimeData` for
+these poses.
 
-Playback drives only Shadow Mario's base-body BCK. It does not record Mario's
-motion blend, upper-body/FLUDD blend, hand/accessory selection, Yoshi rig, or
-goop/material state. Those secondary systems can therefore pop or differ even
-when the body pose is materially correct; V3 does not claim full joint-perfect
-fidelity.
+V4's phase is normalized to `0..255`; the runtime expands it to the renderer's
+`0..4095` phase domain. Equal-ID samples interpolate phase along the shortest
+modular path; an ID change steps at its recorded four-QF boundary. JP/US/PAL
+retail animation maps were verified byte-identical, while the file remains
+independent of region-specific animation pointers.
 
-The maximum sample data is `26974 * 16 = 431584` bytes (`0x695e0`). V3 adds
+The Yoshi field is zero when not mounted, `1..4` for green, orange, purple,
+and pink, and `5` for mounted with an unknown color. Values `6..7` are invalid.
+The held index is zero for no held actor, `1..7` for the corresponding header
+descriptor, or `15` for held-but-unknown when the overflow flag is set. Values
+`8..14`, an index beyond `attachmentCount`, and `15` without the flag are
+invalid.
+
+The current renderer supports Yoshi's base-body model, the five retail
+`TResetFruit` models (`0x40000390..0x40000394`), and the exact retail
+`TJumpBase` spring (`0x40000017`). Unknown or unproved held actors stay hidden.
+It does not record Mario's motion blend, upper-body/FLUDD blend, detailed Yoshi
+pose or separate hands/tongue, held-object animation state, hand/accessory
+selection, or goop/material state.
+
+The maximum sample data is `26974 * 16 = 431584` bytes (`0x695e0`). V4 adds
 the fixed `0x800` table and header for a maximum 433888 bytes (`0x69ee0`),
-still below the `0x7ff00` transfer payload. A later codec must set
-`SUSAMUNE_GHOST_REQUIRED_EXTENDED_CODEC`; current readers refuse it.
+still below the `0x7ff00` transfer payload. V4 itself sets
+`SUSAMUNE_GHOST_REQUIRED_EXTENDED_CODEC` and codec `1`; those values are an
+exact pair rather than advisory metadata.
+
+## V3 compatibility
+
+V3 remains a strict read format. It requires version `3`, required features
+zero, raw codec `0`, a zero 48-byte extension tail, and the original sample
+trailer of animation ID 9, normalized phase 12, and three zero low bits. A V4
+reader selects this decoder by version and never treats those validated-zero
+bits as attachment data. V4 writers always emit version `4`; a released
+V3-only reader sees the newer version before parsing its body and refuses it
+as unsupported, preserving the slot instead of corrupting or replacing it.
 
 ## Checksums
 
@@ -234,7 +277,7 @@ and source profile must match the running build and selected PB profile.
 The global imported pool may use an unmodified revision-zero JP, US, or PAL
 file on another region. This is visual pose-and-animation playback, not format
 conversion: the source tuple and all metadata remain immutable. A foreign file
-is accepted only when its header route, and every SGHF V3 segment route, has a
+is accepted only when its header route, and every SGHF V3/V4 segment route, has a
 shared retail meaning. The portable route policy is:
 
 - standalone areas `00, 01, 02, 03, 04, 05, 06, 08, 09, 14, 15, 16, 17, 18,
@@ -261,7 +304,7 @@ only of printable ASCII, end case-insensitively in `.smsghost`, contain none of
 and paths are always rebuilt beneath the fixed import root.
 
 The ARM scans one directory entry or one bounded file operation per DI-idle
-service pass. It checks the header and the complete SGHF V3 fixed segment
+service pass. It checks the header and the complete SGHF V3/V4 fixed segment
 table before cataloguing a candidate. Compatible candidates are ordered by an
 ASCII case-insensitive lexical comparison with exact-ASCII tie-breaking. The
 lexicographically smallest 12 become global imported rows `0..11`; this is
@@ -327,7 +370,7 @@ Rows `45..47` are outside the PR1 namespace. The 48-row wire catalog retains
 three zero tail rows for ABI convenience, but the ARM does not scan the old
 files, they do not contribute count or duration, and LOAD/EXPORT/DELETE rejects
 those indices. The old Gate ghost library must be cleared before PR1; orphaned
-tail files are otherwise ignored. Every V3 save refuses an occupied row;
+tail files are otherwise ignored. Every V4 save refuses an occupied row;
 there is no overwrite request in the mailbox ABI or UI. Across four profiles
 this reserves 12 rows' worth of policy budget for the single global imported
 pool.
@@ -343,13 +386,13 @@ At the four-QF sampling interval, raw animated poses cost about 479.52 bytes/s,
 28.77 kB/min (28.10 KiB/min), or 1.73 MB/hour (1.65 MiB/hour). The 45-row
 namespace plus the ten-hour cap is smaller than the historical bound. For a
 conservative SD estimate, the former 48-file V1 bound was 17276368 bytes and
-the fixed tables retained by V3 raise it to 17374672 bytes (16.57 MiB).
+the fixed tables retained by V3/V4 raise it to 17374672 bytes (16.57 MiB).
 
-Console A/B recovery can temporarily retain twice that V3 amount: 34749344
+Console A/B recovery can temporarily retain twice that V3/V4 amount: 34749344
 bytes per profile, 138997376 bytes per region, and 416992128 bytes across all
 three regions (approximately 33.14, 132.56, and 397.67 MiB). These remain safe
 upper bounds even though rows `45..47` are no longer scanned. Twelve
-maximum-size V3 import files total 5206656 bytes (4.97 MiB); extra files may
+maximum-size V3/V4 import files total 5206656 bytes (4.97 MiB); extra files may
 remain in the user-managed directory but are not visible until their lexical
 predecessors are removed. These are SD-card bounds. Runtime MEM2 remains a
 fixed record buffer, playback buffer, and transfer buffer; it does not scale
@@ -389,7 +432,7 @@ Each `0x80`-byte entry contains, in order: the 64-bit ghost ID; file size and
 CRC; duration, result, start and end QF; sample count; creation time; route
 variant; four route bytes; name and author lengths; 16-bit entry flags; a
 48-byte name; and a 24-byte author. The only SGIX V1 entry flags are pinned
-`0x0001` and autosaved `0x0002`. Cached file size requires V3's fixed-table
+`0x0001` and autosaved `0x0002`. Cached file size requires the V3/V4 fixed-table
 shape; bundle validation then requires an exact match with the referenced SGHF.
 
 A portable exporter may name a ghost `g_<16 lower-case hex digits>.smsghost` using
