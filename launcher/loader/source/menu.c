@@ -197,7 +197,7 @@ void PrintSusamuneBuild(void)
 {
 	static const char BuildProduct[] = "Susamune Launcher DELTA";
 	static const char BuildTitle[] =
-		"V2.1.0 Pre-Release 2 \"Hot Streak\".";
+		"V2.1.0 Pre-Release 3 \"Hot Streak\".";
 	static const char BuildChecksum[] = "[" SUSAMUNE_BUILD_CHECKSUM "].";
 	PrintFormat(DEFAULT_SIZE, BLACK,
 	            640 - MENU_POS_X - ((int)sizeof(BuildProduct) - 1) * 10,

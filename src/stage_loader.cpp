@@ -5,9 +5,11 @@
 #include "Dolphin/printf.h"
 #include "Dolphin/string.h"
 #include "JSystem/JUtility/JUTGamePad.hxx"
+#include "SMS/Player/Mario.hxx"
 #include "SMS/System/Application.hxx"
 #include "SMS/System/MarDirector.hxx"
 #include "susamune/binds.hxx"
+#include "susamune/addresses.hxx"
 #include "susamune/creation_extras.hxx"
 #include "susamune/ghost.hxx"
 #include "susamune/iling.hxx"
@@ -55,7 +57,32 @@ enum {
     kResultDisplayFrames = 240,
     kModalMask = JUTGamePad::A | JUTGamePad::B | JUTGamePad::START,
     kPlaylistSaveTimeoutFrames = 30 * 15,
+    kShinePublishLatchFrames = 30,
+    kShineDemoLatchFrames = 60 * 5,
+    kMarioWinDemoState = 0x1302,
+    kShineObjectId = 0x20000013,
+    kQueueActionBytes = (StageLoader::QUEUE_CAPACITY + 7) / 8,
 };
+
+constexpr u8 kFastAny[] = {
+    1, 2, 5, 6, 25, 34, 78, 79, 80, 81, 82, 85, 86, 38, 39, 42, 43,
+    46, 49, 13, 14, 16, 17, 20, 21, 22, 7, 10, 52, 53, 56, 57, 60, 61,
+    62, 65, 66, 67, 68, 70, 71, 74, 92,
+};
+constexpr u8 kAllSecrets[] = {3, 8, 18, 26, 40, 47, 54, 58, 72};
+constexpr u8 kRedsWorldTour[] = {
+    4, 5, 9, 11, 19, 21, 27, 31, 33, 41, 42, 48,
+    55, 59, 63, 67, 73, 75, 84, 87, 91, 98, 95, 97,
+};
+enum { kFastAnyPv5Position = 10 };
+
+static_assert(sizeof(kFastAny) == 43 && sizeof(kAllSecrets) == 9 &&
+                  sizeof(kRedsWorldTour) == 24,
+              "built-in playlist contract changed");
+static_assert(sizeof(kFastAny) <= StageLoader::QUEUE_CAPACITY &&
+                  sizeof(kAllSecrets) <= StageLoader::QUEUE_CAPACITY &&
+                  sizeof(kRedsWorldTour) <= StageLoader::QUEUE_CAPACITY,
+              "built-in playlist exceeds the queue");
 
 u32 sPlaylistSaveSeq;
 u32 sPlaylistWaitFrames;
@@ -65,12 +92,13 @@ bool sPlaylistSavePending;
 
 struct StageLoaderRuntime {
     u64 totalObservedActiveQf;
-    u64 successfulQfTotal;
+    u64 completedQfTotal;
     u32 attemptSerial;
     u32 attempts;
     u32 eligibleCompletes;
     u32 qualifyingSuccesses;
     u32 golds;
+    u32 lastShineSerial;
     s32 targetQf;
     s32 lastQf;
     s32 lastObservedQf;
@@ -81,6 +109,7 @@ struct StageLoaderRuntime {
     u16 retryFrames;
     u16 displayFrames;
     u16 modalPrevious;
+    u16 shinePublishLatchFrames;
     u8 draftCount;
     u8 activeCount;
     u8 activeIndex;
@@ -91,29 +120,81 @@ struct StageLoaderRuntime {
     u8 modalState;
     u8 modalReady;
     u8 holdingDeparture;
+    u8 shineDemoSeen;
+    u8 activeFastTextOff[kQueueActionBytes];
 };
 
 struct StageLoaderQueues {
     u8 draft[StageLoader::QUEUE_CAPACITY];
     u8 active[StageLoader::QUEUE_CAPACITY];
+    u8 draftFastTextOff[kQueueActionBytes];
     u8 reserved[SUSAMUNE_STAGE_LOADER_QUEUE_SIZE -
-                StageLoader::QUEUE_CAPACITY * 2];
+                StageLoader::QUEUE_CAPACITY * 2 - kQueueActionBytes];
 };
 
 #define sRuntime (*reinterpret_cast<StageLoaderRuntime *>( \
     SUSAMUNE_MEM2_STAGE_LOADER_RUNTIME_PPC_BASE))
 #define sQueues (*reinterpret_cast<StageLoaderQueues *>( \
     SUSAMUNE_MEM2_STAGE_LOADER_QUEUE_PPC_BASE))
-static_assert(sizeof(StageLoaderRuntime) == 72,
+static_assert(sizeof(StageLoaderRuntime) == 96,
               "Stage Loader runtime layout changed");
 static_assert(sizeof(StageLoaderRuntime) <= SUSAMUNE_STAGE_LOADER_RUNTIME_SIZE,
               "Stage Loader runtime exceeds its MEM2 window");
 static_assert(sizeof(StageLoaderQueues) == SUSAMUNE_STAGE_LOADER_QUEUE_SIZE,
               "Stage Loader queues must exactly fill their MEM2 window");
 
+bool actionAt(const u8 *bits, int position) {
+    return position >= 0 && position < StageLoader::QUEUE_CAPACITY &&
+           (bits[position >> 3] & (1u << (position & 7))) != 0;
+}
+
+void setAction(u8 *bits, int position, bool enabled) {
+    const u8 mask = (u8)(1u << (position & 7));
+    if (enabled) bits[position >> 3] |= mask;
+    else bits[position >> 3] &= (u8)~mask;
+}
+
+u32 shineSerial() {
+    return *reinterpret_cast<volatile u32 *>(
+        SUSAMUNE_ADDR_ATTEMPT_SHINE_SERIAL);
+}
+
+void clearShinePublishLatch() {
+    sRuntime.lastShineSerial = shineSerial();
+    sRuntime.shinePublishLatchFrames = 0;
+    sRuntime.shineDemoSeen = 0;
+}
+
+bool shinePublishPending() {
+    if (sRuntime.state != STATE_RUNNING) {
+        sRuntime.shinePublishLatchFrames = 0;
+        sRuntime.shineDemoSeen = 0;
+        return false;
+    }
+    // WIN_DEMO and its Shine target are published at contact. The director's
+    // Shine fields and fireGetStar serial are not published until landing.
+    const bool shineDemo =
+        gpApplication.mContext == TApplication::CONTEXT_DIRECT_STAGE &&
+        gpMarDirector && gpMarDirector->_260 != 0 &&
+        gpMarDirector->mCurState == TMarDirector::STATE_NORMAL &&
+        gpMarioOriginal && gpMarioOriginal->mState == kMarioWinDemoState &&
+        gpMarioOriginal->mGrabTarget &&
+        gpMarioOriginal->mGrabTarget->mObjectID == kShineObjectId;
+    if (shineDemo && !sRuntime.shineDemoSeen) {
+        sRuntime.shineDemoSeen = 1;
+        sRuntime.shinePublishLatchFrames = kShineDemoLatchFrames;
+    }
+    const u32 serial = shineSerial();
+    if (serial != sRuntime.lastShineSerial) {
+        sRuntime.lastShineSerial = serial;
+        sRuntime.shinePublishLatchFrames = kShinePublishLatchFrames;
+    }
+    return sRuntime.shinePublishLatchFrames != 0;
+}
+
 void resetSession() {
     sRuntime.totalObservedActiveQf = 0;
-    sRuntime.successfulQfTotal = 0;
+    sRuntime.completedQfTotal = 0;
     sRuntime.attemptSerial = 0;
     sRuntime.attempts = 0;
     sRuntime.eligibleCompletes = 0;
@@ -139,6 +220,9 @@ void resetSession() {
     sRuntime.modalState = MODAL_NONE;
     sRuntime.modalReady = 0;
     sRuntime.holdingDeparture = 0;
+    clearShinePublishLatch();
+    memset(sRuntime.activeFastTextOff, 0,
+           sizeof(sRuntime.activeFastTextOff));
 }
 
 void resetAll() {
@@ -147,6 +231,7 @@ void resetAll() {
     sRuntime.targetQf = -1;
     sRuntime.lastQf = -1;
     sRuntime.lastObservedQf = -1;
+    clearShinePublishLatch();
 }
 
 bool validPlaylistMailbox(
@@ -293,6 +378,7 @@ bool requestCurrent() {
 
 void beginAttempt(u32 serial) {
     sRuntime.attemptSerial = serial;
+    clearShinePublishLatch();
     incrementSaturated(sRuntime.attempts);
     sRuntime.lastObservedQf = -1;
     observeQf(liveQf());
@@ -302,6 +388,7 @@ void beginAttempt(u32 serial) {
 }
 
 void queueFailure(Outcome outcome, s32 qf) {
+    clearShinePublishLatch();
     const int entry = expectedEntry();
     if (qf >= 0) observeQf(qf);
     if (entry >= 0) sRuntime.lastEntry = (u8)entry;
@@ -318,13 +405,13 @@ void queueFailure(Outcome outcome, s32 qf) {
 }
 
 void queueSuccess(s32 qf) {
+    clearShinePublishLatch();
     const int entry = expectedEntry();
     observeQf(qf);
     sRuntime.lastEntry = (u8)entry;
     sRuntime.lastQf = qf;
     sRuntime.outcome = OUTCOME_SUCCESS;
     incrementSaturated(sRuntime.qualifyingSuccesses);
-    addSaturated(sRuntime.successfulQfTotal, (u32)qf);
     if (sRuntime.currentStreak != 0xffff) sRuntime.currentStreak++;
     if (sRuntime.currentStreak > sRuntime.bestStreak) {
         sRuntime.bestStreak = sRuntime.currentStreak;
@@ -349,6 +436,7 @@ void queueSuccess(s32 qf) {
     if (sRuntime.activeIndex >= sRuntime.activeCount) {
         sRuntime.retryFrames = 0;
         sRuntime.state = STATE_COMPLETE;
+        sRuntime.modalState = MODAL_PENDING;
     } else {
         sRuntime.retryFrames = kRetryDelayFrames;
         sRuntime.state = STATE_RETRY_DELAY;
@@ -426,7 +514,8 @@ void drawFinalModal(Menu *menu) {
     menu->fillBox(x, y, w, h, Color(8, 12, 20, 245));
     menu->fillBox(x, y, w, 4, Color(80, 220, 120, 255));
 
-    const char *title = "STREAK COMPLETE";
+    const bool loader = sRuntime.mode == StageLoader::MODE_LOADER;
+    const char *title = loader ? "PLAYLIST COMPLETE" : "STREAK COMPLETE";
     menu->drawText(title, 320 - Menu::textWidth(title, 20) / 2,
                    y + 16, 20, 20, Color(255, 255, 255, 255));
 
@@ -440,16 +529,21 @@ void drawFinalModal(Menu *menu) {
                    Color(120, 220, 150, 255));
 
     char target[32];
-    if (sRuntime.targetQf < 0) {
+    if (loader) {
+        snprintf(target, sizeof(target), "Playlist: %u levels",
+                 (unsigned)sRuntime.activeCount);
+    } else if (sRuntime.targetQf < 0) {
         strcpy(target, "Target: Any finish");
     } else {
         char time[20];
         ILing::formatTime(sRuntime.targetQf, time, sizeof(time));
         snprintf(target, sizeof(target), "Target: %s", time);
     }
-    char streak[24];
-    snprintf(streak, sizeof(streak), "Streak: %u/%u",
-             (unsigned)sRuntime.progress, (unsigned)sRuntime.goal);
+    char streak[28];
+    snprintf(streak, sizeof(streak), loader ? "Completed: %u/%u"
+                                             : "Streak: %u/%u",
+             (unsigned)sRuntime.progress,
+             (unsigned)(loader ? sRuntime.activeCount : sRuntime.goal));
     menu->drawText(target, x + 28, y + 77, 13, 13,
                    Color(184, 194, 214, 255));
     menu->drawText(streak, x + w - 28 - Menu::textWidth(streak, 13),
@@ -458,16 +552,16 @@ void drawFinalModal(Menu *menu) {
     char value[32];
     int rowY = y + 119;
     snprintf(value, sizeof(value), "%u / %u",
-             (unsigned)sRuntime.qualifyingSuccesses,
+             (unsigned)sRuntime.eligibleCompletes,
              (unsigned)sRuntime.attempts);
     drawModalRow(menu, rowY, "Completes / attempts", value);
     rowY += 34;
     formatDuration(sRuntime.totalObservedActiveQf, value, sizeof(value));
     drawModalRow(menu, rowY, "Active time", value);
     rowY += 34;
-    if (sRuntime.qualifyingSuccesses) {
-        formatDuration(sRuntime.successfulQfTotal /
-                           sRuntime.qualifyingSuccesses,
+    if (sRuntime.eligibleCompletes) {
+        formatDuration(sRuntime.completedQfTotal /
+                           sRuntime.eligibleCompletes,
                        value, sizeof(value));
     } else {
         strcpy(value, "--");
@@ -618,7 +712,9 @@ bool appendQueue(int entry) {
         return false;
     }
     // Repeated routes are distinct playlist positions by design.
-    sQueues.draft[sRuntime.draftCount++] = (u8)entry;
+    const int position = sRuntime.draftCount++;
+    sQueues.draft[position] = (u8)entry;
+    setAction(sQueues.draftFastTextOff, position, false);
     return true;
 }
 
@@ -626,8 +722,11 @@ bool removeQueue(int position) {
     if (position < 0 || position >= sRuntime.draftCount) return false;
     for (int i = position + 1; i < sRuntime.draftCount; i++) {
         sQueues.draft[i - 1] = sQueues.draft[i];
+        setAction(sQueues.draftFastTextOff, i - 1,
+                  actionAt(sQueues.draftFastTextOff, i));
     }
     sQueues.draft[--sRuntime.draftCount] = 0;
+    setAction(sQueues.draftFastTextOff, sRuntime.draftCount, false);
     return true;
 }
 
@@ -642,12 +741,56 @@ bool moveQueue(int position, int direction) {
     const u8 entry = sQueues.draft[position];
     sQueues.draft[position] = sQueues.draft[destination];
     sQueues.draft[destination] = entry;
+    const bool action = actionAt(sQueues.draftFastTextOff, position);
+    setAction(sQueues.draftFastTextOff, position,
+              actionAt(sQueues.draftFastTextOff, destination));
+    setAction(sQueues.draftFastTextOff, destination, action);
     return true;
 }
 
 void clearQueue() {
     memset(sQueues.draft, 0, sizeof(sQueues.draft));
+    memset(sQueues.draftFastTextOff, 0,
+           sizeof(sQueues.draftFastTextOff));
     sRuntime.draftCount = 0;
+}
+
+const char *builtinPlaylistName(int preset) {
+    switch (preset) {
+    case 0: return "Fast Any%";
+    case 1: return "All Secrets";
+    case 2: return "Reds World Tour";
+    default: return "Unknown";
+    }
+}
+
+bool loadBuiltinPlaylist(int preset) {
+    const u8 *entries = nullptr;
+    u32 count = 0;
+    switch (preset) {
+    case 0:
+        entries = kFastAny;
+        count = sizeof(kFastAny);
+        break;
+    case 1:
+        entries = kAllSecrets;
+        count = sizeof(kAllSecrets);
+        break;
+    case 2:
+        entries = kRedsWorldTour;
+        count = sizeof(kRedsWorldTour);
+        break;
+    default:
+        return false;
+    }
+
+    clearQueue();
+    memcpy(sQueues.draft, entries, count);
+    sRuntime.draftCount = (u8)count;
+    if (preset == 0) {
+        setAction(sQueues.draftFastTextOff, kFastAnyPv5Position, true);
+    }
+    return true;
 }
 
 bool loadCustomPlaylist(int slot) {
@@ -668,6 +811,8 @@ bool loadCustomPlaylist(int slot) {
     }
 
     memset(sQueues.draft, 0, sizeof(sQueues.draft));
+    memset(sQueues.draftFastTextOff, 0,
+           sizeof(sQueues.draftFastTextOff));
     memcpy(sQueues.draft, (const void *)playlists->entries[slot], count);
     sRuntime.draftCount = count;
     return true;
@@ -738,6 +883,8 @@ bool startLoader() {
     const u8 count = sRuntime.draftCount;
     resetSession();
     memcpy(sQueues.active, sQueues.draft, count);
+    memcpy(sRuntime.activeFastTextOff, sQueues.draftFastTextOff,
+           sizeof(sRuntime.activeFastTextOff));
     sRuntime.activeCount = count;
     sRuntime.goal = count;
     sRuntime.mode = MODE_LOADER;
@@ -785,10 +932,10 @@ void getStats(SessionStats *out) {
     out->eligibleCompletes = sRuntime.eligibleCompletes;
     out->qualifyingSuccesses = sRuntime.qualifyingSuccesses;
     out->totalObservedActiveQf = sRuntime.totalObservedActiveQf;
-    out->successfulAverageQf = sRuntime.qualifyingSuccesses
-                                   ? (s32)(sRuntime.successfulQfTotal /
-                                           sRuntime.qualifyingSuccesses)
-                                   : -1;
+    out->completedAverageQf = sRuntime.eligibleCompletes
+                                  ? (s32)(sRuntime.completedQfTotal /
+                                          sRuntime.eligibleCompletes)
+                                  : -1;
     out->bestStreak = sRuntime.bestStreak;
     out->golds = sRuntime.golds;
 }
@@ -801,6 +948,22 @@ bool resultOwnsInput() {
     return sRuntime.modalState == MODAL_VISIBLE ||
            (sRuntime.modalState == MODAL_PENDING &&
             liveResultDirector(gpMarDirector));
+}
+
+bool resultPending() {
+    return sRuntime.modalState != MODAL_NONE;
+}
+
+bool departureResultPending() {
+    return resultPending() || shinePublishPending();
+}
+
+bool fastTextSuppressed() {
+    return sRuntime.state != STATE_INACTIVE &&
+           sRuntime.state != STATE_COMPLETE &&
+           sRuntime.state != STATE_BLOCKED &&
+           sRuntime.activeIndex < sRuntime.activeCount &&
+           actionAt(sRuntime.activeFastTextOff, sRuntime.activeIndex);
 }
 
 bool deferRestartInput() {
@@ -821,6 +984,9 @@ bool holdGameModeBeforeUpdate(TMarDirector *director) {
         showModal();
         return true;
     }
+    if (live && (director->mGameState & 0x2) && shinePublishPending()) {
+        return true;
+    }
 
     if ((sRuntime.state == STATE_RETRY_DELAY ||
          sRuntime.state == STATE_RETRY_PENDING) &&
@@ -838,6 +1004,7 @@ bool holdGameModeBeforeUpdate(TMarDirector *director) {
 
 void update() {
     pollPlaylistSave();
+    const bool shinePending = shinePublishPending();
     if (sRuntime.modalState == MODAL_VISIBLE) {
         updateModal();
         return;
@@ -851,11 +1018,13 @@ void update() {
         return;
     }
 
+    if (shinePending && sRuntime.shinePublishLatchFrames > 0) {
+        sRuntime.shinePublishLatchFrames--;
+    }
+
     observeLive();
     if (sRuntime.displayFrames > 0) sRuntime.displayFrames--;
-    if ((sRuntime.state == STATE_COMPLETE &&
-         sRuntime.mode == MODE_LOADER) ||
-        sRuntime.state == STATE_BLOCKED) {
+    if (sRuntime.state == STATE_BLOCKED) {
         if (sRuntime.displayFrames == 0) resetSession();
         return;
     }
@@ -917,6 +1086,7 @@ void onILResult(int entry, s32 qf, bool eligible) {
     }
 
     incrementSaturated(sRuntime.eligibleCompletes);
+    addSaturated(sRuntime.completedQfTotal, (u32)qf);
     if (sRuntime.mode == MODE_STREAKING && sRuntime.targetQf >= 0 &&
         qf > sRuntime.targetQf) {
         queueFailure(OUTCOME_TARGET_MISS, qf);

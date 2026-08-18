@@ -15,13 +15,14 @@ enum Mode {
 
 enum { QUEUE_CAPACITY = 120 };
 enum { CUSTOM_PLAYLIST_COUNT = 7 };
+enum { BUILTIN_PLAYLIST_COUNT = 3 };
 
 struct SessionStats {
     u32 attempts;
     u32 eligibleCompletes;
     u32 qualifyingSuccesses;
     u64 totalObservedActiveQf;
-    s32 successfulAverageQf;
+    s32 completedAverageQf;
     u32 bestStreak;
     u32 golds;
 };
@@ -34,6 +35,8 @@ bool appendQueue(int entry);
 bool removeQueue(int position);
 bool moveQueue(int position, int direction);
 void clearQueue();
+const char *builtinPlaylistName(int preset);
+bool loadBuiltinPlaylist(int preset);
 bool startLoader();
 bool loadCustomPlaylist(int slot);
 bool saveCustomPlaylist(int slot);
@@ -52,6 +55,13 @@ Mode mode();
 void getStats(SessionStats *out);
 bool modal();
 bool resultOwnsInput();
+// True from an authoritative final result through dismissal.
+bool resultPending();
+// Also covers the bounded gap between Sunshine publishing a Shine event and
+// ILing consuming its exact result. This gates departures, not general input.
+bool departureResultPending();
+// Preset-only action overlay. The persisted Fast Text preference is untouched.
+bool fastTextSuppressed();
 // Restart inputs are sampled before IL results. Defer them until the result
 // pass so a finish on the same frame wins deterministically.
 bool deferRestartInput();

@@ -83,12 +83,14 @@ bool             sClassicInstantHeld;
 bool             sClassicInstantPending;
 bool             sClassicInstantSuppressed;
 u8               sDeferredRestart;
+bool             sDeferredRestartAfterResult;
 bool             sDeathSequence;
 bool             sWaitForSave;
 u8               sSaveIdleFrames;
 bool             sCourseGuard;
 bool             sArmStartedIL;
 bool             sExitSelectorPending;
+bool             sExplicitRetailExit;
 bool             sShown;
 int              sArmedILIndex = -1;
 
@@ -113,6 +115,14 @@ enum DeferredRestart : u8 {
     DEFERRED_RESTART_SAVE_KEEP,
     DEFERRED_RESTART_SAVE_FULL,
 };
+
+enum HeldSessionDeparture : u8 {
+    HELD_SESSION_DEPARTURE_NONE,
+    HELD_SESSION_DEPARTURE_EXIT_AREA,
+    HELD_SESSION_DEPARTURE_TITLE,
+};
+
+HeldSessionDeparture sHeldSessionDeparture;
 
 enum PBSavePolicy : u8 {
     PB_SAVE_ASK,
@@ -146,10 +156,13 @@ bool           sHoldNaturalDeparture;
 void cancelArmedCourseWarp();
 void close();
 void executePromptAction();
+void armWarp(const LevelWarp::Dest &dest, bool keepSpawn,
+             bool overrideSource);
 
 void armExitAreaWarp(const LevelWarp::Dest &dest) {
-    LevelWarp::warpToGuarded(dest, 0, false);
-    sArmedAction = PROMPT_EXIT_AREA;
+    // The PB prompt already resolved every protected token. A second course
+    // guard can race the approved exit and leave stale selector state behind.
+    armWarp(dest, false, false);
     sExitSelectorPending = true;
 }
 
@@ -545,12 +558,7 @@ void executePromptAction() {
         }
         break;
     case PROMPT_EXIT_AREA:
-        if (gSettings.getBool(SETTING_AREA_LOCK) &&
-            !gSettings.getBool(SETTING_DISABLE_WARPS)) {
-            LevelWarp::restart(true);
-        } else {
-            armExitAreaWarp(action.dest);
-        }
+        armExitAreaWarp(action.dest);
         break;
     case PROMPT_TITLE:
         sPendingTitleExit = true;
@@ -645,9 +653,13 @@ void updatePrompt() {
 void cancelExplicitPractice() {
     const bool armedSelectedIL = sArmed && sArmStartedIL;
     StageLoader::cancel();
-    if (sArmed) cancelArmedCourseWarp();
+    // Scrub both an arm and its already-consumed transition tail. A tail lives
+    // outside stage memory and must not redirect a later retail Exit Area.
+    LevelWarp::cancelPending(false);
     if (!armedSelectedIL) ILing::cancelWarpStart();
     sDeferredRestart = DEFERRED_RESTART_NONE;
+    sDeferredRestartAfterResult = false;
+    sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
 }
 
 bool requestCourseWarp(const LevelWarp::Dest &dest) {
@@ -678,12 +690,14 @@ void requestRestart(bool full, bool afterSave) {
 }
 
 void requestOrDeferRestart(bool full, bool afterSave) {
-    if (StageLoader::deferRestartInput()) {
+    if (StageLoader::departureResultPending() ||
+        StageLoader::deferRestartInput()) {
         sDeferredRestart = full
             ? (afterSave ? DEFERRED_RESTART_SAVE_FULL
                          : DEFERRED_RESTART_FULL)
             : (afterSave ? DEFERRED_RESTART_SAVE_KEEP
                          : DEFERRED_RESTART_KEEP);
+        sDeferredRestartAfterResult = false;
         return;
     }
     requestRestart(full, afterSave);
@@ -753,10 +767,12 @@ void applyDest(const LevelWarp::Dest &dest) {
     flags->setBool(true, 0x30006);   // got a shine in the previous stage --
     flags->setBool(false, 0x30004);  // together these suppress the death and
                                      // Peach-kidnapped openings
-    if (dest.area == TGameSequence::AREA_DOLPIC) {
-        flags->setBool((dest.gameInt3 & LevelWarp::Dest::POST_CORONA) != 0,
-                       kPostCoronaFlag);
-    }
+    // A deliberate Plaza destination owns its story variant. Every practice
+    // warp back into a level resets the ordinary retail return to the stable
+    // post-Corona Plaza instead of inheriting Flooded forever.
+    flags->setBool(dest.area != TGameSequence::AREA_DOLPIC ||
+                       (dest.gameInt3 & LevelWarp::Dest::POST_CORONA) != 0,
+                   kPostCoronaFlag);
 
     gpApplication.mNextScene.mAreaID    = dest.area;
     gpApplication.mNextScene.mEpisodeID = dest.episode;
@@ -818,6 +834,7 @@ __attribute__((noinline)) void armWarp(const LevelWarp::Dest &dest,
     sArmStartedIL = false;
     sArmedAction = PROMPT_NONE;
     sExitSelectorPending = false;
+    sExplicitRetailExit = false;
     sArmedILIndex = -1;
 }
 
@@ -940,9 +957,9 @@ void warpToLast() {
 
 void cancelPending(bool keepExitApproval) {
     if (keepExitApproval) {
-        const bool keepExitState = sExitSelectorPending &&
-            (sArmed || sTailPending);
-        if (!keepExitState) {
+        const bool keepExitTail =
+            sExitSelectorPending && (sArmed || sTailPending);
+        if (!keepExitTail) {
             if (sArmed) cancelArmedCourseWarp();
             sTailPending = false;
             sKeepSpawn = false;
@@ -983,11 +1000,15 @@ void cancelPending(bool keepExitApproval) {
     sArmStartedIL = false;
     sArmedAction = PROMPT_NONE;
     sExitSelectorPending = false;
+    sExplicitRetailExit = false;
     sArmedILIndex = -1;
     clearPrompt();
     sSavestateLoadApproved = false;
     sPendingTitleExit = false;
     sHoldNaturalDeparture = false;
+    sDeferredRestart = DEFERRED_RESTART_NONE;
+    sDeferredRestartAfterResult = false;
+    sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
 }
 
 void restart(bool keepSpawn) {
@@ -1025,6 +1046,10 @@ u8 kick(TMarDirector *director, u8 state) {
     if (!sArmed) {
         return state;
     }
+    // A requested warp remains armed, but the authoritative session report
+    // gets the first departure. This also covers Shine-demo frames where the
+    // result cannot safely own input yet.
+    if (StageLoader::departureResultPending()) return state;
     if (sWaitForSave) {
         if (saveFlowActive()) {
             sSaveIdleFrames = 0;
@@ -1067,6 +1092,8 @@ s32 onDirected(s32 appState) {
         }
     }
     sDeathSequence = false;
+    const bool explicitRetailExit = sExplicitRetailExit;
+    sExplicitRetailExit = false;
 
     if (sTailPending) {
         sTailPending = false;
@@ -1097,6 +1124,9 @@ s32 onDirected(s32 appState) {
             return TApplication::CONTEXT_DIRECT_STAGE;
         if (selector == SELECTOR_BLOCKED) return appState;
     }
+
+    // Pause-menu Exit Area is an explicit escape hatch, even with Area Lock.
+    if (explicitRetailExit) return appState;
 
     if (appState > 1 && gSettings.getBool(SETTING_AREA_LOCK)) {
         // Turn every departure into a restart of the area being left, with
@@ -1588,7 +1618,8 @@ u8 applyPendingGameModeAction(TMarDirector *director, u8 state) {
 }
 
 bool retailExitPending() {
-    return sPrompt.action == PROMPT_EXIT_AREA ||
+    return sExplicitRetailExit || sPrompt.action == PROMPT_EXIT_AREA ||
+           sHeldSessionDeparture == HELD_SESSION_DEPARTURE_EXIT_AREA ||
            ((sArmed || sTailPending) && sExitSelectorPending);
 }
 
@@ -1605,13 +1636,44 @@ void suppressClassicInstantUntilRelease() {
 }
 
 void resolveDeferredRestart() {
+    if (sHeldSessionDeparture != HELD_SESSION_DEPARTURE_NONE) {
+        if (StageLoader::departureResultPending()) return;
+
+        const HeldSessionDeparture held = sHeldSessionDeparture;
+        sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+        cancelExplicitPractice();
+
+        LevelWarp::Dest dest = {0, 0, 0};
+        const PromptAction action =
+            held == HELD_SESSION_DEPARTURE_EXIT_AREA
+                ? PROMPT_EXIT_AREA : PROMPT_TITLE;
+        if (held == HELD_SESSION_DEPARTURE_EXIT_AREA) {
+            dest.area = TGameSequence::AREA_DOLPIC;
+            dest.episode = 2;
+            dest.gameInt3 = LevelWarp::Dest::POST_CORONA;
+        }
+        if (beginPrompt(action, dest)) return;
+        if (action == PROMPT_EXIT_AREA) armExitAreaWarp(dest);
+        else sPendingTitleExit = true;
+        return;
+    }
+
     const DeferredRestart deferred = (DeferredRestart)sDeferredRestart;
     if (deferred == DEFERRED_RESTART_NONE) return;
-    sDeferredRestart = DEFERRED_RESTART_NONE;
 
-    // A result recorded later in the input frame owns the transition. Drop
-    // only that restart edge; unrelated controls keep their normal lifecycle.
-    if (!StageLoader::acceptDeferredRestart()) return;
+    if (StageLoader::departureResultPending()) {
+        if (StageLoader::resultPending()) {
+            sDeferredRestartAfterResult = true;
+        }
+        return;
+    }
+
+    sDeferredRestart = DEFERRED_RESTART_NONE;
+    const bool afterResult = sDeferredRestartAfterResult;
+    sDeferredRestartAfterResult = false;
+    // A non-final result owns the next route. A completed session preserves
+    // the requested restart until its report has been dismissed.
+    if (!afterResult && !StageLoader::acceptDeferredRestart()) return;
 
     switch (deferred) {
     case DEFERRED_RESTART_KEEP:      requestRestart(false, false); break;
@@ -1641,32 +1703,32 @@ u8 guardExitArea(u8 nextState) {
     if (nextState != kPauseTitle && nextState != kPauseExitArea)
         return nextState;
 
-    LevelWarp::Dest dest = {0, 0, 0};
-    PromptAction action = PROMPT_TITLE;
-    bool postCoronaReturn = false;
-    if (nextState == kPauseExitArea) {
-        if (!TFlagManager::smInstance) {
-            cancelExplicitPractice();
-            return nextState;
-        }
-        postCoronaReturn = !gSettings.getBool(SETTING_AREA_LOCK);
-        if (postCoronaReturn) {
-            // Scenario 2 plus the marker selects the stable post-Corona Plaza.
-            dest.area = TGameSequence::AREA_DOLPIC;
-            dest.episode = 2;
-            dest.gameInt3 = LevelWarp::Dest::POST_CORONA;
-        }
-        action = PROMPT_EXIT_AREA;
+    if (StageLoader::departureResultPending()) {
+        sHeldSessionDeparture = nextState == kPauseExitArea
+            ? HELD_SESSION_DEPARTURE_EXIT_AREA
+            : HELD_SESSION_DEPARTURE_TITLE;
+        return kPauseResume;
     }
+
     // Restore every temporary IL flag before approving the explicit exit.
     cancelExplicitPractice();
-    if (beginPrompt(action, dest)) return kPauseResume;
-    if (!postCoronaReturn) return nextState;
-    armExitAreaWarp(dest);
+    LevelWarp::Dest dest = {0, 0, 0};
+    if (nextState == kPauseTitle) {
+        return beginPrompt(PROMPT_TITLE, dest) ? kPauseResume : nextState;
+    }
 
-    // getNextState() has already closed the pause object. Resume first; the
-    // raw-pad overlay owns no retail UI pointer.
-    return kPauseResume;
+    dest.area = TGameSequence::AREA_DOLPIC;
+    dest.episode = 2;
+    dest.gameInt3 = LevelWarp::Dest::POST_CORONA;
+    if (beginPrompt(PROMPT_EXIT_AREA, dest)) return kPauseResume;
+
+    // Retail consumes result 5 in this same call stack. Set the story marker
+    // only after IL cleanup, then let decideNextStage()/moveStage() own exit.
+    if (TFlagManager::smInstance) {
+        TFlagManager::smInstance->setBool(true, kPostCoronaFlag);
+    }
+    sExplicitRetailExit = true;
+    return nextState;
 }
 
 void update(TMarioGamePad *pad) {
@@ -1675,6 +1737,10 @@ void update(TMarioGamePad *pad) {
         sSavestateLoadApproved = false;
         sPendingTitleExit = false;
         sHoldNaturalDeparture = false;
+        sExplicitRetailExit = false;
+        sDeferredRestart = DEFERRED_RESTART_NONE;
+        sDeferredRestartAfterResult = false;
+        sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
         close();
         return;
     }

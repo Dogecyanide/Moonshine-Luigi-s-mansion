@@ -2341,7 +2341,7 @@ private:
         drawValueRow(menu, x, y + ROW_H * 4, w, "Unlock popup & chime",
                      gSettings.valueLabel(SETTING_ACHIEVEMENT_NOTIFICATIONS),
                      mSel == 4, false, true);
-        menu->drawText("V2.1.0 Pre-Release 2 \"Hot Streak\"",
+        menu->drawText("V2.1.0 Pre-Release 3 \"Hot Streak\"",
                        x + 4, y + h - 44, FOOT_SZ, FOOT_SZ, cRowDim());
         menu->drawText(storageStatus(), x + 4, y + h - 24,
                        FOOT_SZ, FOOT_SZ,
@@ -3376,8 +3376,9 @@ class StageLoaderTab final : public MenuTab {
 public:
     StageLoaderTab()
         : mSel(0), mGoal(5), mTargetQf(-1), mStreakEntry(0),
-          mStreaking(false), mCustomSlot(0), mEditor(EDIT_NONE), mTextCursor(0),
-          mTextPage(1), mTextLength(0), mTextUpper(false) {
+          mStreaking(false), mBuiltinPlaylist(0), mCustomSlot(0),
+          mEditor(EDIT_NONE), mTextCursor(0), mTextPage(1), mTextLength(0),
+          mTextUpper(false) {
         mText[0] = '\0';
     }
 
@@ -3499,6 +3500,12 @@ public:
             } else if (option == OPTION_TARGET) {
                 name = mStreaking ? "Target time" : "Clear playlist";
                 value = mStreaking ? target : "Clear";
+            } else if (option == OPTION_DISPLAY) {
+                name = "Session display";
+                value = gSettings.valueLabel(SETTING_STAGE_SESSION_DISPLAY);
+            } else if (option == OPTION_BUILTIN) {
+                name = "Built-in preset";
+                value = StageLoader::builtinPlaylistName(mBuiltinPlaylist);
             } else {
                 const int saved =
                     StageLoader::customPlaylistEntryCount(mCustomSlot);
@@ -3583,9 +3590,18 @@ public:
         drawScrollHints(menu, x, y, w, listH, start, end, rows);
         const bool customOption = !mStreaking && isOption() &&
             (mSel == OPTION_LOAD || mSel == OPTION_SAVE);
+        const bool builtinOption = !mStreaking && isOption() &&
+            mSel == OPTION_BUILTIN;
+        const bool displayOption = isOption() && mSel == OPTION_DISPLAY;
         const char *hint = customOption
             ? SUSAMUNE_GLYPH_A " Select   " SUSAMUNE_GLYPH_C
               " L" SUSAMUNE_GLYPH_SLASH "R Slot"
+            : builtinOption
+            ? SUSAMUNE_GLYPH_A " Load   " SUSAMUNE_GLYPH_C
+              " L" SUSAMUNE_GLYPH_SLASH "R Preset"
+            : displayOption
+            ? SUSAMUNE_GLYPH_A " Change   " SUSAMUNE_GLYPH_C
+              " L" SUSAMUNE_GLYPH_SLASH "R Option"
             : isQueueRow()
             ? SUSAMUNE_GLYPH_A " Remove   " SUSAMUNE_GLYPH_C
               " L" SUSAMUNE_GLYPH_SLASH "R Reorder"
@@ -3607,6 +3623,8 @@ private:
         OPTION_RUN,
         OPTION_FINISHES,
         OPTION_TARGET,
+        OPTION_DISPLAY,
+        OPTION_BUILTIN,
         OPTION_LOAD,
         OPTION_SAVE,
         OPTION_COUNT_MAX,
@@ -3618,7 +3636,9 @@ private:
         EDIT_TARGET,
     };
 
-    int optionCount() const { return mStreaking ? OPTION_LOAD : OPTION_COUNT_MAX; }
+    int optionCount() const {
+        return mStreaking ? OPTION_BUILTIN : OPTION_COUNT_MAX;
+    }
     bool isOption() const { return mSel < optionCount(); }
     int catalogueFirst() const {
         return optionCount() + (mStreaking ? 0 : StageLoader::queueCount());
@@ -3660,8 +3680,28 @@ private:
             if (mStreaking) beginTextEditor(EDIT_FINISHES);
             return;
         }
-        if (mStreaking) {
-            beginTextEditor(EDIT_TARGET);
+        if (mSel == OPTION_TARGET) {
+            if (mStreaking) {
+                beginTextEditor(EDIT_TARGET);
+            } else if (StageLoader::queueCount()) {
+                StageLoader::clearQueue();
+                menu->toast("Playlist cleared");
+            } else {
+                menu->toast("Playlist is already empty");
+            }
+            return;
+        }
+        if (mSel == OPTION_DISPLAY) {
+            gSettings.cycle(SETTING_STAGE_SESSION_DISPLAY, 1);
+            return;
+        }
+        if (mSel == OPTION_BUILTIN) {
+            if (StageLoader::loadBuiltinPlaylist(mBuiltinPlaylist)) {
+                mSel = OPTION_FINISHES;
+                menu->toast("Preset loaded");
+            } else {
+                menu->toast("Preset could not load");
+            }
         } else if (mSel == OPTION_LOAD) {
             if (StageLoader::loadCustomPlaylist(mCustomSlot)) {
                 mSel = OPTION_FINISHES;
@@ -3679,17 +3719,18 @@ private:
             } else {
                 menu->toast("Playlist storage unavailable");
             }
-        } else if (StageLoader::queueCount()) {
-            StageLoader::clearQueue();
-            menu->toast("Playlist cleared");
-        } else {
-            menu->toast("Playlist is already empty");
         }
     }
 
     void moveHorizontal(int direction) {
         if (isOption()) {
-            if (!mStreaking &&
+            if (mSel == OPTION_DISPLAY) {
+                gSettings.cycle(SETTING_STAGE_SESSION_DISPLAY, direction);
+            } else if (!mStreaking && mSel == OPTION_BUILTIN) {
+                mBuiltinPlaylist = (u8)wrap(
+                    mBuiltinPlaylist + (direction < 0 ? -1 : 1),
+                    StageLoader::BUILTIN_PLAYLIST_COUNT);
+            } else if (!mStreaking &&
                 (mSel == OPTION_LOAD || mSel == OPTION_SAVE)) {
                 mCustomSlot = (u8)wrap(
                     mCustomSlot + (direction < 0 ? -1 : 1),
@@ -3922,6 +3963,7 @@ private:
     s32 mTargetQf;
     int mStreakEntry;
     bool mStreaking;
+    u8 mBuiltinPlaylist;
     u8 mCustomSlot;
     u8 mEditor;
     u8 mTextCursor;

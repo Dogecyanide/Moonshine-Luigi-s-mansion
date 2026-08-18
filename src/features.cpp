@@ -18,6 +18,7 @@
 #include "susamune/features.hxx"
 #include "susamune/ghost.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/stage_loader.hxx"
 #include "susamune/addresses.hxx"  // SUSAMUNE_MEM1_ADDR
 #include "susamune/mem2_map.h"
 #include "Dolphin/OS.h"            // DCFlushRange, ICInvalidateRange
@@ -644,6 +645,11 @@ static_assert(kNumHooks == 14, "asm hook count changed");
 bool gHooksInited;
 u8 gPiantissimoMode;
 
+bool featureEnabled(SettingId id) {
+    return gSettings.getBool(id) &&
+           (id != SETTING_FAST_TEXT || !StageLoader::fastTextSuppressed());
+}
+
 constexpr u8 kHookIdMask = 0x7Fu;
 constexpr u8 kHookOn     = 0x80u;
 
@@ -685,7 +691,7 @@ void resolveFastTextPalMsg() {
 
 void applyPatches(bool early) {
 #if defined(SUSAMUNE_VERSION_PAL)
-    if (!early && gSettings.getBool(SETTING_FAST_TEXT)) {
+    if (!early && featureEnabled(SETTING_FAST_TEXT)) {
         resolveFastTextPalMsg();
     }
 #endif
@@ -697,7 +703,7 @@ void applyPatches(bool early) {
         u32    tag = (p.addrState & kPatchFeatureMask) >> 24;
         if (tag != 0) {
             featureEarly = (p.addrState & kPatchEarly) != 0;
-            on = gSettings.getBool((SettingId)(tag - 1));
+            on = featureEnabled((SettingId)(tag - 1));
         }
         if (featureEarly != early) {
             continue;
