@@ -914,10 +914,15 @@ public:
                         ? "Last success" : "Last attempt",
                     mSel == AUTO_TARGET_ROW, false, true);
             } else if (row == 5) {
+                drawValueRow(
+                    menu, x, ry, w, "PB ghost save",
+                    gSettings.valueLabel(SETTING_PB_GHOST_SAVE_POLICY),
+                    mSel == PB_SAVE_ROW, false, true);
+            } else if (row == 6) {
                 drawValueRow(menu, x, ry, w, "PB profile",
                              ILing::pbProfileName(ILing::pbProfile()),
                              mSel == PROFILE_ROW, false, true);
-            } else if (row == 6) {
+            } else if (row == 7) {
                 char target[24];
                 targetValue(target, sizeof(target));
                 drawValueRow(menu, x, ry, w, "Race target", target,
@@ -958,7 +963,8 @@ public:
                         DISPLAY_ROW_COUNT);
         const bool settingRow = mSel == DISPLAY_ROW || mSel == OPACITY_ROW ||
                                 mSel == APPEARANCE_ROW ||
-                                mSel == AUTO_TARGET_ROW;
+                                mSel == AUTO_TARGET_ROW ||
+                                mSel == PB_SAVE_ROW;
         const char *footer = mChoice == CHOICE_SECOND
             ? SUSAMUNE_GLYPH_A " Choose ghost 2  " SUSAMUNE_GLYPH_C
               " L" SUSAMUNE_GLYPH_SLASH "R Section  "
@@ -1007,9 +1013,10 @@ private:
         OPACITY_ROW = 1,
         APPEARANCE_ROW = 2,
         AUTO_TARGET_ROW = 3,
-        PROFILE_ROW = 4,
-        TARGET_ROW = 5,
-        PERSONAL_SELECTION_FIRST = 6,
+        PB_SAVE_ROW = 4,
+        PROFILE_ROW = 5,
+        TARGET_ROW = 6,
+        PERSONAL_SELECTION_FIRST = 7,
         PERSONAL_SELECTION_COUNT = SUSAMUNE_GHOST_PROFILE_WRITABLE_ENTRIES,
         IMPORT_SCAN_SELECTION = PERSONAL_SELECTION_FIRST +
                                 PERSONAL_SELECTION_COUNT,
@@ -1022,7 +1029,7 @@ private:
             (PERSONAL_SELECTION_COUNT + RANGE_SIZE - 1) / RANGE_SIZE,
         IMPORTED_RANGE_COUNT =
             (IMPORTED_SELECTION_COUNT + RANGE_SIZE - 1) / RANGE_SIZE,
-        PERSONAL_SUMMARY_DISPLAY = 7,
+        PERSONAL_SUMMARY_DISPLAY = 8,
         PERSONAL_DISPLAY_FIRST = PERSONAL_SUMMARY_DISPLAY + 1,
         PERSONAL_DISPLAY_COUNT = PERSONAL_SELECTION_COUNT +
                                  PERSONAL_RANGE_COUNT,
@@ -1590,6 +1597,10 @@ private:
         }
         if (mSel == AUTO_TARGET_ROW) {
             gSettings.cycle(SETTING_GHOST_LAST_SUCCESS, 1);
+            return;
+        }
+        if (mSel == PB_SAVE_ROW) {
+            gSettings.cycle(SETTING_PB_GHOST_SAVE_POLICY, 1);
             return;
         }
         if (GhostStorage::busy()) {

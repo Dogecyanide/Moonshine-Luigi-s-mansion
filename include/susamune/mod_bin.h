@@ -42,7 +42,10 @@
 #define SUSAMUNE_MOD_BASE_PAL 0x80420D60u
 #define SUSAMUNE_MOD_REGION_SIZE 0x80000u
 #define SUSAMUNE_SCRATCH 0x40u
-#define SUSAMUNE_MOD_BLOB_MAX_SIZE 0x50000u
+#define SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE 0x50000u
+// V2.0.3 reserves the staged-file tail for reset-safe attachment playback.
+// The packed-file ceiling is therefore stricter than the MEM1 working cap.
+#define SUSAMUNE_MOD_BLOB_MAX_SIZE 0x3EF50u
 #define SUSAMUNE_MOD_SCRATCH_OFFSET \
     (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
 #define SUSAMUNE_DEBUG_STACK_SIZE 0x2000u
@@ -81,14 +84,16 @@ struct SusamuneModHeader {
 
 #define SUSAMUNE_MOD_FILE_FMT "mod_%s.bin"
 
-// Portable compile-time checks (no C11 dependency). The window has to hold a
-// blob that fills the whole 512 KiB mod region plus the header and write list;
+// Portable compile-time checks (no C11 dependency). The reset-safe file
+// ceiling has to fit inside the loader's unchanged staging allocation.
 typedef char susamune_mod_header_size_check
     [(sizeof(struct SusamuneModHeader) == SUSAMUNE_MOD_HEADER_SIZE) ? 1 : -1];
 typedef char susamune_mod_window_size_check
-    [(SUSAMUNE_MEM2_MODBIN_SIZE >= SUSAMUNE_MOD_REGION_SIZE + 0x1000u) ? 1 : -1];
+    [(SUSAMUNE_MEM2_MODBIN_SIZE >= SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE) ? 1 : -1];
 typedef char susamune_mod_blob_scratch_check
     [(SUSAMUNE_MOD_BLOB_MAX_SIZE <= SUSAMUNE_MOD_SCRATCH_OFFSET) ? 1 : -1];
+typedef char susamune_mod_working_cap_check
+    [(SUSAMUNE_MOD_BLOB_MAX_SIZE <= SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE) ? 1 : -1];
 
 #define SUSAMUNE_MOD_PPC_PTR  ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PPC_BASE)
 #define SUSAMUNE_MOD_PHYS_PTR ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PHYS_BASE)

@@ -59,8 +59,8 @@ def _repair_ghost_checksums(raw: bytearray) -> bytes:
 def build_ghost(
     *,
     ghost_id: int = 1,
-    version: int = ghost_format.GHOST_VERSION_V3,
-    required_features: int = 0,
+    version: int = ghost_format.GHOST_VERSION,
+    required_features: int | object = _AUTO,
     checksum_kind: int = ghost_format.CHECKSUM_CRC32,
     samples: list[tuple[int, ...]] | None = None,
     start_qf: int = 100,
@@ -80,6 +80,8 @@ def build_ghost(
     run_flags: int = 0,
     reserved_byte: int = 0,
     segments: list[dict] | None = None,
+    attachments: list[tuple[int, int]] | None = None,
+    attachment_flags: int = 0,
 ) -> bytes:
     if samples is None:
         samples = [
@@ -95,13 +97,24 @@ def build_ghost(
         result_qf = end_qf
 
     normalized_samples = [
-        sample if len(sample) == 7 else (*sample, 0xC3, 0)
+        sample if len(sample) in (7, 9) else (*sample, 0xC3, 0)
         for sample in samples
     ]
-    sample_data = b"".join(
-        ghost_format.pack_pose_sample(*sample)
-        for sample in normalized_samples
-    )
+    if version == ghost_format.GHOST_VERSION_V4:
+        sample_data = b"".join(
+            ghost_format.pack_pose_sample_v4(
+                *sample[:6],
+                round(sample[6] * ghost_format.V4_ANIMATION_PHASE_MAX /
+                      ghost_format.ANIMATION_PHASE_MAX),
+                *(sample[7:] if len(sample) >= 9 else (0, 0)),
+            )
+            for sample in normalized_samples
+        )
+    else:
+        sample_data = b"".join(
+            ghost_format.pack_pose_sample(*sample[:7])
+            for sample in normalized_samples
+        )
     header = bytearray(ghost_format.GHOST_HEADER_SIZE)
     author_length = _write_text(header, 96, ghost_format.AUTHOR_SIZE, author)
     name_length = _write_text(header, 120, ghost_format.NAME_SIZE, name)
@@ -112,6 +125,7 @@ def build_ghost(
         ghost_format.GHOST_VERSION_V1,
         ghost_format.GHOST_VERSION_V2,
         ghost_format.GHOST_VERSION_V3,
+        ghost_format.GHOST_VERSION_V4,
     ):
         if segments is None:
             segments = [{
@@ -145,18 +159,32 @@ def build_ghost(
                 0,
                 0,
             )
-        ghost_format._V3_EXTENSION.pack_into(
-            header,
-            184,
-            len(segments),
-            ghost_format.V3_SEGMENT_SIZE,
-            ghost_format.V3_SEGMENT_TABLE_OFFSET,
-            ghost_format.V3_SEGMENT_TABLE_SIZE,
-            ghost_format.V3_SAMPLE_DATA_OFFSET,
-            len(sample_data),
-            ghost_format._crc32(table),
-            *([0] * 12),
-        )
+        if version == ghost_format.GHOST_VERSION_V4:
+            descriptors = list(attachments or [])
+            if len(descriptors) > ghost_format.V4_ATTACHMENT_DESCRIPTOR_COUNT:
+                raise ValueError("too many test attachment descriptors")
+            descriptors.extend(
+                [(0, 0)] *
+                (ghost_format.V4_ATTACHMENT_DESCRIPTOR_COUNT - len(descriptors))
+            )
+            descriptor_values = [value for pair in descriptors for value in pair]
+            ghost_format._V4_EXTENSION.pack_into(
+                header, 184, len(segments), ghost_format.V4_SEGMENT_SIZE,
+                ghost_format.V4_SEGMENT_TABLE_OFFSET,
+                ghost_format.V4_SEGMENT_TABLE_SIZE,
+                ghost_format.V4_SAMPLE_DATA_OFFSET, len(sample_data),
+                ghost_format._crc32(table), len(attachments or []),
+                ghost_format.V4_ATTACHMENT_DESCRIPTOR_SIZE, attachment_flags,
+                0, *descriptor_values,
+            )
+        else:
+            ghost_format._V3_EXTENSION.pack_into(
+                header, 184, len(segments), ghost_format.V3_SEGMENT_SIZE,
+                ghost_format.V3_SEGMENT_TABLE_OFFSET,
+                ghost_format.V3_SEGMENT_TABLE_SIZE,
+                ghost_format.V3_SAMPLE_DATA_OFFSET, len(sample_data),
+                ghost_format._crc32(table), *([0] * 12),
+            )
         if reserved_byte:
             header[-1] = reserved_byte
         payload = bytes(table) + sample_data
@@ -165,6 +193,9 @@ def build_ghost(
         if reserved_byte:
             header[184] = reserved_byte
 
+    if required_features is _AUTO:
+        required_features = (ghost_format.REQUIRED_EXTENDED_CODEC
+                             if version == ghost_format.GHOST_VERSION_V4 else 0)
     ghost_format._GHOST_PREFIX.pack_into(
         header,
         0,
@@ -182,7 +213,9 @@ def build_ghost(
         region,
         source_profile,
         ghost_format.RECORDING_POSE_QF,
-        ghost_format.CODEC_RAW,
+        (ghost_format.CODEC_POSE_ATTACHMENTS
+         if version == ghost_format.GHOST_VERSION_V4 else
+         ghost_format.CODEC_RAW),
         ghost_format.SAMPLE_SIZE,
         ghost_format.SAMPLE_INTERVAL_QF,
         route_area,
@@ -369,15 +402,116 @@ class GhostFileTests(unittest.TestCase):
              335, 4095, 0),
         )
 
+    def test_v4_attachment_wire_layout_is_exact_and_big_endian(self) -> None:
+        raw = build_ghost(
+            samples=[
+                (160, 320, 480, 0x1000, 0, 0xC3, 0, 1, 1),
+                (176, 320, 480, 0x1100, 4, 0xC3, 4095, 4, 1),
+            ],
+            attachments=[(0x81234567, 0xABCD)],
+        )
+        self.assertEqual(raw[4:6], b"\x00\x04")
+        self.assertEqual(raw[208:214], b"\x01\x06\x00\x00\x00\x00")
+        self.assertEqual(raw[214:220], b"\x81\x23\x45\x67\xab\xcd")
+        self.assertEqual(raw[220:256], bytes(36))
+        first_pose = int.from_bytes(
+            raw[ghost_format.V4_SAMPLE_DATA_OFFSET + 13:
+                ghost_format.V4_SAMPLE_DATA_OFFSET + 16], "big"
+        )
+        self.assertEqual(first_pose & 0x7F, 0x11)
+        summary = ghost_format.validate_ghost(raw)
+        self.assertEqual(summary["version"], ghost_format.GHOST_VERSION_V4)
+        self.assertEqual(summary["attachment_descriptors"], [{
+            "object_id": "81234567", "name_key": "abcd",
+        }])
+
+    def test_v4_descriptor_header_is_strict(self) -> None:
+        mutations = [
+            (208, 8, "descriptor count"),
+            (209, 5, "descriptor size"),
+            (211, 2, "attachment flags"),
+            (213, 1, "reserved"),
+        ]
+        for offset, value, message in mutations:
+            with self.subTest(offset=offset):
+                raw = bytearray(build_ghost())
+                raw[offset] = value
+                with self.assertRaisesRegex(ghost_format.FormatError, message):
+                    ghost_format.validate_ghost(_repair_ghost_checksums(raw))
+
+        with self.assertRaisesRegex(ghost_format.FormatError, "is empty"):
+            ghost_format.validate_ghost(build_ghost(attachments=[(0, 0)]))
+        with self.assertRaisesRegex(ghost_format.FormatError, "duplicated"):
+            ghost_format.validate_ghost(build_ghost(
+                attachments=[(0x10000001, 0x1234), (0x10000001, 0x1234)]
+            ))
+        raw = bytearray(build_ghost())
+        raw[214] = 1
+        with self.assertRaisesRegex(ghost_format.FormatError, "unused"):
+            ghost_format.validate_ghost(_repair_ghost_checksums(raw))
+
+    def test_v4_sample_attachment_indices_fail_closed(self) -> None:
+        pose_offset = ghost_format.V4_SAMPLE_DATA_OFFSET + 13
+        for yoshi in (6, 7):
+            raw = bytearray(build_ghost())
+            pose = int.from_bytes(raw[pose_offset:pose_offset + 3], "big")
+            pose = (pose & ~0x70) | (yoshi << 4)
+            raw[pose_offset:pose_offset + 3] = pose.to_bytes(3, "big")
+            with self.subTest(yoshi=yoshi), self.assertRaisesRegex(
+                ghost_format.FormatError, "Yoshi state"
+            ):
+                ghost_format.validate_ghost(_repair_ghost_checksums(raw))
+
+        for held in range(8, 15):
+            raw = bytearray(build_ghost())
+            pose = int.from_bytes(raw[pose_offset:pose_offset + 3], "big")
+            raw[pose_offset:pose_offset + 3] = (
+                (pose & ~0xF) | held
+            ).to_bytes(3, "big")
+            with self.subTest(held=held), self.assertRaisesRegex(
+                ghost_format.FormatError, "held descriptor"
+            ):
+                ghost_format.validate_ghost(_repair_ghost_checksums(raw))
+
+        unknown = [(0, 0, 0, 0, 0, 0, 0, 0, 15),
+                   (0, 0, 0, 0, 4, 0, 0, 0, 15)]
+        with self.assertRaisesRegex(ghost_format.FormatError,
+                                    "held descriptor"):
+            ghost_format.validate_ghost(build_ghost(samples=unknown))
+        summary = ghost_format.validate_ghost(build_ghost(
+            samples=unknown,
+            attachment_flags=ghost_format.V4_ATTACHMENT_HELD_OVERFLOW,
+        ))
+        self.assertEqual(
+            summary["attachment_flags"],
+            ghost_format.V4_ATTACHMENT_HELD_OVERFLOW,
+        )
+
+    def test_v3_and_v4_codec_contracts_are_not_interchangeable(self) -> None:
+        ghost_format.validate_ghost(build_ghost(
+            version=ghost_format.GHOST_VERSION_V3
+        ))
+        with self.assertRaisesRegex(ghost_format.FormatError,
+                                    "lacks its required feature"):
+            ghost_format.validate_ghost(build_ghost(required_features=0))
+        raw = bytearray(build_ghost())
+        raw[40] = ghost_format.CODEC_RAW
+        with self.assertRaisesRegex(ghost_format.FormatError, "sample codec"):
+            ghost_format.validate_ghost(_repair_ghost_checksums(raw))
+        raw = bytearray(build_ghost(version=ghost_format.GHOST_VERSION_V3))
+        raw[40] = ghost_format.CODEC_POSE_ATTACHMENTS
+        with self.assertRaisesRegex(ghost_format.FormatError, "sample codec"):
+            ghost_format.validate_ghost(_repair_ghost_checksums(raw))
+
     def test_v3_animation_id_and_reserved_bits_are_bounded(self) -> None:
         animation = ghost_format.V3_SAMPLE_DATA_OFFSET + 13
-        raw = bytearray(build_ghost())
+        raw = bytearray(build_ghost(version=ghost_format.GHOST_VERSION_V3))
         raw[animation:animation + 3] = (336 << 15).to_bytes(3, "big")
         with self.assertRaisesRegex(ghost_format.FormatError,
                                     "animation id"):
             ghost_format.validate_ghost(_repair_ghost_checksums(raw))
 
-        raw = bytearray(build_ghost())
+        raw = bytearray(build_ghost(version=ghost_format.GHOST_VERSION_V3))
         raw[animation + 2] |= 1
         with self.assertRaisesRegex(ghost_format.FormatError,
                                     "reserved bits"):
@@ -429,7 +563,8 @@ class GhostFileTests(unittest.TestCase):
         raw = build_ghost(samples=samples, start_qf=0)
         summary = ghost_format.validate_ghost(raw)
         self.assertEqual(summary["duration_qf"], ghost_format.MAX_DURATION_QF)
-        self.assertEqual(len(raw), ghost_format.V3_MAX_GHOST_FILE_SIZE)
+        self.assertEqual(len(raw), ghost_format.V4_MAX_GHOST_FILE_SIZE)
+        self.assertEqual(len(raw), 0x69EE0)
         self.assertLess(len(raw), 0x7FF00)
 
     def test_checksum_corruption_is_rejected(self) -> None:
@@ -450,12 +585,12 @@ class GhostFileTests(unittest.TestCase):
 
     def test_forward_version_and_feature_are_distinct(self) -> None:
         for version in (ghost_format.GHOST_VERSION_V1,
-                        ghost_format.GHOST_VERSION_V2, 4):
+                        ghost_format.GHOST_VERSION_V2, 5):
             with self.subTest(version=version), \
                  self.assertRaises(ghost_format.UnsupportedVersion):
                 ghost_format.validate_ghost(build_ghost(version=version))
         with self.assertRaises(ghost_format.UnsupportedFeature):
-            ghost_format.validate_ghost(build_ghost(required_features=1))
+            ghost_format.validate_ghost(build_ghost(required_features=2))
 
     def test_v3_segments_share_one_absolute_qft_timeline(self) -> None:
         samples = [
@@ -601,7 +736,9 @@ class GhostFileTests(unittest.TestCase):
                 build_ghost(route_area=ghost_format.ROUTE_AREA_MAX + 1)
             )
         with self.assertRaisesRegex(ghost_format.FormatError, "reserved"):
-            ghost_format.validate_ghost(build_ghost(reserved_byte=1))
+            ghost_format.validate_ghost(build_ghost(
+                version=ghost_format.GHOST_VERSION_V3, reserved_byte=1
+            ))
 
     def test_route_parent_and_flags_must_agree(self) -> None:
         parent = ghost_format.validate_ghost(build_ghost(

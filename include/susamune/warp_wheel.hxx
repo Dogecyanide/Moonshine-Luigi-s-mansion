@@ -43,6 +43,8 @@ void warpTo(const Dest &dest);
 // Guarded course arm. `selectedIL` lets a late PB abort unwind the attempt;
 // the token parameter remains ABI-compatible with the PR4 call sites.
 void warpToGuarded(const Dest &dest, u32 legacyToken, bool selectedIL);
+// Drop the Plaza return captured by a selected IL once that attempt ends.
+void clearPracticeReturn();
 // Warp to `dest`, but make the next director see `source` as the stage Mario
 // just left. Used by travel practice to select the retail Plaza return point.
 void warpFrom(const Dest &source, const Dest &dest);

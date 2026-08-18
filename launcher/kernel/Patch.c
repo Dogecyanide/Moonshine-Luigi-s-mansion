@@ -4112,6 +4112,8 @@ static const struct SusamuneModHeader *SusamuneModStaged(void)
 		return NULL;
 	if (hdr->fileSize != codeEnd + hdr->writeCount * 8)
 		return NULL;
+	if (hdr->fileSize > SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE)
+		return NULL;
 
 	return hdr;
 }

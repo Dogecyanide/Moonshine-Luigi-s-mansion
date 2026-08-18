@@ -36,6 +36,7 @@ enum ChoiceSet {
     CHOICES_APPEARANCE,
     CHOICES_GHOST_APPEARANCE,
     CHOICES_STAGE_SESSION,
+    CHOICES_PB_GHOST_SAVE,
     CHOICES_COUNT,
 };
 
@@ -61,7 +62,8 @@ const char kChoiceLabels[] =
     "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0" "1\0" "2\0"
     "Slowest\0Fastest\0"
     "25%\0" "50%\0" "75%\0" "100%\0Default\0Never\0"
-    "Shadow Mario\0Piantissimo\0Full notification\0Counter";
+    "Shadow Mario\0Piantissimo\0Full notification\0Counter\0"
+    "Ask\0Auto-Save\0Don't ask";
 
 const u8 kChoiceMap[] = {
     0, 1,              // bool
@@ -76,12 +78,13 @@ const u8 kChoiceMap[] = {
     26, 9, 27,          // appearance: Default, Always, Never
     28, 29,             // ghost appearance
     30, 31, 0,          // stage session: Full notification, Counter, Off
+    32, 33, 34,         // PB ghost save
 };
 const u8 kChoiceFirst[CHOICES_COUNT + 1] = {
-    0, 2, 5, 9, 12, 15, 21, 24, 27, 31, 34, 36, 39
+    0, 2, 5, 9, 12, 15, 21, 24, 27, 31, 34, 36, 39, 42
 };
 
-static_assert(sizeof(kChoiceMap) / sizeof(kChoiceMap[0]) == 39,
+static_assert(sizeof(kChoiceMap) / sizeof(kChoiceMap[0]) == 42,
               "choice map size changed");
 static_assert(SETTING_HELMET_APPEARANCE == SETTING_GHOST_OPACITY + 1 &&
                   SETTING_CAP_APPEARANCE == SETTING_HELMET_APPEARANCE + 1 &&
@@ -97,7 +100,9 @@ static_assert(SETTING_HELMET_APPEARANCE == SETTING_GHOST_OPACITY + 1 &&
                   SETTING_GHOST_LAST_SUCCESS ==
                       SETTING_GHOST_APPEARANCE + 1 &&
                   SETTING_STAGE_SESSION_DISPLAY ==
-                      SETTING_GHOST_LAST_SUCCESS + 1,
+                      SETTING_GHOST_LAST_SUCCESS + 1 &&
+                  SETTING_PB_GHOST_SAVE_POLICY ==
+                      SETTING_STAGE_SESSION_DISPLAY + 1,
               "append-only V2 setting ids moved");
 
 u8 choiceCount(const SettingDesc &desc) {

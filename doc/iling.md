@@ -49,6 +49,13 @@ episodes have separate Full, Secret and Reds rows. QFT's attempt serial changes
 on a real restart; resetting inside the child cancels the Full attempt and arms
 that child as a fresh Secret or Reds attempt instead.
 
+The ten standalone Secret entries latch their exact PB identity when armed.
+They are intended to lose PB, Records and achievement credit after FLUDD use,
+but V2.0.3 hardware testing shows that invalidation is not reliable. Do not
+treat a saved Secret time as proof of a no-FLUDD run. Reds in the same child
+scene and parent-to-secret Full runs are separate identities and remain
+eligible.
+
 Both QFT displays hold the captured split while entering a loading zone, but
 the clock continues through the load. When a retail mission timer owns the
 large Sunshine panel, Susamune leaves it untouched and keeps the full-level QFT
@@ -157,7 +164,9 @@ Do not test all 96 entries for every change. Cover the distinct mechanisms:
 
 1. A normal main-stage Shine after natural entry and level reset.
 2. Bianco 3 from parent stage through its secret.
-3. One Full/Secret/Reds trio, including a reset and FLUDD state.
+3. One Full/Secret/Reds trio, including a reset and FLUDD state. Record the
+   known V2.0.3 failure if the standalone Secret PB remains eligible; Reds and
+   Full must remain eligible.
 4. Delfino Box Game 2 or another one-time Plaza object.
 5. Airstrip 1; its first-visit scenario may need more progression flags.
 6. Corona through the Bowser stop.

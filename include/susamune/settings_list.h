@@ -159,9 +159,11 @@
     /* -- Ghost model selection (append-only persisted id) -- */               \
     X(SETTING_GHOST_APPEARANCE,          "ghost_appearance")                  \
     /* -- Automatic ghost target policy (append-only persisted id) -- */       \
-    X(SETTING_GHOST_LAST_SUCCESS,        "ghost_last_success")               \
-    /* -- Stage-session presentation (append-only persisted id) -- */          \
-    X(SETTING_STAGE_SESSION_DISPLAY,     "stage_session_display")
+    X(SETTING_GHOST_LAST_SUCCESS,        "ghost_last_success")                \
+    /* PR2 assigned this id before the V2.0.3 merge; never swap the next two. */ \
+    X(SETTING_STAGE_SESSION_DISPLAY,     "stage_session_display")             \
+    /* -- PB ghost save policy (append-only persisted id) -- */                \
+    X(SETTING_PB_GHOST_SAVE_POLICY,      "pb_ghost_save_policy")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

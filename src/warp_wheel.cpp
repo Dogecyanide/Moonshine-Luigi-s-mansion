@@ -17,6 +17,7 @@
 #include "susamune/glyphs.hxx"
 #include "susamune/ghost.hxx"
 #include "susamune/ghost_format.h"
+#include "susamune/ghost_storage.hxx"
 #include "susamune/iling.hxx"
 #include "susamune/menu.hxx"
 #include "susamune/packed_text.hxx"
@@ -87,6 +88,8 @@ u8               sSaveIdleFrames;
 bool             sCourseGuard;
 bool             sArmStartedIL;
 bool             sExitSelectorPending;
+bool             sPracticeReturnValid;
+LevelWarp::Dest  sPracticeReturn;
 bool             sShown;
 int              sArmedILIndex = -1;
 
@@ -104,6 +107,12 @@ enum PromptAction : u8 {
     PROMPT_NATURAL_DEPARTURE,
 };
 
+enum PBSavePolicy : u8 {
+    PB_SAVE_ASK,
+    PB_SAVE_AUTO,
+    PB_SAVE_DONT_ASK,
+};
+
 struct PromptState {
     PromptAction    action;
     LevelWarp::Dest dest;
@@ -115,6 +124,13 @@ struct PromptState {
 PromptState    sPrompt;
 RawPromptInput sPromptInput;
 bool           sPromptSaving;
+enum PromptAutoSave : u8 {
+    PROMPT_AUTO_OFF,
+    PROMPT_AUTO_PREPARE,
+    PROMPT_AUTO_WAIT_CATALOG,
+    PROMPT_AUTO_SAVE_PENDING,
+};
+PromptAutoSave sPromptAutoSave;
 PromptAction   sArmedAction;
 bool           sSavestateLoadApproved;
 bool           sPendingTitleExit;
@@ -122,6 +138,13 @@ bool           sHoldNaturalDeparture;
 
 void cancelArmedCourseWarp();
 void close();
+void executePromptAction();
+
+void armExitAreaWarp(const LevelWarp::Dest &dest) {
+    LevelWarp::warpToGuarded(dest, 0, false);
+    sArmedAction = PROMPT_EXIT_AREA;
+    sExitSelectorPending = true;
+}
 
 bool saveFlowActive() {
     if (!gpMarDirector) return false;
@@ -383,7 +406,17 @@ void clearPrompt() {
     sPrompt.detail = 0;
     sPrompt.name[0] = '\0';
     sPromptSaving = false;
+    sPromptAutoSave = PROMPT_AUTO_OFF;
     sPromptInput.clear();
+}
+
+bool unprotectAllPBs() {
+    char name[SUSAMUNE_GHOST_NAME_SIZE];
+    u32 token = 0;
+    while (Ghost::copyUnsavedPBName(name, sizeof(name), &token)) {
+        if (!Ghost::unprotectUnsavedPB(token)) return false;
+    }
+    return true;
 }
 
 bool refreshPromptPB() {
@@ -398,7 +431,11 @@ bool refreshPromptPB() {
 }
 
 bool beginPrompt(PromptAction action, const LevelWarp::Dest &dest,
-                 s32 detail = 0) {
+                  s32 detail = 0) {
+    if (gSettings.get(SETTING_PB_GHOST_SAVE_POLICY) == PB_SAVE_DONT_ASK &&
+        unprotectAllPBs()) {
+        return false;
+    }
     const PromptAction oldAction = sPrompt.action;
     const LevelWarp::Dest oldDest = sPrompt.dest;
     const s32 oldDetail = sPrompt.detail;
@@ -406,15 +443,105 @@ bool beginPrompt(PromptAction action, const LevelWarp::Dest &dest,
     sPrompt.dest = dest;
     sPrompt.detail = detail;
     sPromptSaving = false;
+    sPromptAutoSave = gSettings.get(SETTING_PB_GHOST_SAVE_POLICY) == PB_SAVE_AUTO
+        ? PROMPT_AUTO_PREPARE : PROMPT_AUTO_OFF;
     if (!refreshPromptPB()) {
         sPrompt.action = oldAction;
         sPrompt.dest = oldDest;
         sPrompt.detail = oldDetail;
+        sPromptAutoSave = PROMPT_AUTO_OFF;
         return false;
     }
+    if (sPromptAutoSave != PROMPT_AUTO_OFF)
+        sPromptInput.begin(JUTGamePad::B);
     close();
     gBinds.suppressUntilRelease();
     return true;
+}
+
+void fallBackToPBPrompt(const char *message) {
+    sPromptAutoSave = PROMPT_AUTO_OFF;
+    sPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+    if (gMenu && message) gMenu->toast(message);
+}
+
+void updateAutoSave() {
+    if (sPromptInput.update() & JUTGamePad::B) {
+        fallBackToPBPrompt("Auto-save stopped; choose save or continue");
+        return;
+    }
+    if (GhostStorage::timedOut()) {
+        fallBackToPBPrompt(GhostStorage::statusText());
+        return;
+    }
+    if (!Ghost::hasUnsavedPBToken(sPrompt.token)) {
+        if (!refreshPromptPB()) {
+            executePromptAction();
+            return;
+        }
+        sPromptInput.begin(JUTGamePad::B);
+        if (!GhostStorage::available() || GhostStorage::busy() ||
+            !GhostStorage::refresh()) {
+            if (GhostStorage::busy()) {
+                sPromptAutoSave = PROMPT_AUTO_WAIT_CATALOG;
+            } else {
+                fallBackToPBPrompt(GhostStorage::statusText());
+            }
+            return;
+        }
+        sPromptAutoSave = PROMPT_AUTO_WAIT_CATALOG;
+        return;
+    }
+
+    if (sPromptAutoSave == PROMPT_AUTO_SAVE_PENDING) {
+        if (GhostStorage::busy()) return;
+        fallBackToPBPrompt(GhostStorage::statusText());
+        return;
+    }
+    if (sPromptAutoSave == PROMPT_AUTO_WAIT_CATALOG) {
+        if (GhostStorage::busy()) return;
+        if (!GhostStorage::available() || !GhostStorage::catalogReady()) {
+            fallBackToPBPrompt(GhostStorage::statusText());
+            return;
+        }
+        sPromptAutoSave = PROMPT_AUTO_PREPARE;
+    }
+    if (GhostStorage::busy()) return;
+    if (!GhostStorage::available()) {
+        fallBackToPBPrompt(GhostStorage::statusText());
+        return;
+    }
+    if (!GhostStorage::catalogReady()) {
+        if (GhostStorage::refresh()) {
+            sPromptAutoSave = PROMPT_AUTO_WAIT_CATALOG;
+        } else {
+            fallBackToPBPrompt(GhostStorage::statusText());
+        }
+        return;
+    }
+
+    int emptySlot = -1;
+    for (int slot = 0;
+         slot < static_cast<int>(SUSAMUNE_GHOST_PROFILE_WRITABLE_ENTRIES);
+         slot++) {
+        const SusamuneGhostSlotInfo *info = GhostStorage::slot(slot);
+        if (info &&
+            !(info->flags & (SUSAMUNE_GHOST_SLOT_PRESENT |
+                             SUSAMUNE_GHOST_SLOT_UNSAFE))) {
+            emptySlot = slot;
+            break;
+        }
+    }
+    if (emptySlot < 0) {
+        fallBackToPBPrompt("Ghost slots full; choose save or continue");
+        return;
+    }
+    if (!GhostStorage::save(emptySlot, sPrompt.token)) {
+        fallBackToPBPrompt(GhostStorage::statusText());
+        return;
+    }
+    sPromptAutoSave = PROMPT_AUTO_SAVE_PENDING;
+    if (gMenu) gMenu->toast("Auto-saving PB ghost...");
 }
 
 void executePromptAction() {
@@ -436,9 +563,12 @@ void executePromptAction() {
         }
         break;
     case PROMPT_EXIT_AREA:
-        LevelWarp::warpToGuarded(action.dest, 0, false);
-        sArmedAction = PROMPT_EXIT_AREA;
-        sExitSelectorPending = true;
+        if (gSettings.getBool(SETTING_AREA_LOCK) &&
+            !gSettings.getBool(SETTING_DISABLE_WARPS)) {
+            LevelWarp::restart(true);
+        } else {
+            armExitAreaWarp(action.dest);
+        }
         break;
     case PROMPT_TITLE:
         sPendingTitleExit = true;
@@ -472,6 +602,11 @@ void updatePrompt() {
     // Silence every configured action, including buttons outside its A/B mask.
     gBinds.suppressUntilRelease();
 
+    if (sPromptAutoSave != PROMPT_AUTO_OFF) {
+        updateAutoSave();
+        return;
+    }
+
     // A save owns only the storage request. Keep the destructive action here
     // until its exact PB token disappears on the successful storage ACK.
     if (sPromptSaving) {
@@ -503,12 +638,12 @@ void updatePrompt() {
     const u16 pressed = sPromptInput.update();
     if (pressed & JUTGamePad::B) {
         gBinds.suppressUntilRelease();
-        if (!Ghost::discardUnsavedPB(sPrompt.token)) {
+        if (!Ghost::unprotectUnsavedPB(sPrompt.token)) {
             if (!refreshPromptPB()) executePromptAction();
             return;
         }
-        // Record and playback can each own an accepted PB. Consume each exact
-        // token explicitly before releasing the held departure.
+        // Record and playback can each own an accepted PB. Release each exact
+        // protection token before continuing the held departure.
         if (!refreshPromptPB()) executePromptAction();
         return;
     }
@@ -690,6 +825,29 @@ void armGuardedWarp(const LevelWarp::Dest &dest, bool overrideSource,
     sCourseGuard = true;
     sArmStartedIL = selectedIL;
     sArmedAction = selectedIL ? PROMPT_IL : PROMPT_WARP;
+
+    if (!selectedIL) return;
+
+    const TGameSequence *source = nullptr;
+    const TGameSequence &current = gpApplication.mCurrentScene;
+    const TGameSequence &previous = gpApplication.mPrevScene;
+    if (current.mAreaID == TGameSequence::AREA_DOLPIC &&
+        current.mEpisodeID <= 9) {
+        source = &current;
+    } else if (previous.mAreaID == TGameSequence::AREA_DOLPIC &&
+               previous.mEpisodeID <= 9) {
+        source = &previous;
+    }
+
+    sPracticeReturnValid = source != nullptr;
+    if (source) {
+        const u8 plazaFlags = TFlagManager::smInstance &&
+                TFlagManager::smInstance->getBool(kPostCoronaFlag)
+            ? LevelWarp::Dest::POST_CORONA : 0;
+        sPracticeReturn.area = TGameSequence::AREA_DOLPIC;
+        sPracticeReturn.episode = source->mEpisodeID;
+        sPracticeReturn.gameInt3 = plazaFlags;
+    }
 }
 
 void cancelArmedCourseWarp() {
@@ -713,6 +871,10 @@ bool armedCourseWarpReady() {
     u32 token = 0;
     char name[SUSAMUNE_GHOST_NAME_SIZE];
     if (!Ghost::copyUnsavedPBName(name, sizeof(name), &token)) return true;
+    if (gSettings.get(SETTING_PB_GHOST_SAVE_POLICY) == PB_SAVE_DONT_ASK &&
+        unprotectAllPBs()) {
+        return true;
+    }
 
     const LevelWarp::Dest retryDest = sDest;
     const PromptAction retryAction = sArmedAction;
@@ -751,6 +913,8 @@ SelectorResult applyTransitionSelector() {
     }
     if (command != CLASSIC_WARP) return SELECTOR_NONE;
 
+    if (gSettings.get(SETTING_PB_GHOST_SAVE_POLICY) == PB_SAVE_DONT_ASK)
+        unprotectAllPBs();
     char discarded[SUSAMUNE_GHOST_NAME_SIZE];
     u32 discardedToken = 0;
     if (Ghost::copyUnsavedPBName(discarded, sizeof(discarded),
@@ -775,6 +939,10 @@ void warpTo(const Dest &dest) {
 void warpToGuarded(const Dest &dest, u32 legacyToken, bool selectedIL) {
     (void)legacyToken;
     armGuardedWarp(dest, false, selectedIL);
+}
+
+void clearPracticeReturn() {
+    sPracticeReturnValid = false;
 }
 
 void warpFrom(const Dest &source, const Dest &dest) {
@@ -1480,18 +1648,27 @@ u8 guardExitArea(u8 nextState) {
     StageLoader::cancel();
     LevelWarp::Dest dest = {0, 0, 0};
     PromptAction action = PROMPT_TITLE;
+    bool practiceReturn = false;
     if (nextState == kPauseExitArea) {
         if (!TFlagManager::smInstance) return nextState;
-        const u8 plazaFlags =
-            TFlagManager::smInstance->getBool(kPostCoronaFlag)
-                ? LevelWarp::Dest::POST_CORONA : 0;
-        dest.area = TGameSequence::AREA_DOLPIC;
-        dest.episode = retailPlazaScenario();
-        dest.gameInt3 = plazaFlags;
+        practiceReturn = sPracticeReturnValid &&
+                         !gSettings.getBool(SETTING_AREA_LOCK);
+        if (practiceReturn) {
+            dest = sPracticeReturn;
+        } else {
+            const u8 plazaFlags =
+                TFlagManager::smInstance->getBool(kPostCoronaFlag)
+                    ? LevelWarp::Dest::POST_CORONA : 0;
+            dest.area = TGameSequence::AREA_DOLPIC;
+            dest.episode = retailPlazaScenario();
+            dest.gameInt3 = plazaFlags;
+        }
         action = PROMPT_EXIT_AREA;
     }
     if (sArmed) cancelArmedCourseWarp();
-    if (!beginPrompt(action, dest)) return nextState;
+    if (beginPrompt(action, dest)) return kPauseResume;
+    if (!practiceReturn) return nextState;
+    armExitAreaWarp(dest);
 
     // getNextState() has already closed the pause object. Resume first; the
     // raw-pad overlay owns no retail UI pointer.
@@ -1626,10 +1803,22 @@ void draw() {
         const int y = 142;
         const int w = 516;
         const int h = 190;
-        const char *title = "Protect unsaved PB ghost?";
-        const char *note = "Save it, or explicitly discard and continue.";
-        const char *hint = SUSAMUNE_GLYPH_A " Ghosts / Save    "
-                           SUSAMUNE_GLYPH_B " Discard & continue";
+        const bool automatic = sPromptAutoSave != PROMPT_AUTO_OFF;
+        const bool savestateLoad = !automatic &&
+            sPrompt.action == PROMPT_SAVESTATE_LOAD;
+        const char *title = automatic ? "Auto-saving PB ghost..."
+            : savestateLoad ? "Unsaved PB ghost"
+                            : "Protect unsaved PB ghost?";
+        const char *note = automatic ? GhostStorage::statusText()
+            : savestateLoad ? "Savestate load cannot preserve this recording."
+                            : "Save it now, or continue unsaved.";
+        const char *hint = automatic
+            ? SUSAMUNE_GLYPH_B " Use Ask instead; the PB stays protected"
+            : savestateLoad
+              ? SUSAMUNE_GLYPH_A " Ghosts / Save    "
+                SUSAMUNE_GLYPH_B " Load & lose ghost"
+            : SUSAMUNE_GLYPH_A " Ghosts / Save    "
+              SUSAMUNE_GLYPH_B " Continue unsaved";
 
         gMenu->fillBox(0, 0, 640, 480, cBackdrop());
         gMenu->fillBox(x, y, w, h, cSlice());

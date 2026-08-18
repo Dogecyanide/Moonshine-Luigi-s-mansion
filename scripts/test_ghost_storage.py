@@ -72,7 +72,7 @@ def rechecksum_ghost(raw: bytes) -> bytes:
 class StorageEnvelopeTests(unittest.TestCase):
     def test_old_and_future_canonical_versions_are_not_parsed(self) -> None:
         for version in (ghost_format.GHOST_VERSION_V1,
-                        ghost_format.GHOST_VERSION_V2, 4):
+                        ghost_format.GHOST_VERSION_V2, 5):
             with self.subTest(version=version), mock.patch.object(
                 ghost_format,
                 "validate_ghost",
@@ -80,7 +80,7 @@ class StorageEnvelopeTests(unittest.TestCase):
             ):
                 prefix = ghost_format.GHOST_MAGIC + struct.pack(">H", version)
                 with self.assertRaises(storage.UnsupportedStorage):
-                    storage._validate_v3_ghost(prefix + bytes(512))
+                    storage._validate_canonical_ghost(prefix + bytes(512))
 
     def test_valid_ghost_and_tombstone(self) -> None:
         ghost = envelope(build_ghost())
@@ -94,20 +94,21 @@ class StorageEnvelopeTests(unittest.TestCase):
         )
         self.assertIsNone(parsed["ghost"])
 
-    def test_storage_and_share_accept_only_v3(self) -> None:
-        payload = build_ghost()
-        parsed = storage.validate_slot_file(
-            envelope(payload),
-            game_id=ghost_format.REGION_GAME_IDS[0], profile=0, slot=0,
-        )
-        self.assertEqual(
-            parsed["ghost"]["version"], ghost_format.GHOST_VERSION_V3
-        )
-        shared = storage.validate_share_file(
-            payload, game_id=ghost_format.REGION_GAME_IDS[0], profile=0,
-        )
-        self.assertEqual(shared["version"], ghost_format.GHOST_VERSION_V3)
+    def test_storage_and_share_accept_v3_and_v4(self) -> None:
+        for version in (ghost_format.GHOST_VERSION_V3,
+                        ghost_format.GHOST_VERSION_V4):
+            payload = build_ghost(version=version)
+            parsed = storage.validate_slot_file(
+                envelope(payload),
+                game_id=ghost_format.REGION_GAME_IDS[0], profile=0, slot=0,
+            )
+            self.assertEqual(parsed["ghost"]["version"], version)
+            shared = storage.validate_share_file(
+                payload, game_id=ghost_format.REGION_GAME_IDS[0], profile=0,
+            )
+            self.assertEqual(shared["version"], version)
 
+        payload = build_ghost()
         for version in (ghost_format.GHOST_VERSION_V1,
                         ghost_format.GHOST_VERSION_V2):
             old = bytearray(payload)
@@ -128,7 +129,7 @@ class StorageEnvelopeTests(unittest.TestCase):
                     )
 
     def test_storage_rejects_malformed_v3_pose_samples(self) -> None:
-        base = build_ghost()
+        base = build_ghost(version=ghost_format.GHOST_VERSION_V3)
         sample = ghost_format.V3_SAMPLE_DATA_OFFSET
         bad_position = bytearray(base)
         bad_position[sample + 4:sample + 7] = (
@@ -167,8 +168,32 @@ class StorageEnvelopeTests(unittest.TestCase):
                     slot=0,
                 )
 
+    def test_storage_rejects_version_feature_codec_mismatches(self) -> None:
+        v4_missing_feature = bytearray(build_ghost())
+        struct.pack_into(">I", v4_missing_feature, 24, 0)
+        v4_raw_codec = bytearray(build_ghost())
+        v4_raw_codec[40] = ghost_format.CODEC_RAW
+        v3_attachment_codec = bytearray(build_ghost(
+            version=ghost_format.GHOST_VERSION_V3
+        ))
+        v3_attachment_codec[40] = ghost_format.CODEC_POSE_ATTACHMENTS
+        for label, malformed in (
+            ("V4 feature", v4_missing_feature),
+            ("V4 codec", v4_raw_codec),
+            ("V3 codec", v3_attachment_codec),
+        ):
+            with self.subTest(label=label), self.assertRaises(
+                storage.StorageError
+            ):
+                storage.validate_slot_file(
+                    envelope(rechecksum_ghost(bytes(malformed))),
+                    game_id=ghost_format.REGION_GAME_IDS[0],
+                    profile=0,
+                    slot=0,
+                )
+
     def test_v3_pose_extreme_phase_and_yaw_are_valid(self) -> None:
-        raw = bytearray(build_ghost())
+        raw = bytearray(build_ghost(version=ghost_format.GHOST_VERSION_V3))
         sample = ghost_format.V3_SAMPLE_DATA_OFFSET
         struct.pack_into(">h", raw, sample, -0x8000)
         animation = (
@@ -247,13 +272,16 @@ class StorageEnvelopeTests(unittest.TestCase):
             ),
         )
 
-    def test_kernel_and_ppc_catalog_accept_only_v3_pose_files(self) -> None:
+    def test_kernel_and_ppc_catalog_accept_v3_and_v4_pose_files(self) -> None:
         root = Path(__file__).resolve().parents[1]
         kernel_path = root / "launcher/kernel/SusamuneGhost.c"
         ppc_path = root / "src/ghost_storage.cpp"
         header = source_function(kernel_path, "ValidateCanonicalHeader")
         self.assertIn(
             "version != SUSAMUNE_GHOST_FILE_VERSION_V3", header
+        )
+        self.assertIn(
+            "version != SUSAMUNE_GHOST_FILE_VERSION_V4", header
         )
         self.assertNotIn("SUSAMUNE_GHOST_FILE_VERSION_V1", header)
         self.assertNotIn("SUSAMUNE_GHOST_FILE_VERSION_V2", header)
@@ -283,13 +311,27 @@ class StorageEnvelopeTests(unittest.TestCase):
         sanitize = source_function(ppc_path, "sanitizeSlot")
         for required in (
             "SUSAMUNE_GHOST_FILE_VERSION_V3",
+            "SUSAMUNE_GHOST_FILE_VERSION_V4",
             "SUSAMUNE_GHOST_RECORDING_POSE_QF",
-            "SUSAMUNE_GHOST_V3_SAMPLE_DATA_OFFSET",
+            "SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET",
             "SUSAMUNE_GHOST_POSE_SAMPLE_SIZE",
+            "SUSAMUNE_GHOST_CODEC_RAW",
+            "SUSAMUNE_GHOST_CODEC_POSE_ATTACHMENTS",
         ):
             self.assertIn(required, sanitize)
         self.assertNotIn("SUSAMUNE_GHOST_FILE_VERSION_V1", sanitize)
         self.assertNotIn("SUSAMUNE_GHOST_FILE_VERSION_V2", sanitize)
+
+    def test_ppc_catalog_names_never_render_blank(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        ppc = root / "src/ghost_storage.cpp"
+        visible = source_function(ppc, "copyVisibleName")
+        self.assertIn("text[i] != ' '", visible)
+        self.assertIn("kUnnamedName", visible)
+        for function in ("copySlotName", "copyImportedSlotName"):
+            self.assertIn(
+                "copyVisibleName", source_function(ppc, function)
+            )
 
     def test_quarantined_import_stays_visible_and_deletable(self) -> None:
         root = Path(__file__).resolve().parents[1]

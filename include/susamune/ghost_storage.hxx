@@ -25,6 +25,9 @@ bool loadImportedObserver(int slot, bool secondary);
 bool removeImported(int slot);
 
 bool busy();
+// A timed-out request remains pending because a late ARM acknowledgement is
+// still valid. Callers waiting behind it must offer their own escape path.
+bool timedOut();
 bool available();
 bool catalogReady();
 bool importedCatalogReady();

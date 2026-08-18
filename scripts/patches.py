@@ -85,8 +85,16 @@ mod_region_size = 0x80000
 # the blob must not grow into. MUST match SUSAMUNE_SCRATCH in mod_bin.h.
 mod_scratch_size = 0x40
 
-# Ceiling enforced on the linked blob by every link_mod.py mode.
-mod_blob_max_size = 0x50000
+# The packed header/code/write list must leave the reset-safe runtime tail
+# untouched. nop_count contributes one additional write per NOP.
+mod_mem1_working_cap_size = 0x50000
+mod_file_max_size = 0x3F000
+mod_write_count = sum(1 + patch.get('nop_count', 0) for patch in patches)
+mod_blob_max_size = min(
+    mod_mem1_working_cap_size,
+    mod_region_size - mod_scratch_size,
+    mod_file_max_size - 32 - mod_write_count * 8)
+assert mod_blob_max_size <= mod_mem1_working_cap_size
 assert mod_blob_max_size <= mod_region_size - mod_scratch_size
 
 # OSInit returns the debug stack to the arena when no debug monitor is present

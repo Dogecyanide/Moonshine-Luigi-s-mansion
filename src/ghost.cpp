@@ -35,7 +35,7 @@ const s32 kPositionScale = SUSAMUNE_GHOST_POSITION_SCALE;
 const s32 kMaxPosition = 1000000;
 const s32 kMaxDurationQf = 107892;  // 15 minutes at 120000/1001 QF/s
 const u16 kClockSettleObservations = 30;
-const u16 kMaxSegments = SUSAMUNE_GHOST_V3_MAX_SEGMENTS;
+const u16 kMaxSegments = SUSAMUNE_GHOST_V4_MAX_SEGMENTS;
 const u32 kPlaybackTokenBit = 0x80000000u;
 const u16 kCueMove = 0x0001u;
 const u16 kCueEntry = 0x0200u;
@@ -116,6 +116,11 @@ struct Track {
     u8 routeParentArea;
     u8 routeFlags;
     u16 segmentCount;
+    u16 formatVersion;
+    u16 attachmentFlags;
+    u8 attachmentCount;
+    SusamuneGhostAttachmentDescriptor
+        attachments[SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_COUNT];
     bool valid;
     bool completed;
     bool saved;
@@ -157,6 +162,9 @@ TVec3f sGhostPosition;
 s16 sGhostYaw;
 u16 sGhostAnimationId;
 u16 sGhostAnimationPhase;
+u32 sGhostHeldObjectId;
+u16 sGhostHeldNameKey;
+u8 sGhostYoshi;
 u32 sGhostIdSerial;
 u32 sRecordToken;
 u32 sRecordIdentityToken;
@@ -180,8 +188,13 @@ TVec3f sSecondaryGhostPosition;
 s16 sSecondaryGhostYaw;
 u16 sSecondaryGhostAnimationId;
 u16 sSecondaryGhostAnimationPhase;
+u32 sSecondaryGhostHeldObjectId;
+u16 sSecondaryGhostHeldNameKey;
+u8 sSecondaryGhostYoshi;
 bool sSecondaryGhostVisible;
 TMario *sObserverMario;
+CPolarSubCamera *sObserverCamera;
+f32 sObserverCameraYOffset;
 u16 sObserverMarioPerformFlags;
 bool sObserverMarioVisible;
 bool sObserverMarioPrevVisible;
@@ -342,6 +355,10 @@ void clearTrack(Track &track) {
     track.routeParentArea = SUSAMUNE_GHOST_ROUTE_PARENT_NONE;
     track.routeFlags = 0;
     track.segmentCount = 0;
+    track.formatVersion = SUSAMUNE_GHOST_FILE_VERSION_V4;
+    track.attachmentFlags = 0;
+    track.attachmentCount = 0;
+    memset(track.attachments, 0, sizeof(track.attachments));
     track.valid = false;
     track.completed = false;
     track.saved = false;
@@ -389,6 +406,13 @@ bool observerRunning() {
 void releaseObserverMario(bool restore) {
     if (restore && sObserverMarioOwned && sObserverMario &&
         sObserverMario == gpMarioOriginal) {
+        if (sObserverCamera && sObserverCamera == gpCamera &&
+            gpMarDirector &&
+            gpMarDirector->mCurState == TMarDirector::STATE_NORMAL &&
+            sObserverCameraYOffset != 0.0f) {
+            Vec cameraMove = {0.0f, -sObserverCameraYOffset, 0.0f};
+            sObserverCamera->addMoveCameraAndMario(cameraMove);
+        }
         sObserverMario->mPerformFlags = sObserverMarioPerformFlags;
         // A pre-normal abort must not preserve the visibility bit we cleared.
         const bool visible = sObserverMarioBaselineFinalized
@@ -409,6 +433,8 @@ void releaseObserverMario(bool restore) {
         sObserverMario->mModelAngleY = sObserverMarioModelAngleY;
     }
     sObserverMario = nullptr;
+    sObserverCamera = nullptr;
+    sObserverCameraYOffset = 0.0f;
     sObserverMarioOwned = false;
 }
 
@@ -417,6 +443,8 @@ void bindObserverMario() {
     if (sObserverMarioOwned && sObserverMario == gpMarioOriginal) return;
     releaseObserverMario(false);
     sObserverMario = gpMarioOriginal;
+    sObserverCamera = gpCamera;
+    sObserverCameraYOffset = 0.0f;
     sObserverMarioPerformFlags = sObserverMario->mPerformFlags;
     sObserverMarioVisible = sObserverMario->mAttributes.mIsVisible;
     sObserverMarioPrevVisible = sObserverMario->mPrevAttributes.mIsVisible;
@@ -476,6 +504,9 @@ void resetObserverRuntime() {
     sSecondaryGhostYaw = 0;
     sSecondaryGhostAnimationId = 0;
     sSecondaryGhostAnimationPhase = 0;
+    sSecondaryGhostHeldObjectId = 0;
+    sSecondaryGhostHeldNameKey = 0;
+    sSecondaryGhostYoshi = SUSAMUNE_GHOST_V4_YOSHI_NONE;
     sSecondaryGhostVisible = false;
     sObserverStageReady = false;
     sObserverPastEnd = false;
@@ -548,15 +579,133 @@ u16 sampleAnimationId(const Sample &sample) {
     return static_cast<u16>(readU24(sample.animation) >> 15);
 }
 
-u16 sampleAnimationPhase(const Sample &sample) {
-    return static_cast<u16>((readU24(sample.animation) >> 3) &
+u16 sampleAnimationPhase(const Sample &sample, u16 version) {
+    const u32 packed = readU24(sample.animation);
+    if (version == SUSAMUNE_GHOST_FILE_VERSION_V4) {
+        const u32 phase = (packed >> SUSAMUNE_GHOST_V4_ANIMATION_PHASE_SHIFT) &
+                          SUSAMUNE_GHOST_V4_ANIMATION_PHASE_MAX;
+        return static_cast<u16>(phase * SUSAMUNE_GHOST_ANIMATION_PHASE_MAX /
+                                SUSAMUNE_GHOST_V4_ANIMATION_PHASE_MAX);
+    }
+    return static_cast<u16>((packed >> 3) &
                             SUSAMUNE_GHOST_ANIMATION_PHASE_MAX);
 }
 
+u8 sampleYoshi(const Sample &sample, u16 version) {
+    return version == SUSAMUNE_GHOST_FILE_VERSION_V4
+        ? static_cast<u8>((readU24(sample.animation) >>
+                           SUSAMUNE_GHOST_V4_YOSHI_SHIFT) &
+                          SUSAMUNE_GHOST_V4_YOSHI_MASK)
+        : SUSAMUNE_GHOST_V4_YOSHI_NONE;
+}
+
+u8 sampleHeld(const Sample &sample, u16 version) {
+    return version == SUSAMUNE_GHOST_FILE_VERSION_V4
+        ? static_cast<u8>(readU24(sample.animation) &
+                          SUSAMUNE_GHOST_V4_HELD_INDEX_MASK)
+        : 0;
+}
+
+void sampleAttachments(const Track &track, const Sample &sample, u8 *yoshi,
+                       u32 *objectId, u16 *nameKey) {
+    if (yoshi) *yoshi = sampleYoshi(sample, track.formatVersion);
+    if (objectId) *objectId = 0;
+    if (nameKey) *nameKey = 0;
+    const u8 held = sampleHeld(sample, track.formatVersion);
+    if (held == 0 || held == SUSAMUNE_GHOST_V4_HELD_UNKNOWN ||
+        held > track.attachmentCount) {
+        return;
+    }
+    const SusamuneGhostAttachmentDescriptor &descriptor =
+        track.attachments[held - 1];
+    if (objectId) {
+        *objectId = (static_cast<u32>(descriptor.objectId[0]) << 24) |
+                    (static_cast<u32>(descriptor.objectId[1]) << 16) |
+                    (static_cast<u32>(descriptor.objectId[2]) << 8) |
+                    static_cast<u32>(descriptor.objectId[3]);
+    }
+    if (nameKey) {
+        *nameKey = static_cast<u16>(
+            (static_cast<u16>(descriptor.nameKey[0]) << 8) |
+            descriptor.nameKey[1]);
+    }
+}
+
 void setSampleAnimation(Sample &sample, u16 id, u16 phase) {
+    const u32 attachments = readU24(sample.animation) & 0x7fu;
+    const u32 phaseV4 =
+        (static_cast<u32>(phase) * SUSAMUNE_GHOST_V4_ANIMATION_PHASE_MAX +
+         SUSAMUNE_GHOST_ANIMATION_PHASE_MAX / 2) /
+        SUSAMUNE_GHOST_ANIMATION_PHASE_MAX;
     writeU24(sample.animation,
              (static_cast<u32>(id) << 15) |
-             (static_cast<u32>(phase) << 3));
+             (phaseV4 << SUSAMUNE_GHOST_V4_ANIMATION_PHASE_SHIFT) |
+             attachments);
+}
+
+void setSampleAttachments(Sample &sample, u8 yoshi, u8 held) {
+    const u32 animation = readU24(sample.animation) & ~0x7fu;
+    writeU24(sample.animation,
+             animation |
+             (static_cast<u32>(yoshi) << SUSAMUNE_GHOST_V4_YOSHI_SHIFT) |
+             held);
+}
+
+bool attachmentDescriptorEquals(
+    const SusamuneGhostAttachmentDescriptor &descriptor, u32 objectId,
+    u16 nameKey) {
+    return descriptor.objectId[0] == static_cast<u8>(objectId >> 24) &&
+           descriptor.objectId[1] == static_cast<u8>(objectId >> 16) &&
+           descriptor.objectId[2] == static_cast<u8>(objectId >> 8) &&
+           descriptor.objectId[3] == static_cast<u8>(objectId) &&
+           descriptor.nameKey[0] == static_cast<u8>(nameKey >> 8) &&
+           descriptor.nameKey[1] == static_cast<u8>(nameKey);
+}
+
+void setAttachmentDescriptor(SusamuneGhostAttachmentDescriptor &descriptor,
+                             u32 objectId, u16 nameKey) {
+    descriptor.objectId[0] = static_cast<u8>(objectId >> 24);
+    descriptor.objectId[1] = static_cast<u8>(objectId >> 16);
+    descriptor.objectId[2] = static_cast<u8>(objectId >> 8);
+    descriptor.objectId[3] = static_cast<u8>(objectId);
+    descriptor.nameKey[0] = static_cast<u8>(nameKey >> 8);
+    descriptor.nameKey[1] = static_cast<u8>(nameKey);
+}
+
+u8 captureYoshiState() {
+    if (!gpMarioOriginal || !gpMarioOriginal->mYoshi ||
+        gpMarioOriginal->mYoshi->mState != TYoshi::MOUNTED) {
+        return SUSAMUNE_GHOST_V4_YOSHI_NONE;
+    }
+    const s8 color = gpMarioOriginal->mYoshi->mType;
+    return color >= TYoshi::GREEN && color <= TYoshi::PINK
+        ? static_cast<u8>(color + 1)
+        : SUSAMUNE_GHOST_V4_YOSHI_UNKNOWN;
+}
+
+u8 captureHeldObject(Track &track) {
+    if (!gpMarioOriginal || !gpMarioOriginal->mHeldObject) return 0;
+    const TTakeActor *held = gpMarioOriginal->mHeldObject;
+    if (held->mObjectID == 0 && held->mKeyCode == 0) {
+        track.attachmentFlags |=
+            SUSAMUNE_GHOST_V4_ATTACHMENT_HELD_OVERFLOW;
+        return SUSAMUNE_GHOST_V4_HELD_UNKNOWN;
+    }
+    for (u8 i = 0; i < track.attachmentCount; i++) {
+        if (attachmentDescriptorEquals(track.attachments[i], held->mObjectID,
+                                       held->mKeyCode)) {
+            return static_cast<u8>(i + 1);
+        }
+    }
+    if (track.attachmentCount <
+        SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_COUNT) {
+        setAttachmentDescriptor(track.attachments[track.attachmentCount],
+                                held->mObjectID, held->mKeyCode);
+        return static_cast<u8>(++track.attachmentCount);
+    }
+    track.attachmentFlags |=
+        SUSAMUNE_GHOST_V4_ATTACHMENT_HELD_OVERFLOW;
+    return SUSAMUNE_GHOST_V4_HELD_UNKNOWN;
 }
 
 bool captureAnimation(u16 *idOut, u16 *phaseOut) {
@@ -729,12 +878,15 @@ bool appendSample(s32 qf) {
     }
 
     Sample &sample = sRecord.samples[sRecord.count];
+    memset(&sample, 0, sizeof(sample));
     writeS24(sample.x, x);
     writeS24(sample.y, y);
     writeS24(sample.z, z);
     sample.yaw = gpMarioOriginal->mModelAngleY;
     sample.deltaQf = static_cast<u16>(delta);
     setSampleAnimation(sample, animationId, animationPhase);
+    setSampleAttachments(sample, captureYoshiState(),
+                         captureHeldObject(sRecord));
     if (segment->sampleCount == 0) {
         segment->startQf = static_cast<u32>(qf);
         if (sRecord.count == 0) sRecord.startQf = static_cast<u32>(qf);
@@ -861,10 +1013,10 @@ bool finishTrackAt(s32 qf) {
                     terminal, beforeAnimation,
                     beforeAnimation == afterAnimation
                         ? interpolateAnimationPhase(
-                              sampleAnimationPhase(before),
-                              sampleAnimationPhase(after), numerator,
+                              sampleAnimationPhase(before, sRecord.formatVersion),
+                              sampleAnimationPhase(after, sRecord.formatVersion), numerator,
                               denominator)
-                        : sampleAnimationPhase(before));
+                        : sampleAnimationPhase(before, sRecord.formatVersion));
                 terminal.deltaQf = static_cast<u16>(numerator);
                 sRecord.count = index + 2;
             }
@@ -1023,6 +1175,9 @@ void selectPlaybackSegment(u16 index) {
 
 void updatePlayback(s32 qf) {
     sGhostVisible = false;
+    sGhostHeldObjectId = 0;
+    sGhostHeldNameKey = 0;
+    sGhostYoshi = SUSAMUNE_GHOST_V4_YOSHI_NONE;
     const int segmentIndex = playbackSegmentAt(qf);
     if (segmentIndex < 0) return;
     const Segment &segment = sPlayback.segments[segmentIndex];
@@ -1050,7 +1205,9 @@ void updatePlayback(s32 qf) {
                            samplePosition(sampleZ(a)));
         sGhostYaw = a.yaw;
         sGhostAnimationId = sampleAnimationId(a);
-        sGhostAnimationPhase = sampleAnimationPhase(a);
+        sGhostAnimationPhase = sampleAnimationPhase(a, sPlayback.formatVersion);
+        sampleAttachments(sPlayback, a, &sGhostYoshi,
+                          &sGhostHeldObjectId, &sGhostHeldNameKey);
         sGhostVisible = true;
         return;
     }
@@ -1078,9 +1235,12 @@ void updatePlayback(s32 qf) {
     sGhostAnimationId = sampleAnimationId(a);
     sGhostAnimationPhase = sampleAnimationId(a) == sampleAnimationId(b)
         ? interpolateAnimationPhase(
-              sampleAnimationPhase(a), sampleAnimationPhase(b),
+              sampleAnimationPhase(a, sPlayback.formatVersion),
+              sampleAnimationPhase(b, sPlayback.formatVersion),
               qf - sPlaybackCursorQf, nextQf - sPlaybackCursorQf)
-        : sampleAnimationPhase(a);
+        : sampleAnimationPhase(a, sPlayback.formatVersion);
+    sampleAttachments(sPlayback, a, &sGhostYoshi,
+                      &sGhostHeldObjectId, &sGhostHeldNameKey);
     sGhostVisible = true;
 }
 
@@ -1092,9 +1252,11 @@ void updateProvisionalPlayback(s32 qf) {
 
 bool sampleObserverTrack(const Track &track, u16 segmentIndex, s32 qf,
                          u32 *cursor, s32 *cursorQf, TVec3f *position,
-                         s16 *yaw, u16 *animationId, u16 *animationPhase) {
+                         s16 *yaw, u16 *animationId, u16 *animationPhase,
+                         u8 *yoshi, u32 *heldObjectId, u16 *heldNameKey) {
     if (!cursor || !cursorQf || !position || !yaw || !animationId ||
-        !animationPhase || segmentIndex >= track.segmentCount) {
+        !animationPhase || !yoshi || !heldObjectId || !heldNameKey ||
+        segmentIndex >= track.segmentCount) {
         return false;
     }
     const Segment &segment = track.segments[segmentIndex];
@@ -1122,7 +1284,8 @@ bool sampleObserverTrack(const Track &track, u16 segmentIndex, s32 qf,
                       samplePosition(sampleZ(a)));
         *yaw = a.yaw;
         *animationId = sampleAnimationId(a);
-        *animationPhase = sampleAnimationPhase(a);
+        *animationPhase = sampleAnimationPhase(a, track.formatVersion);
+        sampleAttachments(track, a, yoshi, heldObjectId, heldNameKey);
         return true;
     }
 
@@ -1143,9 +1306,11 @@ bool sampleObserverTrack(const Track &track, u16 segmentIndex, s32 qf,
     *yaw = static_cast<s16>(a.yaw + yawDelta * elapsed / span);
     *animationId = sampleAnimationId(a);
     *animationPhase = sampleAnimationId(a) == sampleAnimationId(b)
-        ? interpolateAnimationPhase(sampleAnimationPhase(a),
-                                    sampleAnimationPhase(b), elapsed, span)
-        : sampleAnimationPhase(a);
+        ? interpolateAnimationPhase(sampleAnimationPhase(a, track.formatVersion),
+                                    sampleAnimationPhase(b, track.formatVersion),
+                                    elapsed, span)
+        : sampleAnimationPhase(a, track.formatVersion);
+    sampleAttachments(track, a, yoshi, heldObjectId, heldNameKey);
     return true;
 }
 
@@ -1178,13 +1343,16 @@ void updateObserverVisual(s32 qf) {
     sGhostVisible = sampleObserverTrack(
         sPlayback, sObserverPrimarySegment, qf, &sPlaybackCursor,
         &sPlaybackCursorQf, &sGhostPosition, &sGhostYaw,
-        &sGhostAnimationId, &sGhostAnimationPhase);
+        &sGhostAnimationId, &sGhostAnimationPhase, &sGhostYoshi,
+        &sGhostHeldObjectId, &sGhostHeldNameKey);
     sSecondaryGhostVisible = observerHasTwo() &&
         sampleObserverTrack(
             sObserverSecondary, sObserverSecondarySegment, qf,
             &sObserverSecondaryCursor, &sObserverSecondaryCursorQf,
             &sSecondaryGhostPosition, &sSecondaryGhostYaw,
-            &sSecondaryGhostAnimationId, &sSecondaryGhostAnimationPhase);
+            &sSecondaryGhostAnimationId, &sSecondaryGhostAnimationPhase,
+            &sSecondaryGhostYoshi, &sSecondaryGhostHeldObjectId,
+            &sSecondaryGhostHeldNameKey);
 }
 
 bool observerRoutesCompatible() {
@@ -1357,6 +1525,17 @@ void anchorObserverMario() {
     } else {
         target = sSecondaryGhostPosition;
         yaw = sSecondaryGhostYaw;
+    }
+
+    // Moving Mario externally must carry the camera's smoothed Y anchors too.
+    if (gpCamera && gpCamera == sObserverCamera) {
+        Vec cameraMove = {
+            0.0f, target.y - sObserverMario->mTranslation.y, 0.0f
+        };
+        if (cameraMove.y != 0.0f) {
+            gpCamera->addMoveCameraAndMario(cameraMove);
+            sObserverCameraYOffset += cameraMove.y;
+        }
     }
 
     // TViewObj::testPerform subtracts this mask from each incoming cue.
@@ -1723,11 +1902,26 @@ bool validSamplePosition(const Sample &sample) {
            sampleZ(sample) <= SUSAMUNE_GHOST_MAX_POSITION_FIXED;
 }
 
-bool validSampleAnimation(const Sample &sample) {
+bool validSampleAnimation(const Sample &sample, u16 version,
+                          u8 attachmentCount, u16 attachmentFlags) {
     const u32 packed = readU24(sample.animation);
-    return !(packed & SUSAMUNE_GHOST_ANIMATION_RESERVED_MASK) &&
-           sampleAnimationId(sample) <=
-               SUSAMUNE_GHOST_ANIMATION_ID_MAX;
+    if (sampleAnimationId(sample) > SUSAMUNE_GHOST_ANIMATION_ID_MAX) {
+        return false;
+    }
+    if (version == SUSAMUNE_GHOST_FILE_VERSION_V3) {
+        return !(packed & SUSAMUNE_GHOST_ANIMATION_RESERVED_MASK);
+    }
+    if (version != SUSAMUNE_GHOST_FILE_VERSION_V4) return false;
+    const u8 yoshi = static_cast<u8>(
+        (packed >> SUSAMUNE_GHOST_V4_YOSHI_SHIFT) &
+        SUSAMUNE_GHOST_V4_YOSHI_MASK);
+    const u8 held = static_cast<u8>(
+        packed & SUSAMUNE_GHOST_V4_HELD_INDEX_MASK);
+    return yoshi <= SUSAMUNE_GHOST_V4_YOSHI_UNKNOWN &&
+           (held == 0 || (held <= attachmentCount) ||
+            (held == SUSAMUNE_GHOST_V4_HELD_UNKNOWN &&
+             (attachmentFlags &
+              SUSAMUNE_GHOST_V4_ATTACHMENT_HELD_OVERFLOW)));
 }
 
 bool validCanonicalFile(const void *data, u32 size,
@@ -1739,21 +1933,29 @@ bool validCanonicalFile(const void *data, u32 size,
 
     SusamuneGhostFileHeader header;
     memcpy(&header, data, sizeof(header));
+    const bool v3 = header.version == SUSAMUNE_GHOST_FILE_VERSION_V3;
+    const bool v4 = header.version == SUSAMUNE_GHOST_FILE_VERSION_V4;
+    if (!v3 && !v4) return false;
+    const u32 supportedFeatures = v4
+        ? SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V4
+        : SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V3;
     const bool foreign = header.gameId != runningGameId() ||
                          header.region != runningRegion();
     if (header.magic != SUSAMUNE_GHOST_FILE_MAGIC ||
-        header.version != SUSAMUNE_GHOST_FILE_VERSION_V3 ||
         header.headerSize != SUSAMUNE_GHOST_FILE_HEADER_SIZE ||
         header.fileSize != size ||
-        size > SUSAMUNE_GHOST_V3_MAX_FILE_SIZE ||
+        size > SUSAMUNE_GHOST_V4_MAX_FILE_SIZE ||
         header.checksumKind != SUSAMUNE_GHOST_CHECKSUM_CRC32 ||
-        header.requiredFeatures &
-            ~SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V3 ||
+        (header.requiredFeatures & ~supportedFeatures) ||
+        (v4 && header.requiredFeatures !=
+                   SUSAMUNE_GHOST_REQUIRED_EXTENDED_CODEC) ||
         !validGameRegionPair(header.gameId, header.region) ||
         header.discRevision != SUSAMUNE_GHOST_DISC_REVISION ||
         header.sourceProfile >= SUSAMUNE_GHOST_PROFILE_COUNT ||
         header.recordingMode != SUSAMUNE_GHOST_RECORDING_POSE_QF ||
-        header.sampleCodec != SUSAMUNE_GHOST_CODEC_RAW ||
+        header.sampleCodec != (v4
+            ? SUSAMUNE_GHOST_CODEC_POSE_ATTACHMENTS
+            : SUSAMUNE_GHOST_CODEC_RAW) ||
         header.sampleStride != SUSAMUNE_GHOST_POSE_SAMPLE_SIZE ||
         header.sampleIntervalQf != SUSAMUNE_GHOST_TRANSFORM_INTERVAL_QF ||
         !validRouteTuple(header.routeArea, header.routeEpisode,
@@ -1785,26 +1987,58 @@ bool validCanonicalFile(const void *data, u32 size,
     const u8 *bytes = static_cast<const u8 *>(data);
     const u32 sampleDataSize =
         header.sampleCount * SUSAMUNE_GHOST_POSE_SAMPLE_SIZE;
-    SusamuneGhostFileV3Extension extension;
+    SusamuneGhostFileV4Extension extension;
     memcpy(&extension, header.reserved, sizeof(extension));
     if (extension.segmentCount == 0 ||
-        extension.segmentCount > SUSAMUNE_GHOST_V3_MAX_SEGMENTS ||
-        extension.segmentSize != SUSAMUNE_GHOST_V3_SEGMENT_SIZE ||
+        extension.segmentCount > SUSAMUNE_GHOST_V4_MAX_SEGMENTS ||
+        extension.segmentSize != SUSAMUNE_GHOST_V4_SEGMENT_SIZE ||
         extension.segmentTableOffset !=
-            SUSAMUNE_GHOST_V3_SEGMENT_TABLE_OFFSET ||
+            SUSAMUNE_GHOST_V4_SEGMENT_TABLE_OFFSET ||
         extension.segmentTableSize !=
-            SUSAMUNE_GHOST_V3_SEGMENT_TABLE_SIZE ||
+            SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE ||
         extension.sampleDataOffset !=
-            SUSAMUNE_GHOST_V3_SAMPLE_DATA_OFFSET ||
+            SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET ||
         extension.sampleDataSize != sampleDataSize ||
         header.payloadSize !=
-            SUSAMUNE_GHOST_V3_SEGMENT_TABLE_SIZE + sampleDataSize ||
+            SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE + sampleDataSize ||
         header.fileSize != extension.sampleDataOffset + sampleDataSize) {
         return false;
     }
-    for (u32 i = 0; i < sizeof(extension.reserved) /
-                            sizeof(extension.reserved[0]); i++) {
-        if (extension.reserved[i] != 0) return false;
+    if (v3) {
+        const u8 *reserved = header.reserved + 24;
+        for (u32 i = 0; i < 48; i++) {
+            if (reserved[i] != 0) return false;
+        }
+    } else {
+        if (extension.attachmentCount >
+                SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_COUNT ||
+            extension.attachmentSize !=
+                SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE ||
+            (extension.attachmentFlags &
+             ~SUSAMUNE_GHOST_V4_ATTACHMENT_FLAGS) ||
+            extension.attachmentReserved != 0) {
+            return false;
+        }
+        for (u8 i = 0;
+             i < SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_COUNT; i++) {
+            const u8 *descriptor = reinterpret_cast<const u8 *>(
+                &extension.attachments[i]);
+            bool zero = true;
+            for (u32 j = 0;
+                 j < SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE; j++) {
+                if (descriptor[j] != 0) zero = false;
+            }
+            if ((i < extension.attachmentCount) == zero) return false;
+            if (i < extension.attachmentCount) {
+                for (u8 prior = 0; prior < i; prior++) {
+                    if (memcmp(&extension.attachments[prior],
+                               &extension.attachments[i],
+                               sizeof(extension.attachments[i])) == 0) {
+                        return false;
+                    }
+                }
+            }
+        }
     }
     if (extension.segmentTableChecksum !=
         crc32(bytes + extension.segmentTableOffset,
@@ -1825,7 +2059,7 @@ bool validCanonicalFile(const void *data, u32 size,
     u32 coveredSamples = 0;
     u32 priorEndQf = 0;
     u32 finalStartQf = 0;
-    for (u16 i = 0; i < SUSAMUNE_GHOST_V3_MAX_SEGMENTS; i++) {
+    for (u16 i = 0; i < SUSAMUNE_GHOST_V4_MAX_SEGMENTS; i++) {
             SusamuneGhostSegment segment;
             memcpy(&segment,
                    bytes + extension.segmentTableOffset +
@@ -1874,7 +2108,9 @@ bool validCanonicalFile(const void *data, u32 size,
                            (segment.firstSample + j) * sizeof(Sample),
                        sizeof(sample));
                 if (!validSamplePosition(sample) ||
-                    !validSampleAnimation(sample)) {
+                    !validSampleAnimation(sample, header.version,
+                                          v4 ? extension.attachmentCount : 0,
+                                          v4 ? extension.attachmentFlags : 0)) {
                     return false;
                 }
                 if (j == 0) {
@@ -1913,7 +2149,7 @@ void installCanonicalTrack(Track &track, const void *data,
                            const SusamuneGhostFileHeader &header) {
     clearTrack(track);
     const u8 *bytes = static_cast<const u8 *>(data);
-    SusamuneGhostFileV3Extension extension;
+    SusamuneGhostFileV4Extension extension;
     memcpy(&extension, header.reserved, sizeof(extension));
     memcpy(track.samples, bytes + extension.sampleDataOffset,
            header.sampleCount * sizeof(Sample));
@@ -1930,6 +2166,13 @@ void installCanonicalTrack(Track &track, const void *data,
     track.episode = header.routeEpisode;
     track.routeParentArea = header.routeParentArea;
     track.routeFlags = header.routeFlags;
+    track.formatVersion = header.version;
+    if (header.version == SUSAMUNE_GHOST_FILE_VERSION_V4) {
+        track.attachmentFlags = extension.attachmentFlags;
+        track.attachmentCount = extension.attachmentCount;
+        memcpy(track.attachments, extension.attachments,
+               sizeof(track.attachments));
+    }
     track.valid = true;
     track.completed =
         header.resultQf != SUSAMUNE_GHOST_RESULT_QF_NONE &&
@@ -1998,9 +2241,11 @@ void drawMarker(Menu *menu, const TVec3f &position, bool secondary,
             y + unit[i * 2 + 1] * r / 10);
     }
 
+    const u8 fillAlpha = alpha == 255
+        ? 255 : static_cast<u8>(alpha >> (secondary ? 3 : 2));
     const JUtility::TColor fill = secondary
-        ? JUtility::TColor(30, 155, 205, alpha >> 3)
-        : JUtility::TColor(70, 210, 255, alpha >> 2);
+        ? JUtility::TColor(30, 155, 205, fillAlpha)
+        : JUtility::TColor(70, 210, 255, fillAlpha);
     const JUtility::TColor line = secondary
         ? JUtility::TColor(190, 250, 255, alpha)
         : JUtility::TColor(110, 235, 255, alpha);
@@ -2053,6 +2298,9 @@ void init() {
     sGhostYaw = 0;
     sGhostAnimationId = 0;
     sGhostAnimationPhase = 0;
+    sGhostHeldObjectId = 0;
+    sGhostHeldNameKey = 0;
+    sGhostYoshi = SUSAMUNE_GHOST_V4_YOSHI_NONE;
     sGhostIdSerial = 0;
     resetObserverRuntime();
 }
@@ -2503,19 +2751,24 @@ bool exportLatest(void *out, u32 capacity, u8 sourceProfile,
         track->parentEpisode < SUSAMUNE_GHOST_ROUTE_VARIANT_NONE ||
         track->parentEpisode > SUSAMUNE_GHOST_ROUTE_VARIANT_MAX ||
         track->segmentCount == 0 || track->segmentCount > kMaxSegments ||
-        track->endQf < track->startQf) {
+        track->endQf < track->startQf ||
+        track->formatVersion != SUSAMUNE_GHOST_FILE_VERSION_V4 ||
+        track->attachmentCount >
+            SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_COUNT ||
+        (track->attachmentFlags &
+         ~SUSAMUNE_GHOST_V4_ATTACHMENT_FLAGS)) {
         return false;
     }
 
     const u32 duration = track->endQf - track->startQf;
     const u32 sampleDataSize = track->count * sizeof(Sample);
-    const u32 sampleDataOffset = SUSAMUNE_GHOST_V3_SAMPLE_DATA_OFFSET;
+    const u32 sampleDataOffset = SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET;
     const u32 payloadSize = sampleDataSize +
-        SUSAMUNE_GHOST_V3_SEGMENT_TABLE_SIZE;
+        SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE;
     const u32 fileSize = sampleDataOffset + sampleDataSize;
     if (duration > SUSAMUNE_GHOST_MAX_DURATION_QF ||
         sampleDataSize > SUSAMUNE_GHOST_MAX_SAMPLE_DATA_SIZE ||
-        payloadSize > SUSAMUNE_GHOST_V3_MAX_PAYLOAD_SIZE ||
+        payloadSize > SUSAMUNE_GHOST_V4_MAX_PAYLOAD_SIZE ||
         fileSize > capacity) {
         return false;
     }
@@ -2523,23 +2776,23 @@ bool exportLatest(void *out, u32 capacity, u8 sourceProfile,
     u8 *bytes = static_cast<u8 *>(out);
     memset(bytes, 0, fileSize);
     memcpy(bytes + sampleDataOffset, track->samples, sampleDataSize);
-    memcpy(bytes + SUSAMUNE_GHOST_V3_SEGMENT_TABLE_OFFSET,
+    memcpy(bytes + SUSAMUNE_GHOST_V4_SEGMENT_TABLE_OFFSET,
            track->segments, track->segmentCount * sizeof(Segment));
 
     SusamuneGhostFileHeader header;
     memset(&header, 0, sizeof(header));
     header.magic = SUSAMUNE_GHOST_FILE_MAGIC;
-    header.version = SUSAMUNE_GHOST_FILE_VERSION_V3;
+    header.version = SUSAMUNE_GHOST_FILE_VERSION_V4;
     header.headerSize = SUSAMUNE_GHOST_FILE_HEADER_SIZE;
     header.fileSize = fileSize;
-    header.requiredFeatures = 0;
+    header.requiredFeatures = SUSAMUNE_GHOST_REQUIRED_EXTENDED_CODEC;
     header.runFlags = track->runFlags;
     header.gameId = runningGameId();
     header.discRevision = SUSAMUNE_GHOST_DISC_REVISION;
     header.region = runningRegion();
     header.sourceProfile = sourceProfile;
     header.recordingMode = SUSAMUNE_GHOST_RECORDING_POSE_QF;
-    header.sampleCodec = SUSAMUNE_GHOST_CODEC_RAW;
+    header.sampleCodec = SUSAMUNE_GHOST_CODEC_POSE_ATTACHMENTS;
     header.sampleStride = SUSAMUNE_GHOST_POSE_SAMPLE_SIZE;
     header.sampleIntervalQf = SUSAMUNE_GHOST_TRANSFORM_INTERVAL_QF;
     header.routeArea = track->area;
@@ -2555,18 +2808,24 @@ bool exportLatest(void *out, u32 capacity, u8 sourceProfile,
     header.durationQf = duration;
     header.sampleCount = track->count;
     header.payloadSize = payloadSize;
-    SusamuneGhostFileV3Extension extension;
+    SusamuneGhostFileV4Extension extension;
     memset(&extension, 0, sizeof(extension));
     extension.segmentCount = track->segmentCount;
-    extension.segmentSize = SUSAMUNE_GHOST_V3_SEGMENT_SIZE;
+    extension.segmentSize = SUSAMUNE_GHOST_V4_SEGMENT_SIZE;
     extension.segmentTableOffset =
-        SUSAMUNE_GHOST_V3_SEGMENT_TABLE_OFFSET;
-    extension.segmentTableSize = SUSAMUNE_GHOST_V3_SEGMENT_TABLE_SIZE;
-    extension.sampleDataOffset = SUSAMUNE_GHOST_V3_SAMPLE_DATA_OFFSET;
+        SUSAMUNE_GHOST_V4_SEGMENT_TABLE_OFFSET;
+    extension.segmentTableSize = SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE;
+    extension.sampleDataOffset = SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET;
     extension.sampleDataSize = sampleDataSize;
     extension.segmentTableChecksum = crc32(
         bytes + extension.segmentTableOffset,
         extension.segmentTableSize);
+    extension.attachmentCount = track->attachmentCount;
+    extension.attachmentSize =
+        SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE;
+    extension.attachmentFlags = track->attachmentFlags;
+    memcpy(extension.attachments, track->attachments,
+           sizeof(extension.attachments));
     memcpy(header.reserved, &extension, sizeof(extension));
 
     const OSTime ticks = OSGetTime();
@@ -2788,6 +3047,9 @@ bool visualState(VisualState *out) {
     out->yaw = sGhostYaw;
     out->animationId = sGhostAnimationId;
     out->animationPhase = sGhostAnimationPhase;
+    out->heldObjectId = sGhostHeldObjectId;
+    out->heldNameKey = sGhostHeldNameKey;
+    out->yoshi = sGhostYoshi;
     out->visible = sGhostVisible;
     return true;
 }
@@ -2800,6 +3062,9 @@ bool secondaryVisualState(VisualState *out) {
     out->yaw = sSecondaryGhostYaw;
     out->animationId = sSecondaryGhostAnimationId;
     out->animationPhase = sSecondaryGhostAnimationPhase;
+    out->heldObjectId = sSecondaryGhostHeldObjectId;
+    out->heldNameKey = sSecondaryGhostHeldNameKey;
+    out->yoshi = sSecondaryGhostYoshi;
     out->visible = sSecondaryGhostVisible;
     return true;
 }
@@ -2915,6 +3180,22 @@ bool hasUnsavedPBToken(u32 token) {
             sRecord.pbToken == token) ||
            (sPlayback.valid && sPlayback.pb && !sPlayback.saved &&
             sPlayback.pbToken == token);
+}
+
+bool unprotectUnsavedPB(u32 token) {
+    if (token == 0) return false;
+    Track *track = nullptr;
+    if (sRecord.valid && sRecord.pb && !sRecord.saved &&
+        sRecord.pbToken == token) {
+        track = &sRecord;
+    } else if (sPlayback.valid && sPlayback.pb && !sPlayback.saved &&
+               sPlayback.pbToken == token) {
+        track = &sPlayback;
+    }
+    if (!track) return false;
+    track->pb = false;
+    track->pbToken = 0;
+    return true;
 }
 
 bool discardUnsavedPB(u32 token) {

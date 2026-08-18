@@ -76,7 +76,13 @@ string(TOUPPER "${VERS_PRIMARY}" VERS_PRIMARY_UPPER)
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "Where to load the iso from by default in meta.xml")
 set_property(CACHE LAUNCHER_DEFAULT_SOURCE PROPERTY STRINGS di sd usb)
 if(LAUNCHER_VERSION STREQUAL "V1.2.0" OR
-   LAUNCHER_VERSION MATCHES "^V2\\.0\\.0" OR
+   LAUNCHER_VERSION STREQUAL "V2.0.0 \"Ghosts of Delfino\"" OR
+   LAUNCHER_VERSION STREQUAL "V2.0.1 \"Ghosts of Delfino\"" OR
+   LAUNCHER_VERSION STREQUAL "V2.0.2 \"Ghosts of Delfino\"" OR
+   LAUNCHER_VERSION STREQUAL "V2.0.3 \"Ghosts of Delfino\"" OR
+   LAUNCHER_VERSION MATCHES "^V2\\.0\\.0 Gate [0-9]+" OR
+   LAUNCHER_VERSION MATCHES "^V2\\.0\\.0 .*Pre-release [0-9]+$" OR
+   LAUNCHER_VERSION MATCHES "^V2\\.0\\.0 .*Release Candidate [0-9]+$" OR
    LAUNCHER_VERSION MATCHES "^V2\\.1\\.0 Pre-Release 1")
     unset(LAUNCHER_VERSION CACHE)
 endif()
