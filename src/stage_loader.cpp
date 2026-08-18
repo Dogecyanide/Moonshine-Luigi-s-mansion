@@ -1,6 +1,7 @@
 #include "susamune/stage_loader.hxx"
 
 #include "Dolphin/mem.h"
+#include "Dolphin/OS.h"
 #include "Dolphin/printf.h"
 #include "Dolphin/string.h"
 #include "JSystem/JUtility/JUTGamePad.hxx"
@@ -14,6 +15,7 @@
 #include "susamune/mem2_map.h"
 #include "susamune/qft_timer.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/susamune_cfg.h"
 #include "susamune/warp_wheel.hxx"
 
 namespace {
@@ -52,7 +54,14 @@ enum {
     kRetryDelayFrames = 90,
     kResultDisplayFrames = 240,
     kModalMask = JUTGamePad::A | JUTGamePad::B | JUTGamePad::START,
+    kPlaylistSaveTimeoutFrames = 30 * 15,
 };
+
+u32 sPlaylistSaveSeq;
+u32 sPlaylistWaitFrames;
+u32 sPlaylistLastError;
+bool sPlaylistsAvailable;
+bool sPlaylistSavePending;
 
 struct StageLoaderRuntime {
     u64 totalObservedActiveQf;
@@ -72,8 +81,6 @@ struct StageLoaderRuntime {
     u16 retryFrames;
     u16 displayFrames;
     u16 modalPrevious;
-    u8 draftQueue[StageLoader::QUEUE_CAPACITY];
-    u8 activeQueue[StageLoader::QUEUE_CAPACITY];
     u8 draftCount;
     u8 activeCount;
     u8 activeIndex;
@@ -86,12 +93,23 @@ struct StageLoaderRuntime {
     u8 holdingDeparture;
 };
 
+struct StageLoaderQueues {
+    u8 draft[StageLoader::QUEUE_CAPACITY];
+    u8 active[StageLoader::QUEUE_CAPACITY];
+    u8 reserved[SUSAMUNE_STAGE_LOADER_QUEUE_SIZE -
+                StageLoader::QUEUE_CAPACITY * 2];
+};
+
 #define sRuntime (*reinterpret_cast<StageLoaderRuntime *>( \
     SUSAMUNE_MEM2_STAGE_LOADER_RUNTIME_PPC_BASE))
-static_assert(sizeof(StageLoaderRuntime) == 136,
+#define sQueues (*reinterpret_cast<StageLoaderQueues *>( \
+    SUSAMUNE_MEM2_STAGE_LOADER_QUEUE_PPC_BASE))
+static_assert(sizeof(StageLoaderRuntime) == 72,
               "Stage Loader runtime layout changed");
 static_assert(sizeof(StageLoaderRuntime) <= SUSAMUNE_STAGE_LOADER_RUNTIME_SIZE,
               "Stage Loader runtime exceeds its MEM2 window");
+static_assert(sizeof(StageLoaderQueues) == SUSAMUNE_STAGE_LOADER_QUEUE_SIZE,
+              "Stage Loader queues must exactly fill their MEM2 window");
 
 void resetSession() {
     sRuntime.totalObservedActiveQf = 0;
@@ -111,7 +129,7 @@ void resetSession() {
     sRuntime.retryFrames = 0;
     sRuntime.displayFrames = 0;
     sRuntime.modalPrevious = 0;
-    memset(sRuntime.activeQueue, 0, sizeof(sRuntime.activeQueue));
+    memset(sQueues.active, 0, sizeof(sQueues.active));
     sRuntime.activeCount = 0;
     sRuntime.activeIndex = 0;
     sRuntime.lastEntry = 0;
@@ -125,9 +143,72 @@ void resetSession() {
 
 void resetAll() {
     memset(&sRuntime, 0, sizeof(sRuntime));
+    memset(&sQueues, 0, sizeof(sQueues));
     sRuntime.targetQf = -1;
     sRuntime.lastQf = -1;
     sRuntime.lastObservedQf = -1;
+}
+
+bool validPlaylistMailbox(
+    const volatile SusamuneStagePlaylistsCfg *playlists) {
+    return playlists->magic == SUSAMUNE_STAGE_PLAYLIST_MAGIC &&
+           playlists->version == SUSAMUNE_STAGE_PLAYLIST_VERSION &&
+           playlists->slotCount == SUSAMUNE_STAGE_PLAYLIST_COUNT &&
+           playlists->capacity == SUSAMUNE_STAGE_PLAYLIST_CAPACITY;
+}
+
+void initPlaylistPersistence() {
+    sPlaylistSaveSeq = 0;
+    sPlaylistWaitFrames = 0;
+    sPlaylistLastError = 0;
+    sPlaylistsAvailable = false;
+    sPlaylistSavePending = false;
+#if !IS_EMULATOR
+    volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
+    DCInvalidateRange((void *)cfg, 32);
+    if (cfg->magic != SUSAMUNE_CFG_MAGIC ||
+        cfg->version != SUSAMUNE_CFG_VERSION ||
+        !(cfg->flags & SUSAMUNE_CFG_FLAG_STAGE_PLAYLISTS)) {
+        return;
+    }
+
+    volatile SusamuneStagePlaylistsCfg *playlists =
+        SUSAMUNE_STAGE_PLAYLIST_PPC_PTR;
+    DCInvalidateRange((void *)playlists, sizeof(*playlists));
+    if (!validPlaylistMailbox(playlists) ||
+        !(playlists->flags & SUSAMUNE_STAGE_PLAYLIST_FLAG_WRITABLE)) {
+        return;
+    }
+    sPlaylistSaveSeq = playlists->saveSeq;
+    sPlaylistsAvailable = true;
+#endif
+}
+
+void pollPlaylistSave() {
+#if !IS_EMULATOR
+    if (!sPlaylistSavePending) return;
+    volatile SusamuneStagePlaylistsCfg *playlists =
+        SUSAMUNE_STAGE_PLAYLIST_PPC_PTR;
+    DCInvalidateRange((void *)&playlists->ackSeq, 32);
+    if (playlists->ackSeq == sPlaylistSaveSeq) {
+        sPlaylistSavePending = false;
+        sPlaylistWaitFrames = 0;
+        sPlaylistLastError = playlists->status;
+        if (gMenu) {
+            if (sPlaylistLastError == 0) {
+                gMenu->toast("Playlist saved");
+            } else {
+                char message[40];
+                snprintf(message, sizeof(message), "Playlist save failed: %u",
+                         (unsigned)sPlaylistLastError);
+                gMenu->toast(message);
+            }
+        }
+    } else if (++sPlaylistWaitFrames == kPlaylistSaveTimeoutFrames + 1) {
+        sPlaylistLastError = 0xffffffffu;
+        if (gMenu) gMenu->toast("Playlist save timed out");
+    }
+#endif
 }
 
 void incrementSaturated(u32 &value) {
@@ -141,7 +222,7 @@ void addSaturated(u64 &total, u64 amount) {
 
 int expectedEntry() {
     return sRuntime.activeIndex < sRuntime.activeCount
-               ? sRuntime.activeQueue[sRuntime.activeIndex]
+               ? sQueues.active[sRuntime.activeIndex]
                : -1;
 }
 
@@ -518,6 +599,7 @@ namespace StageLoader {
 
 void init() {
     resetAll();
+    initPlaylistPersistence();
 }
 
 int queueCount() {
@@ -526,7 +608,7 @@ int queueCount() {
 
 int queueEntry(int position) {
     return position >= 0 && position < sRuntime.draftCount
-               ? sRuntime.draftQueue[position]
+               ? sQueues.draft[position]
                : -1;
 }
 
@@ -536,16 +618,16 @@ bool appendQueue(int entry) {
         return false;
     }
     // Repeated routes are distinct playlist positions by design.
-    sRuntime.draftQueue[sRuntime.draftCount++] = (u8)entry;
+    sQueues.draft[sRuntime.draftCount++] = (u8)entry;
     return true;
 }
 
 bool removeQueue(int position) {
     if (position < 0 || position >= sRuntime.draftCount) return false;
     for (int i = position + 1; i < sRuntime.draftCount; i++) {
-        sRuntime.draftQueue[i - 1] = sRuntime.draftQueue[i];
+        sQueues.draft[i - 1] = sQueues.draft[i];
     }
-    sRuntime.draftQueue[--sRuntime.draftCount] = 0;
+    sQueues.draft[--sRuntime.draftCount] = 0;
     return true;
 }
 
@@ -557,15 +639,95 @@ bool moveQueue(int position, int direction) {
         destination == position) {
         return false;
     }
-    const u8 entry = sRuntime.draftQueue[position];
-    sRuntime.draftQueue[position] = sRuntime.draftQueue[destination];
-    sRuntime.draftQueue[destination] = entry;
+    const u8 entry = sQueues.draft[position];
+    sQueues.draft[position] = sQueues.draft[destination];
+    sQueues.draft[destination] = entry;
     return true;
 }
 
 void clearQueue() {
-    memset(sRuntime.draftQueue, 0, sizeof(sRuntime.draftQueue));
+    memset(sQueues.draft, 0, sizeof(sQueues.draft));
     sRuntime.draftCount = 0;
+}
+
+bool loadCustomPlaylist(int slot) {
+#if IS_EMULATOR
+    (void)slot;
+    return false;
+#else
+    if (!sPlaylistsAvailable || slot < 0 ||
+        slot >= CUSTOM_PLAYLIST_COUNT) {
+        return false;
+    }
+    volatile SusamuneStagePlaylistsCfg *playlists =
+        SUSAMUNE_STAGE_PLAYLIST_PPC_PTR;
+    const u8 count = playlists->counts[slot];
+    if (count > QUEUE_CAPACITY) return false;
+    for (u8 i = 0; i < count; i++) {
+        if (playlists->entries[slot][i] >= ILing::count()) return false;
+    }
+
+    memset(sQueues.draft, 0, sizeof(sQueues.draft));
+    memcpy(sQueues.draft, (const void *)playlists->entries[slot], count);
+    sRuntime.draftCount = count;
+    return true;
+#endif
+}
+
+bool saveCustomPlaylist(int slot) {
+#if IS_EMULATOR
+    (void)slot;
+    return false;
+#else
+    if (!sPlaylistsAvailable || sPlaylistSavePending ||
+        sRuntime.draftCount == 0 || slot < 0 ||
+        slot >= CUSTOM_PLAYLIST_COUNT) {
+        return false;
+    }
+    volatile SusamuneStagePlaylistsCfg *playlists =
+        SUSAMUNE_STAGE_PLAYLIST_PPC_PTR;
+    playlists->counts[slot] = sRuntime.draftCount;
+    memset((void *)playlists->entries[slot], 0,
+           sizeof(playlists->entries[slot]));
+    memcpy((void *)playlists->entries[slot], sQueues.draft,
+           sRuntime.draftCount);
+    DCStoreRange((void *)playlists->counts,
+                 sizeof(playlists->counts) + sizeof(playlists->entries));
+
+    sPlaylistSaveSeq++;
+    playlists->saveSeq = sPlaylistSaveSeq;
+    DCStoreRange((void *)playlists, 32);
+    sPlaylistSavePending = true;
+    sPlaylistWaitFrames = 0;
+    sPlaylistLastError = 0;
+    return true;
+#endif
+}
+
+bool customPlaylistsAvailable() {
+    return sPlaylistsAvailable;
+}
+
+bool customPlaylistSavePending() {
+    return sPlaylistSavePending;
+}
+
+int customPlaylistEntryCount(int slot) {
+#if IS_EMULATOR
+    (void)slot;
+    return -1;
+#else
+    if (!sPlaylistsAvailable || slot < 0 ||
+        slot >= CUSTOM_PLAYLIST_COUNT) {
+        return -1;
+    }
+    const u8 count = SUSAMUNE_STAGE_PLAYLIST_PPC_PTR->counts[slot];
+    return count <= QUEUE_CAPACITY ? count : -1;
+#endif
+}
+
+u32 customPlaylistLastError() {
+    return sPlaylistLastError;
 }
 
 bool startLoader() {
@@ -575,7 +737,7 @@ bool startLoader() {
     }
     const u8 count = sRuntime.draftCount;
     resetSession();
-    memcpy(sRuntime.activeQueue, sRuntime.draftQueue, count);
+    memcpy(sQueues.active, sQueues.draft, count);
     sRuntime.activeCount = count;
     sRuntime.goal = count;
     sRuntime.mode = MODE_LOADER;
@@ -591,7 +753,7 @@ bool startStreak(int entry, u16 finishes, s32 targetQf) {
         return false;
     }
     resetSession();
-    sRuntime.activeQueue[0] = (u8)entry;
+    sQueues.active[0] = (u8)entry;
     sRuntime.activeCount = 1;
     sRuntime.goal = finishes;
     sRuntime.targetQf = targetQf;
@@ -641,6 +803,15 @@ bool resultOwnsInput() {
             liveResultDirector(gpMarDirector));
 }
 
+bool deferRestartInput() {
+    return sRuntime.state == STATE_RUNNING;
+}
+
+bool acceptDeferredRestart() {
+    return sRuntime.state == STATE_RUNNING &&
+           sRuntime.modalState == MODAL_NONE;
+}
+
 bool holdGameModeBeforeUpdate(TMarDirector *director) {
     const bool live = liveResultDirector(director);
 
@@ -666,6 +837,7 @@ bool holdGameModeBeforeUpdate(TMarDirector *director) {
 }
 
 void update() {
+    pollPlaylistSave();
     if (sRuntime.modalState == MODAL_VISIBLE) {
         updateModal();
         return;

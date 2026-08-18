@@ -82,14 +82,13 @@ bool             sTailPending;
 bool             sClassicInstantHeld;
 bool             sClassicInstantPending;
 bool             sClassicInstantSuppressed;
+u8               sDeferredRestart;
 bool             sDeathSequence;
 bool             sWaitForSave;
 u8               sSaveIdleFrames;
 bool             sCourseGuard;
 bool             sArmStartedIL;
 bool             sExitSelectorPending;
-bool             sPracticeReturnValid;
-LevelWarp::Dest  sPracticeReturn;
 bool             sShown;
 int              sArmedILIndex = -1;
 
@@ -105,6 +104,14 @@ enum PromptAction : u8 {
     PROMPT_RESTART_SAVE_FULL,
     PROMPT_SAVESTATE_LOAD,
     PROMPT_NATURAL_DEPARTURE,
+};
+
+enum DeferredRestart : u8 {
+    DEFERRED_RESTART_NONE,
+    DEFERRED_RESTART_KEEP,
+    DEFERRED_RESTART_FULL,
+    DEFERRED_RESTART_SAVE_KEEP,
+    DEFERRED_RESTART_SAVE_FULL,
 };
 
 enum PBSavePolicy : u8 {
@@ -165,31 +172,6 @@ u8 currentGameInt3() {
         value |= LevelWarp::Dest::POST_CORONA;
     }
     return value;
-}
-
-// Exit Area still has episode 0xff here; mirror moveStage's resolver so the
-// discard check predicts the concrete Plaza route without mutating game state.
-u8 retailPlazaScenario() {
-    TFlagManager *flags = TFlagManager::smInstance;
-    if (flags->getBool(kPostCoronaFlag)) return 2;
-
-    const u8 kFinalShines[] = {0x06, 0x10, 0x1a, 0x24,
-                               0x2e, 0x38, 0x42};
-    bool finalPlaza = true;
-    for (u32 i = 0; i < sizeof(kFinalShines); i++) {
-        if (!flags->getShineFlag(kFinalShines[i])) {
-            finalPlaza = false;
-            break;
-        }
-    }
-    if (finalPlaza) return 9;
-    if (flags->getBool(0x10389)) return 8;
-    if (flags->getBool(0x10386) && flags->getBool(0x10387)) {
-        return flags->getFlag(0x40000) >= 10 ? 7 : 6;
-    }
-    if (flags->getBool(0x10385)) return 5;
-    if (flags->getBool(0x10384)) return 1;
-    return 0;
 }
 
 enum ClassicCommand {
@@ -660,11 +642,18 @@ void updatePrompt() {
     }
 }
 
+void cancelExplicitPractice() {
+    const bool armedSelectedIL = sArmed && sArmStartedIL;
+    StageLoader::cancel();
+    if (sArmed) cancelArmedCourseWarp();
+    if (!armedSelectedIL) ILing::cancelWarpStart();
+    sDeferredRestart = DEFERRED_RESTART_NONE;
+}
+
 bool requestCourseWarp(const LevelWarp::Dest &dest) {
     // A new explicit destination replaces any still-card-delayed command now,
     // even if this request itself opens the PB guard.
-    StageLoader::cancel();
-    if (sArmed) cancelArmedCourseWarp();
+    cancelExplicitPractice();
     if (beginPrompt(PROMPT_WARP, dest)) return true;
     LevelWarp::warpToGuarded(dest, 0, false);
     return true;
@@ -686,6 +675,18 @@ void requestRestart(bool full, bool afterSave) {
     } else {
         LevelWarp::restart(true);
     }
+}
+
+void requestOrDeferRestart(bool full, bool afterSave) {
+    if (StageLoader::deferRestartInput()) {
+        sDeferredRestart = full
+            ? (afterSave ? DEFERRED_RESTART_SAVE_FULL
+                         : DEFERRED_RESTART_FULL)
+            : (afterSave ? DEFERRED_RESTART_SAVE_KEEP
+                         : DEFERRED_RESTART_KEEP);
+        return;
+    }
+    requestRestart(full, afterSave);
 }
 
 bool updateClassicInstant(TMarioGamePad *pad) {
@@ -723,8 +724,12 @@ bool updateClassicInstant(TMarioGamePad *pad) {
     case CLASSIC_WARP:
         requestCourseWarp(dest);
         return true;
-    case CLASSIC_RESTART_KEEP:    requestRestart(false, false); return true;
-    case CLASSIC_RESTART_DEFAULT: requestRestart(true, false); return true;
+    case CLASSIC_RESTART_KEEP:
+        requestOrDeferRestart(false, false);
+        return true;
+    case CLASSIC_RESTART_DEFAULT:
+        requestOrDeferRestart(true, false);
+        return true;
     case CLASSIC_WARP_LAST:
         if (sLastValid) requestCourseWarp(sLast);
         return true;
@@ -825,29 +830,6 @@ void armGuardedWarp(const LevelWarp::Dest &dest, bool overrideSource,
     sCourseGuard = true;
     sArmStartedIL = selectedIL;
     sArmedAction = selectedIL ? PROMPT_IL : PROMPT_WARP;
-
-    if (!selectedIL) return;
-
-    const TGameSequence *source = nullptr;
-    const TGameSequence &current = gpApplication.mCurrentScene;
-    const TGameSequence &previous = gpApplication.mPrevScene;
-    if (current.mAreaID == TGameSequence::AREA_DOLPIC &&
-        current.mEpisodeID <= 9) {
-        source = &current;
-    } else if (previous.mAreaID == TGameSequence::AREA_DOLPIC &&
-               previous.mEpisodeID <= 9) {
-        source = &previous;
-    }
-
-    sPracticeReturnValid = source != nullptr;
-    if (source) {
-        const u8 plazaFlags = TFlagManager::smInstance &&
-                TFlagManager::smInstance->getBool(kPostCoronaFlag)
-            ? LevelWarp::Dest::POST_CORONA : 0;
-        sPracticeReturn.area = TGameSequence::AREA_DOLPIC;
-        sPracticeReturn.episode = source->mEpisodeID;
-        sPracticeReturn.gameInt3 = plazaFlags;
-    }
 }
 
 void cancelArmedCourseWarp() {
@@ -922,7 +904,7 @@ SelectorResult applyTransitionSelector() {
         if (gMenu) gMenu->toast("Save PB ghost before chart warp");
         return SELECTOR_BLOCKED;
     }
-    if (!restartCommand) StageLoader::cancel();
+    if (!restartCommand) cancelExplicitPractice();
     applyDest(selected);
     if (parentRestart) overrideSourceForDefaultSpawn(selected);
     return SELECTOR_REDIRECTED;
@@ -939,10 +921,6 @@ void warpTo(const Dest &dest) {
 void warpToGuarded(const Dest &dest, u32 legacyToken, bool selectedIL) {
     (void)legacyToken;
     armGuardedWarp(dest, false, selectedIL);
-}
-
-void clearPracticeReturn() {
-    sPracticeReturnValid = false;
 }
 
 void warpFrom(const Dest &source, const Dest &dest) {
@@ -1626,6 +1604,24 @@ void suppressClassicInstantUntilRelease() {
     sClassicInstantPending = false;
 }
 
+void resolveDeferredRestart() {
+    const DeferredRestart deferred = (DeferredRestart)sDeferredRestart;
+    if (deferred == DEFERRED_RESTART_NONE) return;
+    sDeferredRestart = DEFERRED_RESTART_NONE;
+
+    // A result recorded later in the input frame owns the transition. Drop
+    // only that restart edge; unrelated controls keep their normal lifecycle.
+    if (!StageLoader::acceptDeferredRestart()) return;
+
+    switch (deferred) {
+    case DEFERRED_RESTART_KEEP:      requestRestart(false, false); break;
+    case DEFERRED_RESTART_FULL:      requestRestart(true, false); break;
+    case DEFERRED_RESTART_SAVE_KEEP: requestRestart(false, true); break;
+    case DEFERRED_RESTART_SAVE_FULL: requestRestart(true, true); break;
+    default: break;
+    }
+}
+
 bool resumePBPrompt(u32 token) {
     if (!sPromptSaving || sPrompt.action == PROMPT_NONE ||
         token == 0 || token != sPrompt.token ||
@@ -1645,29 +1641,27 @@ u8 guardExitArea(u8 nextState) {
     if (nextState != kPauseTitle && nextState != kPauseExitArea)
         return nextState;
 
-    StageLoader::cancel();
     LevelWarp::Dest dest = {0, 0, 0};
     PromptAction action = PROMPT_TITLE;
-    bool practiceReturn = false;
+    bool postCoronaReturn = false;
     if (nextState == kPauseExitArea) {
-        if (!TFlagManager::smInstance) return nextState;
-        practiceReturn = sPracticeReturnValid &&
-                         !gSettings.getBool(SETTING_AREA_LOCK);
-        if (practiceReturn) {
-            dest = sPracticeReturn;
-        } else {
-            const u8 plazaFlags =
-                TFlagManager::smInstance->getBool(kPostCoronaFlag)
-                    ? LevelWarp::Dest::POST_CORONA : 0;
+        if (!TFlagManager::smInstance) {
+            cancelExplicitPractice();
+            return nextState;
+        }
+        postCoronaReturn = !gSettings.getBool(SETTING_AREA_LOCK);
+        if (postCoronaReturn) {
+            // Scenario 2 plus the marker selects the stable post-Corona Plaza.
             dest.area = TGameSequence::AREA_DOLPIC;
-            dest.episode = retailPlazaScenario();
-            dest.gameInt3 = plazaFlags;
+            dest.episode = 2;
+            dest.gameInt3 = LevelWarp::Dest::POST_CORONA;
         }
         action = PROMPT_EXIT_AREA;
     }
-    if (sArmed) cancelArmedCourseWarp();
+    // Restore every temporary IL flag before approving the explicit exit.
+    cancelExplicitPractice();
     if (beginPrompt(action, dest)) return kPauseResume;
-    if (!practiceReturn) return nextState;
+    if (!postCoronaReturn) return nextState;
     armExitAreaWarp(dest);
 
     // getNextState() has already closed the pause object. Resume first; the
@@ -1716,7 +1710,7 @@ void update(TMarioGamePad *pad) {
         const bool instantRestart = gBinds.wasPressed(BIND_INSTANT_RESTART);
         if ((deathExit || saveDialog) &&
             (fullRestart || instantRestart)) {
-            requestRestart(fullRestart, saveDialog);
+            requestOrDeferRestart(fullRestart, saveDialog);
             if (gMenu && gSettings.getBool(SETTING_RESTART_QUEUED_FEEDBACK))
                 gMenu->toast("Restart queued");
         }
@@ -1730,10 +1724,10 @@ void update(TMarioGamePad *pad) {
         // Bianco 1 rather than the bare B+D-up restart bind.
         closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_INSTANT_RESTART)) {
-        requestRestart(false, false);
+        requestOrDeferRestart(false, false);
         closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_FULL_RESTART)) {
-        requestRestart(true, false);
+        requestOrDeferRestart(true, false);
         closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_WARP_LAST)) {
         if (sLastValid) requestCourseWarp(sLast);

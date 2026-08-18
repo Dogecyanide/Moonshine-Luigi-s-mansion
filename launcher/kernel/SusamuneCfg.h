@@ -21,9 +21,9 @@ bool SusamuneCfgPending(void);
 // GCNCard_Save) -- FatFS is not reentrant against the DI thread.
 void SusamuneCfgService(void);
 
-// Binary-journal service slot for ILing PBs and global progress. Keeping these
-// separate from the ini write avoids regenerating susamune.ini; PBs retain
-// priority when both payloads are pending.
+// Binary-journal service slot for ILing PBs, global progress, and Stage Loader
+// playlists. Keeping these separate avoids regenerating susamune.ini; PBs
+// retain priority when several payloads are pending.
 bool SusamunePbPending(void);
 void SusamunePbService(void);
 

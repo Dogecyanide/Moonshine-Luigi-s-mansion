@@ -1152,7 +1152,6 @@ TMapObjBase *findCoverFruit() {
 
 void clearAttempt() {
     const bool hadAttempt = sRunning;
-    LevelWarp::clearPracticeReturn();
     restorePlazaSetupState();
     restorePlazaStoryFlags();
     restoreOverlayFlags(isPlazaEntry(sSelectedEntry));
@@ -1902,7 +1901,6 @@ void onSavestateSaved() {
 }
 
 void onSavestateLoaded() {
-    LevelWarp::clearPracticeReturn();
     sFanfareDelay = 0;
     sAchievementChimeBlockFrames = 0;
     sBannerFrames = 0;

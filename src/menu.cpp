@@ -3376,7 +3376,7 @@ class StageLoaderTab final : public MenuTab {
 public:
     StageLoaderTab()
         : mSel(0), mGoal(5), mTargetQf(-1), mStreakEntry(0),
-          mStreaking(false), mEditor(EDIT_NONE), mTextCursor(0),
+          mStreaking(false), mCustomSlot(0), mEditor(EDIT_NONE), mTextCursor(0),
           mTextPage(1), mTextLength(0), mTextUpper(false) {
         mText[0] = '\0';
     }
@@ -3471,6 +3471,7 @@ public:
         char goal[8];
         char target[24];
         char queued[16];
+        char custom[32];
         snprintf(goal, sizeof(goal), "%u", (unsigned)mGoal);
         snprintf(queued, sizeof(queued), "%d / %d",
                  StageLoader::queueCount(), StageLoader::QUEUE_CAPACITY);
@@ -3482,7 +3483,7 @@ public:
 
         int ry = y;
         int row = 0;
-        for (int option = 0; option < OPTION_COUNT; option++, row++) {
+        for (int option = 0; option < optionCount(); option++, row++) {
             if (row < start || row >= end) continue;
             const char *name;
             const char *value;
@@ -3495,9 +3496,24 @@ public:
             } else if (option == OPTION_FINISHES) {
                 name = mStreaking ? "Finishes" : "Playlist entries";
                 value = mStreaking ? goal : queued;
-            } else {
+            } else if (option == OPTION_TARGET) {
                 name = mStreaking ? "Target time" : "Clear playlist";
                 value = mStreaking ? target : "Clear";
+            } else {
+                const int saved =
+                    StageLoader::customPlaylistEntryCount(mCustomSlot);
+                if (!StageLoader::customPlaylistsAvailable()) {
+                    strcpy(custom, "Unavailable");
+                } else if (saved > 0) {
+                    snprintf(custom, sizeof(custom), "Custom %u (%d)",
+                             (unsigned)mCustomSlot + 1, saved);
+                } else {
+                    snprintf(custom, sizeof(custom), "Custom %u (empty)",
+                             (unsigned)mCustomSlot + 1);
+                }
+                name = option == OPTION_LOAD ? "Load playlist"
+                                             : "Save playlist";
+                value = custom;
             }
             drawValueRow(menu, x, ry, w, name, value, mSel == option,
                          false, true);
@@ -3526,7 +3542,7 @@ public:
                     snprintf(label, sizeof(label), "%02d. %s", position + 1,
                              ILing::label(StageLoader::queueEntry(position)));
                     drawValueRow(menu, x, ry, w, label, nullptr,
-                                 mSel == OPTION_COUNT + position,
+                                 mSel == optionCount() + position,
                                  false, true);
                     ry += ROW_H;
                 }
@@ -3565,7 +3581,12 @@ public:
         }
 
         drawScrollHints(menu, x, y, w, listH, start, end, rows);
-        const char *hint = isQueueRow()
+        const bool customOption = !mStreaking && isOption() &&
+            (mSel == OPTION_LOAD || mSel == OPTION_SAVE);
+        const char *hint = customOption
+            ? SUSAMUNE_GLYPH_A " Select   " SUSAMUNE_GLYPH_C
+              " L" SUSAMUNE_GLYPH_SLASH "R Slot"
+            : isQueueRow()
             ? SUSAMUNE_GLYPH_A " Remove   " SUSAMUNE_GLYPH_C
               " L" SUSAMUNE_GLYPH_SLASH "R Reorder"
             : isCatalogueRow()
@@ -3586,7 +3607,9 @@ private:
         OPTION_RUN,
         OPTION_FINISHES,
         OPTION_TARGET,
-        OPTION_COUNT,
+        OPTION_LOAD,
+        OPTION_SAVE,
+        OPTION_COUNT_MAX,
     };
 
     enum Editor {
@@ -3595,16 +3618,17 @@ private:
         EDIT_TARGET,
     };
 
-    bool isOption() const { return mSel < OPTION_COUNT; }
+    int optionCount() const { return mStreaking ? OPTION_LOAD : OPTION_COUNT_MAX; }
+    bool isOption() const { return mSel < optionCount(); }
     int catalogueFirst() const {
-        return OPTION_COUNT + (mStreaking ? 0 : StageLoader::queueCount());
+        return optionCount() + (mStreaking ? 0 : StageLoader::queueCount());
     }
     bool isQueueRow() const {
-        return !mStreaking && mSel >= OPTION_COUNT &&
+        return !mStreaking && mSel >= optionCount() &&
                mSel < catalogueFirst();
     }
     bool isCatalogueRow() const { return mSel >= catalogueFirst(); }
-    int queuePosition() const { return mSel - OPTION_COUNT; }
+    int queuePosition() const { return mSel - optionCount(); }
     int catalogueEntry() const { return mSel - catalogueFirst(); }
     int selectionCount() const {
         return catalogueFirst() + ILing::count();
@@ -3638,6 +3662,23 @@ private:
         }
         if (mStreaking) {
             beginTextEditor(EDIT_TARGET);
+        } else if (mSel == OPTION_LOAD) {
+            if (StageLoader::loadCustomPlaylist(mCustomSlot)) {
+                mSel = OPTION_FINISHES;
+                menu->toast("Playlist loaded");
+            } else {
+                menu->toast("Playlist storage unavailable");
+            }
+        } else if (mSel == OPTION_SAVE) {
+            if (StageLoader::customPlaylistSavePending()) {
+                menu->toast("Playlist save already pending");
+            } else if (!StageLoader::queueCount()) {
+                menu->toast("Playlist is empty");
+            } else if (StageLoader::saveCustomPlaylist(mCustomSlot)) {
+                menu->toast("Playlist save queued");
+            } else {
+                menu->toast("Playlist storage unavailable");
+            }
         } else if (StageLoader::queueCount()) {
             StageLoader::clearQueue();
             menu->toast("Playlist cleared");
@@ -3648,7 +3689,14 @@ private:
 
     void moveHorizontal(int direction) {
         if (isOption()) {
-            jumpFromOptions(direction);
+            if (!mStreaking &&
+                (mSel == OPTION_LOAD || mSel == OPTION_SAVE)) {
+                mCustomSlot = (u8)wrap(
+                    mCustomSlot + (direction < 0 ? -1 : 1),
+                    StageLoader::CUSTOM_PLAYLIST_COUNT);
+            } else {
+                jumpFromOptions(direction);
+            }
         } else if (isQueueRow()) {
             const int position = queuePosition();
             if (StageLoader::moveQueue(position, direction)) {
@@ -3847,7 +3895,7 @@ private:
     }
 
     int catalogueBaseRow() const {
-        int row = OPTION_COUNT;
+        int row = optionCount();
         if (!mStreaking) {
             row += 1 + (StageLoader::queueCount()
                             ? StageLoader::queueCount()
@@ -3861,9 +3909,9 @@ private:
     }
 
     int menuRowForSelection(int selection) const {
-        if (selection < OPTION_COUNT) return selection;
+        if (selection < optionCount()) return selection;
         if (!mStreaking && selection < catalogueFirst()) {
-            return OPTION_COUNT + 1 + selection - OPTION_COUNT;
+            return optionCount() + 1 + selection - optionCount();
         }
         return catalogueBaseRow() +
                catalogueRowForEntry(selection - catalogueFirst());
@@ -3874,6 +3922,7 @@ private:
     s32 mTargetQf;
     int mStreakEntry;
     bool mStreaking;
+    u8 mCustomSlot;
     u8 mEditor;
     u8 mTextCursor;
     u8 mTextPage;

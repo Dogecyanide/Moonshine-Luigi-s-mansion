@@ -136,6 +136,11 @@ static u32 ProgressGeneration = 0;
 static s32 ProgressActiveFile = -1;
 static bool ProgressReady = false;
 static char ProgressPaths[SUSAMUNE_PB_FILE_COUNT][SUSAMUNE_PB_PATH_SIZE];
+static u32 StagePlaylistAckSeq = 0;
+static u32 StagePlaylistGeneration = 0;
+static s32 StagePlaylistActiveFile = -1;
+static bool StagePlaylistReady = false;
+static char StagePlaylistPaths[SUSAMUNE_PB_FILE_COUNT][SUSAMUNE_PB_PATH_SIZE];
 
 enum PbReadResult
 {
@@ -175,6 +180,11 @@ static struct SusamuneCfg *CfgBlock(void)
 static struct SusamuneProgressCfg *ProgressBlock(void)
 {
 	return SUSAMUNE_PROGRESS_PHYS_PTR;
+}
+
+static struct SusamuneStagePlaylistsCfg *StagePlaylistBlock(void)
+{
+	return SUSAMUNE_STAGE_PLAYLIST_PHYS_PTR;
 }
 
 // ---------------------------------------------------------------------
@@ -707,6 +717,215 @@ static int WriteProgressFile(const struct SusamuneProgressCfg *progress)
 	{
 		ProgressGeneration = file.generation;
 		ProgressActiveFile = (s32)target;
+	}
+	return ret;
+}
+
+// ---------------------------------------------------------------------
+// Stage Loader custom-playlist binary files
+// ---------------------------------------------------------------------
+
+static u32 StagePlaylistChecksum(const struct SusamuneStagePlaylistsFile *file)
+{
+	u32 hash = 2166136261u;
+	u32 slot;
+	u32 i;
+
+	hash = PbHashWord(hash, ((u32)file->version << 16) |
+	                         ((u32)file->slotCount << 8) | file->capacity);
+	hash = PbHashWord(hash, file->generation);
+	for (slot = 0; slot < SUSAMUNE_STAGE_PLAYLIST_COUNT; slot++)
+	{
+		hash = (hash ^ file->counts[slot]) * 16777619u;
+		for (i = 0; i < SUSAMUNE_STAGE_PLAYLIST_CAPACITY; i++)
+			hash = (hash ^ file->entries[slot][i]) * 16777619u;
+	}
+	return hash;
+}
+
+static bool StagePlaylistBytesZero(const u8 *bytes, u32 size)
+{
+	u32 i;
+	for (i = 0; i < size; i++)
+		if (bytes[i] != 0)
+			return false;
+	return true;
+}
+
+static bool StagePlaylistPayloadValid(
+	const u8 counts[SUSAMUNE_STAGE_PLAYLIST_COUNT],
+	const u8 entries[SUSAMUNE_STAGE_PLAYLIST_COUNT]
+	                [SUSAMUNE_STAGE_PLAYLIST_CAPACITY])
+{
+	u32 slot;
+	u32 i;
+
+	for (slot = 0; slot < SUSAMUNE_STAGE_PLAYLIST_COUNT; slot++)
+	{
+		if (counts[slot] > SUSAMUNE_STAGE_PLAYLIST_CAPACITY)
+			return false;
+		for (i = 0; i < counts[slot]; i++)
+			if (entries[slot][i] >= SUSAMUNE_STAGE_PLAYLIST_ROUTE_COUNT)
+				return false;
+		for (; i < SUSAMUNE_STAGE_PLAYLIST_CAPACITY; i++)
+			if (entries[slot][i] != 0)
+				return false;
+	}
+	return true;
+}
+
+static enum PbReadResult ReadStagePlaylistFile(
+	const char *path, struct SusamuneStagePlaylistsFile *file)
+{
+	FIL f;
+	UINT read = 0;
+	u32 size;
+	u32 prefixSize = sizeof(file->magic) + sizeof(file->version);
+	int ret;
+	int closeRet;
+
+	ret = f_open_char(&f, path, FA_READ | FA_OPEN_EXISTING);
+	if (ret == FR_NO_FILE || ret == FR_NO_PATH)
+		return PB_READ_INVALID;
+	if (ret != FR_OK)
+		return PB_READ_UNSAFE;
+	size = (u32)f_size(&f);
+	if (size != sizeof(*file))
+	{
+		memset(file, 0, sizeof(*file));
+		if (size >= prefixSize)
+			ret = f_read(&f, file, prefixSize, &read);
+		closeRet = f_close(&f);
+		if (ret != FR_OK || closeRet != FR_OK ||
+		    (size >= prefixSize && read != prefixSize))
+			return PB_READ_UNSAFE;
+		if (size >= prefixSize &&
+		    file->magic == SUSAMUNE_STAGE_PLAYLIST_FILE_MAGIC &&
+		    file->version != SUSAMUNE_STAGE_PLAYLIST_VERSION)
+			return PB_READ_UNSAFE;
+		return PB_READ_INVALID;
+	}
+	ret = f_read(&f, file, sizeof(*file), &read);
+	closeRet = f_close(&f);
+	if (ret != FR_OK || read != sizeof(*file) || closeRet != FR_OK)
+		return PB_READ_UNSAFE;
+	if (file->magic == SUSAMUNE_STAGE_PLAYLIST_FILE_MAGIC &&
+	    file->version != SUSAMUNE_STAGE_PLAYLIST_VERSION)
+		return PB_READ_UNSAFE;
+	if (file->magic != SUSAMUNE_STAGE_PLAYLIST_FILE_MAGIC ||
+	    file->slotCount != SUSAMUNE_STAGE_PLAYLIST_COUNT ||
+	    file->capacity != SUSAMUNE_STAGE_PLAYLIST_CAPACITY ||
+	    !StagePlaylistBytesZero(file->reserved0,
+	                            sizeof(file->reserved0)) ||
+	    !StagePlaylistBytesZero(file->reserved1,
+	                            sizeof(file->reserved1)) ||
+	    file->checksum != StagePlaylistChecksum(file) ||
+	    !StagePlaylistPayloadValid(file->counts, file->entries))
+		return PB_READ_INVALID;
+	return PB_READ_VALID;
+}
+
+static void InitStagePlaylistDefaults(
+	struct SusamuneStagePlaylistsCfg *playlists)
+{
+	memset(playlists, 0, sizeof(*playlists));
+	playlists->magic = SUSAMUNE_STAGE_PLAYLIST_MAGIC;
+	playlists->version = SUSAMUNE_STAGE_PLAYLIST_VERSION;
+	playlists->slotCount = SUSAMUNE_STAGE_PLAYLIST_COUNT;
+	playlists->capacity = SUSAMUNE_STAGE_PLAYLIST_CAPACITY;
+}
+
+static bool InitStagePlaylistFiles(
+	struct SusamuneStagePlaylistsCfg *playlists)
+{
+	struct SusamuneStagePlaylistsFile file;
+	u32 fileIndex;
+	bool safe = true;
+
+	InitStagePlaylistDefaults(playlists);
+	_sprintf(StagePlaylistPaths[0], "%s/susamune_stage_playlists_v1_a.bin",
+	         SusamuneCfgStoragePrefix());
+	_sprintf(StagePlaylistPaths[1], "%s/susamune_stage_playlists_v1_b.bin",
+	         SusamuneCfgStoragePrefix());
+	StagePlaylistGeneration = 0;
+	StagePlaylistActiveFile = -1;
+	for (fileIndex = 0; fileIndex < SUSAMUNE_PB_FILE_COUNT; fileIndex++)
+	{
+		enum PbReadResult readResult =
+			ReadStagePlaylistFile(StagePlaylistPaths[fileIndex], &file);
+		if (readResult == PB_READ_UNSAFE)
+		{
+			safe = false;
+			continue;
+		}
+		if (readResult != PB_READ_VALID)
+			continue;
+		if (StagePlaylistActiveFile >= 0 &&
+		    !PbGenerationIsNewer(file.generation,
+		                         StagePlaylistGeneration))
+			continue;
+
+		memcpy(playlists->counts, file.counts, sizeof(playlists->counts));
+		memcpy(playlists->entries, file.entries, sizeof(playlists->entries));
+		StagePlaylistGeneration = file.generation;
+		StagePlaylistActiveFile = (s32)fileIndex;
+	}
+
+	StagePlaylistAckSeq = 0;
+	StagePlaylistReady = safe;
+	if (safe)
+		playlists->flags |= SUSAMUNE_STAGE_PLAYLIST_FLAG_WRITABLE;
+	else
+		dbgprintf("Susamune: playlist persistence disabled to preserve unreadable files\r\n");
+	return safe;
+}
+
+static int WriteStagePlaylistFile(
+	const struct SusamuneStagePlaylistsCfg *playlists)
+{
+	struct SusamuneStagePlaylistsFile file;
+	FIL f;
+	UINT wrote = 0;
+	u32 target = StagePlaylistActiveFile == 0 ? 1u : 0u;
+	int ret;
+	int syncRet;
+	int closeRet;
+
+	if (playlists->magic != SUSAMUNE_STAGE_PLAYLIST_MAGIC ||
+	    playlists->version != SUSAMUNE_STAGE_PLAYLIST_VERSION ||
+	    playlists->slotCount != SUSAMUNE_STAGE_PLAYLIST_COUNT ||
+	    playlists->capacity != SUSAMUNE_STAGE_PLAYLIST_CAPACITY ||
+	    !StagePlaylistPayloadValid(playlists->counts, playlists->entries))
+		return FR_INVALID_PARAMETER;
+
+	memset(&file, 0, sizeof(file));
+	file.magic = SUSAMUNE_STAGE_PLAYLIST_FILE_MAGIC;
+	file.version = SUSAMUNE_STAGE_PLAYLIST_VERSION;
+	file.slotCount = SUSAMUNE_STAGE_PLAYLIST_COUNT;
+	file.capacity = SUSAMUNE_STAGE_PLAYLIST_CAPACITY;
+	file.generation = StagePlaylistGeneration + 1;
+	memcpy(file.counts, playlists->counts, sizeof(file.counts));
+	memcpy(file.entries, playlists->entries, sizeof(file.entries));
+	file.checksum = StagePlaylistChecksum(&file);
+
+	ret = f_open_char(&f, StagePlaylistPaths[target],
+	                  FA_WRITE | FA_CREATE_ALWAYS);
+	if (ret != FR_OK)
+		return ret;
+	ret = f_write(&f, &file, sizeof(file), &wrote);
+	if (ret == FR_OK && wrote != sizeof(file))
+		ret = FR_DISK_ERR;
+	syncRet = f_sync(&f);
+	if (ret == FR_OK && syncRet != FR_OK)
+		ret = syncRet;
+	closeRet = f_close(&f);
+	if (ret == FR_OK && closeRet != FR_OK)
+		ret = closeRet;
+
+	if (ret == FR_OK)
+	{
+		StagePlaylistGeneration = file.generation;
+		StagePlaylistActiveFile = (s32)target;
 	}
 	return ret;
 }
@@ -2388,6 +2607,7 @@ void SusamuneCfgInit(void)
 {
 	struct SusamuneCfg *cfg = CfgBlock();
 	struct SusamuneProgressCfg *progress = ProgressBlock();
+	struct SusamuneStagePlaylistsCfg *playlists = StagePlaylistBlock();
 	const char *region = SUSAMUNE_MOD_REGION_TAG(GAME_ID);
 	FIL   f;
 	char *buf;
@@ -2400,9 +2620,11 @@ void SusamuneCfgInit(void)
 	// that happens to be running now.
 	memset(cfg, 0, sizeof(struct SusamuneCfg));
 	memset(progress, 0, sizeof(struct SusamuneProgressCfg));
+	memset(playlists, 0, sizeof(struct SusamuneStagePlaylistsCfg));
 	CfgReady = false;
 	PbReady = false;
 	ProgressReady = false;
+	StagePlaylistReady = false;
 
 	if (!SusamuneCfgStorageAvailable())
 	{
@@ -2410,6 +2632,7 @@ void SusamuneCfgInit(void)
 		// mounted. Zero magic advertises an unsupported backend to the mod.
 		sync_after_write(cfg, sizeof(struct SusamuneCfg));
 		sync_after_write(progress, sizeof(struct SusamuneProgressCfg));
+		sync_after_write(playlists, sizeof(struct SusamuneStagePlaylistsCfg));
 		return;
 	}
 
@@ -2420,6 +2643,7 @@ void SusamuneCfgInit(void)
 		// magic zeroed is what makes the mod (if any) report "no launcher".
 		sync_after_write(cfg, sizeof(struct SusamuneCfg));
 		sync_after_write(progress, sizeof(struct SusamuneProgressCfg));
+		sync_after_write(playlists, sizeof(struct SusamuneStagePlaylistsCfg));
 		CfgReady = false;
 		return;
 	}
@@ -2490,6 +2714,8 @@ void SusamuneCfgInit(void)
 		              SUSAMUNE_CFG_FLAG_ILING_PROFILES;
 	if (InitProgressFiles(progress))
 		cfg->flags |= SUSAMUNE_CFG_FLAG_PROGRESS;
+	if (InitStagePlaylistFiles(playlists))
+		cfg->flags |= SUSAMUNE_CFG_FLAG_STAGE_PLAYLISTS;
 
 	ret = f_open_char(&f, SusamuneCfgIniPath(), FA_READ | FA_OPEN_EXISTING);
 	if (ret == FR_OK)
@@ -2522,6 +2748,7 @@ void SusamuneCfgInit(void)
 
 	sync_after_write(cfg, sizeof(struct SusamuneCfg));
 	sync_after_write(progress, sizeof(struct SusamuneProgressCfg));
+	sync_after_write(playlists, sizeof(struct SusamuneStagePlaylistsCfg));
 
 	CfgAckSeq = 0;
 	CfgReady  = true;
@@ -2596,15 +2823,31 @@ static bool ProgressSavePending(struct SusamuneProgressCfg *progress)
 	return progress->saveSeq != ProgressAckSeq;
 }
 
+static bool StagePlaylistSavePending(
+	struct SusamuneStagePlaylistsCfg *playlists)
+{
+	if (!StagePlaylistReady)
+		return false;
+	sync_before_read(playlists, 32);
+	if (playlists->magic != SUSAMUNE_STAGE_PLAYLIST_MAGIC ||
+	    playlists->version != SUSAMUNE_STAGE_PLAYLIST_VERSION ||
+	    playlists->slotCount != SUSAMUNE_STAGE_PLAYLIST_COUNT ||
+	    playlists->capacity != SUSAMUNE_STAGE_PLAYLIST_CAPACITY)
+		return false;
+	return playlists->saveSeq != StagePlaylistAckSeq;
+}
+
 bool SusamunePbPending(void)
 {
 	struct SusamuneCfg *cfg = CfgBlock();
 	struct SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
 	struct SusamuneProgressCfg *progress = ProgressBlock();
+	struct SusamuneStagePlaylistsCfg *playlists = StagePlaylistBlock();
 
 	if (!CfgReady)
 		return false;
-	return PbSavePending(profiles) || ProgressSavePending(progress);
+	return PbSavePending(profiles) || ProgressSavePending(progress) ||
+	       StagePlaylistSavePending(playlists);
 }
 
 void SusamunePbService(void)
@@ -2612,14 +2855,15 @@ void SusamunePbService(void)
 	struct SusamuneCfg *cfg = CfgBlock();
 	struct SusamuneILingProfilesCfg *profiles = &cfg->ilingProfiles;
 	struct SusamuneProgressCfg *progress = ProgressBlock();
+	struct SusamuneStagePlaylistsCfg *playlists = StagePlaylistBlock();
 	u32 seq;
 	int ret;
 
 	if (!CfgReady)
 		return;
 
-	// Both payloads are binary journals and share this main-loop service slot.
-	// Preserve PB priority; progress follows on the next idle pass if both ring.
+	// Binary journals share this main-loop service slot. Preserve PB priority;
+	// progress and playlists follow on later idle passes when several ring.
 	if (PbSavePending(profiles))
 	{
 		seq = profiles->saveSeq;
@@ -2637,17 +2881,34 @@ void SusamunePbService(void)
 		return;
 	}
 
-	if (!ProgressSavePending(progress))
-		return;
-	seq = progress->saveSeq;
-	sync_before_read(progress->achievements,
-	                 sizeof(progress->achievements) + sizeof(progress->stats));
-	ret = WriteProgressFile(progress);
-	if (ret != FR_OK)
-		dbgprintf("Susamune: failed to write progress (%d)\r\n", ret);
+	if (ProgressSavePending(progress))
+	{
+		seq = progress->saveSeq;
+		sync_before_read(progress->achievements,
+		                 sizeof(progress->achievements) +
+		                 sizeof(progress->stats));
+		ret = WriteProgressFile(progress);
+		if (ret != FR_OK)
+			dbgprintf("Susamune: failed to write progress (%d)\r\n", ret);
 
-	progress->status = (u32)ret;
-	progress->ackSeq = seq;
-	ProgressAckSeq = seq;
-	sync_after_write(&progress->ackSeq, 32);
+		progress->status = (u32)ret;
+		progress->ackSeq = seq;
+		ProgressAckSeq = seq;
+		sync_after_write(&progress->ackSeq, 32);
+		return;
+	}
+
+	if (!StagePlaylistSavePending(playlists))
+		return;
+	seq = playlists->saveSeq;
+	sync_before_read(playlists->counts,
+	                 sizeof(playlists->counts) + sizeof(playlists->entries));
+	ret = WriteStagePlaylistFile(playlists);
+	if (ret != FR_OK)
+		dbgprintf("Susamune: failed to write stage playlists (%d)\r\n", ret);
+
+	playlists->status = (u32)ret;
+	playlists->ackSeq = seq;
+	StagePlaylistAckSeq = seq;
+	sync_after_write(&playlists->ackSeq, 32);
 }

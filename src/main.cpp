@@ -347,6 +347,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     Records::update(creationEditing, observerFrame);
     ILing::update();
     StageLoader::update();
+    WarpWheel::resolveDeferredRestart();
     const bool sessionOwnsInput = sessionResultBeforeDirect ||
                                   sessionResultAfterDirect ||
                                   StageLoader::resultOwnsInput();

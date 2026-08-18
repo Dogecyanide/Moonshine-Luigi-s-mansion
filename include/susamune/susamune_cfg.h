@@ -417,6 +417,8 @@ struct SusamuneMetadataStyleCfg {
 #define SUSAMUNE_CFG_FLAG_ILING_PROFILES 0x200u
 // Kernel/backend exposes the independent global achievement/statistics journal.
 #define SUSAMUNE_CFG_FLAG_PROGRESS 0x400u
+// Kernel/backend exposes the global Stage Loader custom-playlist journal.
+#define SUSAMUNE_CFG_FLAG_STAGE_PLAYLISTS 0x800u
 
 // IL PBs use stable result slots: ordinary rows use retail Shine ids, while
 // independent Secret, variant and Any% rows occupy otherwise-unused ids through 124.
@@ -566,6 +568,49 @@ struct SusamuneProgressFile {
                        [SUSAMUNE_PROGRESS_STAT_COUNT];
 };
 
+#define SUSAMUNE_STAGE_PLAYLIST_MAGIC      0x53504C53u  // 'SPLS'
+#define SUSAMUNE_STAGE_PLAYLIST_FILE_MAGIC 0x53504C46u  // 'SPLF'
+#define SUSAMUNE_STAGE_PLAYLIST_VERSION    1u
+#define SUSAMUNE_STAGE_PLAYLIST_COUNT      7u
+#define SUSAMUNE_STAGE_PLAYLIST_CAPACITY   120u
+#define SUSAMUNE_STAGE_PLAYLIST_ROUTE_COUNT 121u
+#define SUSAMUNE_STAGE_PLAYLIST_FLAG_WRITABLE 0x1u
+
+struct SusamuneStagePlaylistsCfg {
+    // --- cache line 0: written by the kernel at boot, by the mod on save ---
+    unsigned int   magic;
+    unsigned short version;
+    unsigned char  slotCount;
+    unsigned char  capacity;
+    unsigned int   saveSeq;
+    unsigned int   flags;
+    unsigned char  pad0[16];
+
+    // --- cache line 1: written ONLY by the kernel ---
+    unsigned int   ackSeq;
+    unsigned int   status;
+    unsigned char  pad1[24];
+
+    unsigned char counts[SUSAMUNE_STAGE_PLAYLIST_COUNT];
+    unsigned char entries[SUSAMUNE_STAGE_PLAYLIST_COUNT]
+                         [SUSAMUNE_STAGE_PLAYLIST_CAPACITY];
+    unsigned char reserved[17];
+};
+
+struct SusamuneStagePlaylistsFile {
+    unsigned int   magic;
+    unsigned short version;
+    unsigned char  slotCount;
+    unsigned char  capacity;
+    unsigned int   generation;
+    unsigned int   checksum;
+    unsigned char  reserved0[16];
+    unsigned char counts[SUSAMUNE_STAGE_PLAYLIST_COUNT];
+    unsigned char entries[SUSAMUNE_STAGE_PLAYLIST_COUNT]
+                         [SUSAMUNE_STAGE_PLAYLIST_CAPACITY];
+    unsigned char reserved1[17];
+};
+
 struct SusamuneCfg {
     // --- cache line 0: written by the kernel at boot, by the mod on save ---
     unsigned int   magic;
@@ -614,6 +659,16 @@ struct SusamuneCfg {
 #define SUSAMUNE_PROGRESS_PHYS_PTR \
     ((struct SusamuneProgressCfg *)(SUSAMUNE_MEM2_CFG_PHYS_BASE + \
                                     SUSAMUNE_PROGRESS_CFG_OFFSET))
+
+// Fixed gap before progress. This remains separate from SusamuneCfg so older
+// launchers can keep their established struct size and offsets.
+#define SUSAMUNE_STAGE_PLAYLIST_CFG_OFFSET 0x1400u
+#define SUSAMUNE_STAGE_PLAYLIST_PPC_PTR \
+    ((struct SusamuneStagePlaylistsCfg *)(SUSAMUNE_MEM2_CFG_PPC_BASE + \
+                                          SUSAMUNE_STAGE_PLAYLIST_CFG_OFFSET))
+#define SUSAMUNE_STAGE_PLAYLIST_PHYS_PTR \
+    ((struct SusamuneStagePlaylistsCfg *)(SUSAMUNE_MEM2_CFG_PHYS_BASE + \
+                                          SUSAMUNE_STAGE_PLAYLIST_CFG_OFFSET))
 
 // Path of the ini, at the root of whichever device holds it. That is the device
 // the launcher was run from, which the kernel may have had to mount as a second
@@ -702,8 +757,19 @@ typedef char susamune_progress_cfg_size_check[(sizeof(struct SusamuneProgressCfg
 typedef char susamune_progress_file_achievements_check[(__builtin_offsetof(struct SusamuneProgressFile, achievements) == 32) ? 1 : -1];
 typedef char susamune_progress_file_stats_check[(__builtin_offsetof(struct SusamuneProgressFile, stats) == 96) ? 1 : -1];
 typedef char susamune_progress_file_size_check[(sizeof(struct SusamuneProgressFile) == 864) ? 1 : -1];
+typedef char susamune_stage_playlist_cfg_ack_check[(__builtin_offsetof(struct SusamuneStagePlaylistsCfg, ackSeq) == 32) ? 1 : -1];
+typedef char susamune_stage_playlist_cfg_counts_check[(__builtin_offsetof(struct SusamuneStagePlaylistsCfg, counts) == 64) ? 1 : -1];
+typedef char susamune_stage_playlist_cfg_size_check[(sizeof(struct SusamuneStagePlaylistsCfg) == 928) ? 1 : -1];
+typedef char susamune_stage_playlist_file_counts_check[(__builtin_offsetof(struct SusamuneStagePlaylistsFile, counts) == 32) ? 1 : -1];
+typedef char susamune_stage_playlist_file_size_check[(sizeof(struct SusamuneStagePlaylistsFile) == 896) ? 1 : -1];
 typedef char susamune_progress_alignment_check[(SUSAMUNE_PROGRESS_CFG_OFFSET % 32 == 0) ? 1 : -1];
+typedef char susamune_stage_playlist_alignment_check[(SUSAMUNE_STAGE_PLAYLIST_CFG_OFFSET % 32 == 0) ? 1 : -1];
 typedef char susamune_progress_cfg_gap_check[(sizeof(struct SusamuneCfg) <= SUSAMUNE_PROGRESS_CFG_OFFSET) ? 1 : -1];
+typedef char susamune_stage_playlist_cfg_gap_check[
+    (sizeof(struct SusamuneCfg) <= SUSAMUNE_STAGE_PLAYLIST_CFG_OFFSET &&
+     SUSAMUNE_STAGE_PLAYLIST_CFG_OFFSET +
+             sizeof(struct SusamuneStagePlaylistsCfg) <=
+         SUSAMUNE_PROGRESS_CFG_OFFSET) ? 1 : -1];
 typedef char susamune_progress_space_check[
     (SUSAMUNE_MEM2_CFG_PPC_BASE + SUSAMUNE_PROGRESS_CFG_OFFSET +
          sizeof(struct SusamuneProgressCfg) <=
