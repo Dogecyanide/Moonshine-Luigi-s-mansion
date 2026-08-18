@@ -27,6 +27,9 @@ struct VisualState {
     s16 yaw;
     u16 animationId;
     u16 animationPhase;
+    u32 heldObjectId;
+    u16 heldNameKey;
+    u8 yoshi;
     bool visible;
 };
 
@@ -85,6 +88,9 @@ bool hasUnsavedPB();
 // Revalidate or consume the exact accepted PB named by a prior query. PB
 // tokens survive record/playback buffer promotion and never name imports.
 bool hasUnsavedPBToken(u32 token);
+// Stop guarding the accepted PB without deleting its completed track. A
+// subsequent restart can still promote it into the automatic race target.
+bool unprotectUnsavedPB(u32 token);
 bool discardUnsavedPB(u32 token);
 // Protect only the just-completed in-memory recording whose result QF was
 // accepted as a PB. Imported and pinned library ghosts never qualify.

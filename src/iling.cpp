@@ -136,6 +136,12 @@ constexpr Entry kEntries[] = {
 #undef ENTRY_STATE
 
 const int kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);
+const int kSecretOnlyPbSlotFirst = 70;
+const int kSecretOnlyPbSlotLast = 79;
+constexpr bool isSecretOnlyPbSlot(int slot) {
+    return slot >= kSecretOnlyPbSlotFirst &&
+           slot <= kSecretOnlyPbSlotLast;
+}
 constexpr u8 kGroupFirst[GROUP_COUNT] = {
     0, 13, 25, 38, 52, 65, 78, 90, 92, 94, 110
 };
@@ -338,6 +344,56 @@ constexpr int packedLabelCount(const char *pool, u32 bytes) {
 #undef ENTRY_LABEL_I
 #undef ENTRY_LABEL
 
+// Secret and Reds entries share child scenes. Keep PB identity, rather than
+// scene identity, as the discriminator for no-FLUDD eligibility.
+#define RAW(label, area, episode, parent, finish, result, group, flags, prerequisite) \
+    static_assert(!isSecretOnlyPbSlot(                                          \
+                      ((flags) & ENTRY_PB_OVERRIDE) ? (prerequisite) : (result)), \
+                  "non-Secret IL entered the Secret-only PB slot range");
+#define SHINE(label, area, episode, parent, id, group) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, ENTRY_NONE, kNoShine)
+#define SHINE_SET(label, area, episode, parent, id, group, required) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CARRY_OVERLAY, required)
+#define SHINE_SET_ALIAS(label, area, episode, parent, id, group, required) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CARRY_OVERLAY | ENTRY_ACCEPT_PREREQ, required)
+#define SHINE_CLEAR(label, area, episode, parent, id, group) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT, kNoShine)
+#define SHINE_CLEAR_SET(label, area, episode, parent, id, group, required) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT, required)
+#define SHINE_FULL(label, area, episode, parent, id, group) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT | ENTRY_CARRY_OVERLAY, kNoShine)
+#define PINNA_EYG(label, slot) \
+    RAW(label, 5, 2, 2, FINISH_SHINE, 35, GROUP_PINNA, \
+        ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE | ENTRY_CARRY_OVERLAY, slot)
+#define SHINE_INSIDE(label, area, episode, parent, id, group, slot) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE, slot)
+#define SHINE_SECRET(label, area, episode, parent, id, group, slot) \
+    static_assert(isSecretOnlyPbSlot(slot), \
+                  "Secret-only IL left its reserved PB slot range");
+#define PLAZA(label, source, scenario, finish, result, slot) \
+    RAW(label, TGameSequence::AREA_DOLPIC, scenario, source, finish, result, \
+        GROUP_ANY_PERCENT, ENTRY_PLAZA | ENTRY_PB_OVERRIDE, slot)
+
+#include "iling_entries.inc"
+
+#undef SHINE
+#undef SHINE_SET
+#undef SHINE_SET_ALIAS
+#undef SHINE_CLEAR
+#undef SHINE_CLEAR_SET
+#undef SHINE_FULL
+#undef PINNA_EYG
+#undef SHINE_INSIDE
+#undef SHINE_SECRET
+#undef PLAZA
+#undef RAW
+
 const u8 kPlazaStoryHigh[10] = {0x00, 0x10, 0xF0, 0xF0, 0xF0,
                                 0x30, 0xF0, 0xF0, 0xF0, 0xF0};
 const int kPbSlotCount = 125;
@@ -419,6 +475,7 @@ struct AttemptState {
     OverlayFlag overlayFlags[kOverlayFlagCount];
     LevelWarp::Dest start;
     u8 finish;
+    bool secretOnly;
     int selectedEntry;
     u32 serial;
 };
@@ -510,6 +567,7 @@ static_assert(sizeof(ILingRuntime) <= SUSAMUNE_ILING_RUNTIME_SIZE,
 #define sOverlayFlags sAttemptState.overlayFlags
 #define sAttemptStart sAttemptState.start
 #define sFinishKind sAttemptState.finish
+#define sSecretOnly sAttemptState.secretOnly
 #define sSelectedEntry sAttemptState.selectedEntry
 #define sAttemptSerial sAttemptState.serial
 #define sCustomPbProfileNames sRuntime.customProfileNames
@@ -1092,6 +1150,7 @@ TMapObjBase *findCoverFruit() {
 }
 
 void clearAttempt() {
+    LevelWarp::clearPracticeReturn();
     restorePlazaSetupState();
     restorePlazaStoryFlags();
     restoreOverlayFlags(isPlazaEntry(sSelectedEntry));
@@ -1111,6 +1170,7 @@ void clearAttempt() {
     sTransitionPending = false;
     sRecordsEligible = false;
     sNativeIgt = false;
+    sSecretOnly = false;
     sSelectedEntry = -1;
     sRocketEquipPending = false;
     Records::onILAttemptEnded();
@@ -1125,6 +1185,13 @@ void armAttempt(const Entry &entry, int selected) {
     sAttemptStart = entry.start;
     sFinishKind = entryFinish(entry);
     sSelectedEntry = selected;
+    int identity = selected;
+    if (!validEntry(identity) &&
+        sceneMatches(gpApplication.mCurrentScene, entry.start)) {
+        identity = entryForChildMode(gpApplication.mCurrentScene, -1);
+    }
+    if (identity < 0 || identity >= kEntryCount) identity = entryIndex;
+    sSecretOnly = isSecretOnlyPbSlot(pbSlot(identity));
     sAttemptSerial = gQFTTimer.attemptSerial();
     sRecordsEligible = !gSettings.getBool(SETTING_STAGE_INTRO_SKIP) &&
                        !actionsFastForwardActive();
@@ -1158,6 +1225,13 @@ bool pbRecordingEnabled() {
 
 bool attemptPBRecordingEnabled() {
     return gSettings.getBool(SETTING_ILING_RECORDING) && sRecordsEligible;
+}
+
+bool secretAttemptUsedFludd() {
+    // isEmitting() reports nozzle pressure, not an accepted water emit.
+    return sRunning && sRecordsEligible && sSecretOnly &&
+           stageObjectsLive() && gpMarioOriginal && gpMarioOriginal->mFludd &&
+           gpMarioOriginal->mFludd->mIsEmitWater;
 }
 
 void recordPB(int entry, s32 qf) {
@@ -1619,6 +1693,10 @@ void update() {
         sRecordsEligible = false;
         Records::invalidateAttempt();
     }
+    if (secretAttemptUsedFludd()) {
+        sRecordsEligible = false;
+        Records::invalidateAttempt();
+    }
     if (sRunning && stageObjectsLive() && gpMarDirector->mGCConsole &&
         gpMarDirector->mGCConsole->mIsTimerMoving) {
         sNativeIgt = true;
@@ -1813,6 +1891,7 @@ void onSavestateSaved() {
 }
 
 void onSavestateLoaded() {
+    LevelWarp::clearPracticeReturn();
     sFanfareDelay = 0;
     sAchievementChimeBlockFrames = 0;
     sBannerFrames = 0;
@@ -1825,6 +1904,7 @@ void onSavestateLoaded() {
         sTransitionPending = false;
         sHavePlazaStoryFlags = false;
         sOverlayCount = 0;
+        sSecretOnly = false;
         sSelectedEntry = -1;
         return;
     }

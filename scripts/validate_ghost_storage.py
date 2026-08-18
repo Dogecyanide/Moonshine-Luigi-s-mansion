@@ -59,15 +59,16 @@ def _crc32_zeroed(raw: bytes, start: int, end: int) -> int:
     return zlib.crc32(work) & 0xFFFFFFFF
 
 
-def _validate_v3_ghost(
+def _validate_canonical_ghost(
     raw: bytes, *, running_region: int | None = None,
 ) -> dict:
     # Recognize old/future SGHF from its prefix without interpreting its body.
     if len(raw) >= 6 and raw[:4] == ghost_format.GHOST_MAGIC:
         version = struct.unpack_from(">H", raw, 4)[0]
-        if version != ghost_format.GHOST_VERSION_V3:
+        if version not in (ghost_format.GHOST_VERSION_V3,
+                           ghost_format.GHOST_VERSION_V4):
             raise UnsupportedStorage(
-                f"unsupported ghost version {version}; storage requires 3"
+                f"unsupported ghost version {version}; storage supports 3 and 4"
             )
     try:
         if running_region is None:
@@ -120,7 +121,7 @@ def validate_slot_file(
             payload_checksum == (zlib.crc32(payload) & 0xFFFFFFFF),
             "storage payload checksum mismatch",
         )
-        ghost = _validate_v3_ghost(payload)
+        ghost = _validate_canonical_ghost(payload)
         _require(int(ghost["game_id"], 16) == game_id, "ghost game id mismatch")
         _require(ghost["source_profile"] == profile, "ghost profile mismatch")
         _require(ghost["duration_qf"] == duration_qf,
@@ -270,14 +271,14 @@ def export_share_path(
 
 
 def validate_share_file(raw: bytes, *, game_id: int, profile: int) -> dict:
-    ghost = _validate_v3_ghost(raw)
+    ghost = _validate_canonical_ghost(raw)
     _require(int(ghost["game_id"], 16) == game_id, "ghost game id mismatch")
     _require(ghost["source_profile"] == profile, "ghost profile mismatch")
     return ghost
 
 
 def validate_import_file(raw: bytes, *, running_region: int) -> dict:
-    return _validate_v3_ghost(raw, running_region=running_region)
+    return _validate_canonical_ghost(raw, running_region=running_region)
 
 
 def select_import_files(

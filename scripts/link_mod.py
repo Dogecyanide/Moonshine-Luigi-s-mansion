@@ -35,6 +35,15 @@ def check_shared_layout():
                 "{} is {:#x} in {} but {:#x} in patches.py".format(
                     name, header_value, header, value))
 
+    mem2_header = header.parent / "mem2_map.h"
+    mem2_text = mem2_header.read_text()
+    match = re.search(
+        r"^#define\s+SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE\s+"
+        r"(0x[0-9a-fA-F]+)u?\s*$", mem2_text, re.M)
+    if not match or int(match.group(1), 16) != patches.mod_file_max_size:
+        raise RuntimeError(
+            "reset-safe mod file ceiling differs between mem2_map.h and patches.py")
+
 
 def check_arena_reserve(linker_script, base):
     """Verify the debug-stack gap this build's arena reserve assumes.

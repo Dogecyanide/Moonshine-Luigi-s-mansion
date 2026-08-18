@@ -159,7 +159,9 @@
     /* -- Ghost model selection (append-only persisted id) -- */               \
     X(SETTING_GHOST_APPEARANCE,          "ghost_appearance")                  \
     /* -- Automatic ghost target policy (append-only persisted id) -- */       \
-    X(SETTING_GHOST_LAST_SUCCESS,        "ghost_last_success")
+    X(SETTING_GHOST_LAST_SUCCESS,        "ghost_last_success")                \
+    /* -- PB ghost save policy (append-only persisted id) -- */                \
+    X(SETTING_PB_GHOST_SAVE_POLICY,      "pb_ghost_save_policy")
 
 
 #endif  // SUSAMUNE_SETTINGS_LIST_H

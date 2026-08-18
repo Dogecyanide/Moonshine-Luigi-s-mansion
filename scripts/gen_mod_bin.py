@@ -20,19 +20,20 @@ VERSION = 1
 HEADER_SIZE = 32
 
 
-def staging_window_size():
+def shared_hex_define(name):
     header = Path(__file__).parent.parent / "include" / "susamune" / "mem2_map.h"
     match = re.search(
-        r"^#define\s+SUSAMUNE_MEM2_MODBIN_SIZE\s+(0x[0-9a-fA-F]+)u?\s*$",
+        r"^#define\s+{}\s+(0x[0-9a-fA-F]+)u?\s*$".format(re.escape(name)),
         header.read_text(), re.M)
     if not match:
-        raise RuntimeError("SUSAMUNE_MEM2_MODBIN_SIZE not found in {}".format(header))
+        raise RuntimeError("{} not found in {}".format(name, header))
     return int(match.group(1), 16)
 
 
 # The loader refuses a larger file, so fail the build instead of shipping one
 # that cannot be staged. Read the shared C header rather than duplicating it.
-STAGING_WINDOW_SIZE = staging_window_size()
+STAGING_WINDOW_SIZE = shared_hex_define("SUSAMUNE_MEM2_MODBIN_SIZE")
+STAGED_FILE_MAX_SIZE = shared_hex_define("SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE")
 
 
 def build_mod_bin(manifest):
@@ -57,10 +58,12 @@ def build_mod_bin(manifest):
     )
     assert len(header) == HEADER_SIZE
     total = HEADER_SIZE + len(body)
-    if total > STAGING_WINDOW_SIZE:
+    if total > STAGED_FILE_MAX_SIZE:
         raise ValueError(
-            f"mod bin is {total:#x} bytes, over the {STAGING_WINDOW_SIZE:#x} "
-            "MEM2 staging window (see SUSAMUNE_MEM2_MODBIN_SIZE)")
+            f"mod bin is {total:#x} bytes, over the {STAGED_FILE_MAX_SIZE:#x} "
+            "reset-safe ceiling (see SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE)")
+    if total > STAGING_WINDOW_SIZE:
+        raise ValueError("mod bin exceeds its MEM2 staging window")
     return header + body
 
 

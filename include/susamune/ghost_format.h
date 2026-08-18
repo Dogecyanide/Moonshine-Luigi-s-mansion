@@ -8,7 +8,8 @@
 #define SUSAMUNE_GHOST_FILE_VERSION_V1   1u
 #define SUSAMUNE_GHOST_FILE_VERSION_V2   2u
 #define SUSAMUNE_GHOST_FILE_VERSION_V3   3u
-#define SUSAMUNE_GHOST_FILE_VERSION      SUSAMUNE_GHOST_FILE_VERSION_V3
+#define SUSAMUNE_GHOST_FILE_VERSION_V4   4u
+#define SUSAMUNE_GHOST_FILE_VERSION      SUSAMUNE_GHOST_FILE_VERSION_V4
 #define SUSAMUNE_GHOST_FILE_HEADER_SIZE  0x100u
 #define SUSAMUNE_GHOST_FILE_CHECKSUM_OFFSET    0x0Cu
 #define SUSAMUNE_GHOST_HEADER_CHECKSUM_OFFSET  0x10u
@@ -60,6 +61,18 @@
 #define SUSAMUNE_GHOST_ANIMATION_ID_MAX          335u
 #define SUSAMUNE_GHOST_ANIMATION_PHASE_MAX       4095u
 #define SUSAMUNE_GHOST_ANIMATION_RESERVED_MASK   0x7u
+#define SUSAMUNE_GHOST_V4_ANIMATION_PHASE_MAX    255u
+#define SUSAMUNE_GHOST_V4_ANIMATION_PHASE_SHIFT  7u
+#define SUSAMUNE_GHOST_V4_YOSHI_SHIFT            4u
+#define SUSAMUNE_GHOST_V4_YOSHI_MASK             0x7u
+#define SUSAMUNE_GHOST_V4_YOSHI_NONE             0u
+#define SUSAMUNE_GHOST_V4_YOSHI_GREEN            1u
+#define SUSAMUNE_GHOST_V4_YOSHI_ORANGE           2u
+#define SUSAMUNE_GHOST_V4_YOSHI_PURPLE           3u
+#define SUSAMUNE_GHOST_V4_YOSHI_PINK             4u
+#define SUSAMUNE_GHOST_V4_YOSHI_UNKNOWN          5u
+#define SUSAMUNE_GHOST_V4_HELD_INDEX_MASK        0xFu
+#define SUSAMUNE_GHOST_V4_HELD_UNKNOWN           0xFu
 #define SUSAMUNE_GHOST_MAX_SAMPLE_DATA_SIZE      0x695E0u
 #define SUSAMUNE_GHOST_V1_MAX_PAYLOAD_SIZE       0x695E0u
 #define SUSAMUNE_GHOST_V1_MAX_FILE_SIZE          0x696E0u
@@ -82,10 +95,25 @@
 #define SUSAMUNE_GHOST_V3_MAX_PAYLOAD_SIZE       0x69DE0u
 #define SUSAMUNE_GHOST_V3_MAX_FILE_SIZE          0x69EE0u
 
+// V4 repacks the same fixed sample/table budget with attachment state.
+#define SUSAMUNE_GHOST_V4_MAX_SEGMENTS           64u
+#define SUSAMUNE_GHOST_V4_SEGMENT_SIZE           0x20u
+#define SUSAMUNE_GHOST_V4_SEGMENT_TABLE_OFFSET   0x100u
+#define SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE     0x800u
+#define SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET     0x900u
+#define SUSAMUNE_GHOST_V4_MAX_PAYLOAD_SIZE       0x69DE0u
+#define SUSAMUNE_GHOST_V4_MAX_FILE_SIZE          0x69EE0u
+
+#define SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_COUNT 7u
+#define SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE  6u
+#define SUSAMUNE_GHOST_V4_ATTACHMENT_HELD_OVERFLOW    0x0001u
+#define SUSAMUNE_GHOST_V4_ATTACHMENT_FLAGS             \
+    SUSAMUNE_GHOST_V4_ATTACHMENT_HELD_OVERFLOW
+
 // Transfer/storage bounds cover every currently supported canonical version.
 #define SUSAMUNE_GHOST_MAX_PAYLOAD_SIZE \
-    SUSAMUNE_GHOST_V3_MAX_PAYLOAD_SIZE
-#define SUSAMUNE_GHOST_MAX_FILE_SIZE SUSAMUNE_GHOST_V3_MAX_FILE_SIZE
+    SUSAMUNE_GHOST_V4_MAX_PAYLOAD_SIZE
+#define SUSAMUNE_GHOST_MAX_FILE_SIZE SUSAMUNE_GHOST_V4_MAX_FILE_SIZE
 #define SUSAMUNE_GHOST_INDEX_MAX_FILE_SIZE        0x1880u
 
 #define SUSAMUNE_GHOST_V2_SEGMENT_COUNT_OFFSET       184u
@@ -104,9 +132,23 @@
 #define SUSAMUNE_GHOST_V3_SAMPLE_DATA_SIZE_OFFSET    200u
 #define SUSAMUNE_GHOST_V3_SEGMENT_CHECKSUM_OFFSET    204u
 
+#define SUSAMUNE_GHOST_V4_SEGMENT_COUNT_OFFSET       184u
+#define SUSAMUNE_GHOST_V4_SEGMENT_SIZE_OFFSET        186u
+#define SUSAMUNE_GHOST_V4_SEGMENT_TABLE_OFFSET_FIELD 188u
+#define SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE_OFFSET  192u
+#define SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET_FIELD   196u
+#define SUSAMUNE_GHOST_V4_SAMPLE_DATA_SIZE_OFFSET    200u
+#define SUSAMUNE_GHOST_V4_SEGMENT_CHECKSUM_OFFSET    204u
+#define SUSAMUNE_GHOST_V4_ATTACHMENT_COUNT_OFFSET    208u
+#define SUSAMUNE_GHOST_V4_ATTACHMENT_SIZE_OFFSET     209u
+#define SUSAMUNE_GHOST_V4_ATTACHMENT_FLAGS_OFFSET    210u
+#define SUSAMUNE_GHOST_V4_ATTACHMENT_RESERVED_OFFSET 212u
+#define SUSAMUNE_GHOST_V4_ATTACHMENT_TABLE_OFFSET    214u
+
 #define SUSAMUNE_GHOST_RECORDING_TRANSFORM_QF 1u
 #define SUSAMUNE_GHOST_RECORDING_POSE_QF      2u
 #define SUSAMUNE_GHOST_CODEC_RAW              0u
+#define SUSAMUNE_GHOST_CODEC_POSE_ATTACHMENTS 1u
 
 // A future codec must set this required bit. V1 readers support no required
 // feature bits and refuse the file instead of guessing how to decode it.
@@ -114,8 +156,10 @@
 #define SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V1 0u
 #define SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V2 0u
 #define SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V3 0u
+#define SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V4 \
+    SUSAMUNE_GHOST_REQUIRED_EXTENDED_CODEC
 #define SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES \
-    SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V3
+    SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V4
 
 // Run flags are advisory metadata. Unknown bits are preserved and ignored.
 #define SUSAMUNE_GHOST_RUN_ASSISTED          0x00000001u
@@ -170,7 +214,8 @@ struct SusamuneGhostPoseSample {
     unsigned char x[3];
     unsigned char y[3];
     unsigned char z[3];
-    // Big-endian u24: animation ID 9, normalized phase 12, reserved zero 3.
+    // Big-endian u24. V3 is animation 9/phase 12/zero 3; V4 is
+    // animation 9/phase 8/Yoshi 3/held-descriptor index 4.
     unsigned char animation[3];
 };
 
@@ -197,6 +242,29 @@ struct SusamuneGhostFileV3Extension {
     unsigned int   sampleDataSize;
     unsigned int   segmentTableChecksum;
     unsigned int   reserved[12];
+};
+
+// These are source-game identifiers, never pointers or region-specific code
+// addresses. A future renderer can map the pair using the header's region.
+struct SusamuneGhostAttachmentDescriptor {
+    unsigned char objectId[4];
+    unsigned char nameKey[2];
+};
+
+struct SusamuneGhostFileV4Extension {
+    unsigned short segmentCount;
+    unsigned short segmentSize;
+    unsigned int   segmentTableOffset;
+    unsigned int   segmentTableSize;
+    unsigned int   sampleDataOffset;
+    unsigned int   sampleDataSize;
+    unsigned int   segmentTableChecksum;
+    unsigned char  attachmentCount;
+    unsigned char  attachmentSize;
+    unsigned short attachmentFlags;
+    unsigned short attachmentReserved;
+    struct SusamuneGhostAttachmentDescriptor
+        attachments[SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_COUNT];
 };
 
 struct SusamuneGhostFileHeader {
@@ -318,6 +386,12 @@ typedef char SusamuneGhostSegmentRouteOffset[
         ? 1 : -1];
 typedef char SusamuneGhostFileV3ExtensionSize[
     sizeof(struct SusamuneGhostFileV3Extension) == 72u ? 1 : -1];
+typedef char SusamuneGhostAttachmentDescriptorSize[
+    sizeof(struct SusamuneGhostAttachmentDescriptor) ==
+            SUSAMUNE_GHOST_V4_ATTACHMENT_DESCRIPTOR_SIZE
+        ? 1 : -1];
+typedef char SusamuneGhostFileV4ExtensionSize[
+    sizeof(struct SusamuneGhostFileV4Extension) == 72u ? 1 : -1];
 typedef char SusamuneGhostFileHeaderSize[
     sizeof(struct SusamuneGhostFileHeader) == SUSAMUNE_GHOST_FILE_HEADER_SIZE
         ? 1 : -1];
@@ -348,6 +422,12 @@ typedef char SusamuneGhostV3ExtensionChecksumOffset[
             __builtin_offsetof(struct SusamuneGhostFileV3Extension,
                                segmentTableChecksum) ==
             SUSAMUNE_GHOST_V3_SEGMENT_CHECKSUM_OFFSET
+        ? 1 : -1];
+typedef char SusamuneGhostV4ExtensionAttachmentOffset[
+    SUSAMUNE_GHOST_V4_SEGMENT_COUNT_OFFSET +
+            __builtin_offsetof(struct SusamuneGhostFileV4Extension,
+                               attachments) ==
+            SUSAMUNE_GHOST_V4_ATTACHMENT_TABLE_OFFSET
         ? 1 : -1];
 typedef char SusamuneGhostIndexHeaderSize[
     sizeof(struct SusamuneGhostIndexHeader) == SUSAMUNE_GHOST_INDEX_HEADER_SIZE
@@ -393,6 +473,15 @@ typedef char SusamuneGhostV3PayloadLimit[
     SUSAMUNE_GHOST_V3_SEGMENT_TABLE_SIZE +
             SUSAMUNE_GHOST_MAX_SAMPLE_DATA_SIZE ==
             SUSAMUNE_GHOST_V3_MAX_PAYLOAD_SIZE
+        ? 1 : -1];
+typedef char SusamuneGhostV4FileLimit[
+    SUSAMUNE_GHOST_FILE_HEADER_SIZE + SUSAMUNE_GHOST_V4_MAX_PAYLOAD_SIZE ==
+            SUSAMUNE_GHOST_V4_MAX_FILE_SIZE
+        ? 1 : -1];
+typedef char SusamuneGhostV4PayloadLimit[
+    SUSAMUNE_GHOST_V4_SEGMENT_TABLE_SIZE +
+            SUSAMUNE_GHOST_MAX_SAMPLE_DATA_SIZE ==
+            SUSAMUNE_GHOST_V4_MAX_PAYLOAD_SIZE
         ? 1 : -1];
 typedef char SusamuneGhostIndexLimit[
     SUSAMUNE_GHOST_INDEX_HEADER_SIZE +

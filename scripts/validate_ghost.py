@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate canonical Susamune V3 ghosts and portable export bundles."""
+"""Validate canonical Susamune V3/V4 ghosts and portable export bundles."""
 
 from __future__ import annotations
 
@@ -17,7 +17,8 @@ VERSION = 1  # SGIX remains V1.
 GHOST_VERSION_V1 = 1
 GHOST_VERSION_V2 = 2
 GHOST_VERSION_V3 = 3
-GHOST_VERSION = GHOST_VERSION_V3
+GHOST_VERSION_V4 = 4
+GHOST_VERSION = GHOST_VERSION_V4
 GHOST_HEADER_SIZE = 0x100
 INDEX_HEADER_SIZE = 0x80
 INDEX_ENTRY_SIZE = 0x80
@@ -51,13 +52,35 @@ V3_SEGMENT_TABLE_SIZE = 0x800
 V3_SAMPLE_DATA_OFFSET = 0x900
 V3_MAX_PAYLOAD_SIZE = 0x69DE0
 V3_MAX_GHOST_FILE_SIZE = 0x69EE0
-MAX_PAYLOAD_SIZE = V3_MAX_PAYLOAD_SIZE
-MAX_GHOST_FILE_SIZE = V3_MAX_GHOST_FILE_SIZE
+V4_MAX_SEGMENTS = V3_MAX_SEGMENTS
+V4_SEGMENT_SIZE = V3_SEGMENT_SIZE
+V4_SEGMENT_TABLE_OFFSET = V3_SEGMENT_TABLE_OFFSET
+V4_SEGMENT_TABLE_SIZE = V3_SEGMENT_TABLE_SIZE
+V4_SAMPLE_DATA_OFFSET = V3_SAMPLE_DATA_OFFSET
+V4_MAX_PAYLOAD_SIZE = V3_MAX_PAYLOAD_SIZE
+V4_MAX_GHOST_FILE_SIZE = V3_MAX_GHOST_FILE_SIZE
+V4_ANIMATION_PHASE_MAX = 255
+V4_ANIMATION_PHASE_SHIFT = 7
+V4_YOSHI_SHIFT = 4
+V4_YOSHI_MASK = 0x7
+V4_YOSHI_UNKNOWN = 5
+V4_HELD_INDEX_MASK = 0xF
+V4_HELD_UNKNOWN = 0xF
+V4_ATTACHMENT_DESCRIPTOR_COUNT = 7
+V4_ATTACHMENT_DESCRIPTOR_SIZE = 6
+V4_ATTACHMENT_HELD_OVERFLOW = 0x0001
+V4_ATTACHMENT_FLAGS = V4_ATTACHMENT_HELD_OVERFLOW
+MAX_PAYLOAD_SIZE = V4_MAX_PAYLOAD_SIZE
+MAX_GHOST_FILE_SIZE = V4_MAX_GHOST_FILE_SIZE
 MAX_INDEX_FILE_SIZE = 0x1880
 RESULT_QF_NONE = 0xFFFFFFFF
 RECORDING_POSE_QF = 2
 CODEC_RAW = 0
-SUPPORTED_REQUIRED_FEATURES = 0
+CODEC_POSE_ATTACHMENTS = 1
+REQUIRED_EXTENDED_CODEC = 0x00000001
+SUPPORTED_REQUIRED_FEATURES_V3 = 0
+SUPPORTED_REQUIRED_FEATURES_V4 = REQUIRED_EXTENDED_CODEC
+SUPPORTED_REQUIRED_FEATURES = SUPPORTED_REQUIRED_FEATURES_V4
 RUN_INCOMPLETE = 0x00000008
 ROUTE_FLAGS_V1 = 0x03
 ROUTE_INTERNAL_SCENE = 0x01
@@ -91,6 +114,7 @@ _INDEX_PREFIX = struct.Struct(">4sHHHHIIIII4BIIII4B")
 _INDEX_ENTRY_PREFIX = struct.Struct(">IIIIIIIIIIIi6BH")
 _SEGMENT = struct.Struct(">IIIIi4BII")
 _V3_EXTENSION = struct.Struct(">HHIIIII12I")
+_V4_EXTENSION = struct.Struct(">HHIIIIIBBHH" + "IH" * 7)
 
 
 class FormatError(ValueError):
@@ -153,6 +177,39 @@ def pack_pose_sample(
         animation.to_bytes(3, "big")
 
 
+def pack_pose_sample_v4(
+    x: int,
+    y: int,
+    z: int,
+    yaw: int,
+    delta_qf: int,
+    animation_id: int,
+    animation_phase: int,
+    yoshi: int = 0,
+    held: int = 0,
+) -> bytes:
+    """Pack one V4 pose/attachment sample without changing its 16-byte stride."""
+    for value in (x, y, z):
+        if not -(1 << 23) <= value < (1 << 23):
+            raise ValueError("pose coordinate does not fit signed BE24")
+    if not 0 <= animation_id <= ANIMATION_ID_MAX:
+        raise ValueError("animation id outside V4 range")
+    if not 0 <= animation_phase <= V4_ANIMATION_PHASE_MAX:
+        raise ValueError("animation phase outside V4 range")
+    if not 0 <= yoshi <= V4_YOSHI_MASK:
+        raise ValueError("Yoshi state outside V4 range")
+    if not 0 <= held <= V4_HELD_INDEX_MASK:
+        raise ValueError("held index outside V4 range")
+    pose = ((animation_id << 15) |
+            (animation_phase << V4_ANIMATION_PHASE_SHIFT) |
+            (yoshi << V4_YOSHI_SHIFT) | held)
+    coordinates = b"".join(
+        (value & 0xFFFFFF).to_bytes(3, "big") for value in (x, y, z)
+    )
+    return struct.pack(">hH", yaw, delta_qf) + coordinates + \
+        pose.to_bytes(3, "big")
+
+
 def _unpack_pose_sample(data: bytes, offset: int) -> tuple[int, ...]:
     _require(0 <= offset and offset + SAMPLE_SIZE <= len(data),
              "truncated pose sample")
@@ -165,6 +222,22 @@ def _unpack_pose_sample(data: bytes, offset: int) -> tuple[int, ...]:
     animation_phase = (animation >> 3) & ANIMATION_PHASE_MAX
     reserved = animation & ANIMATION_RESERVED_MASK
     return x, y, z, yaw, delta_qf, animation_id, animation_phase, reserved
+
+
+def _unpack_pose_sample_v4(data: bytes, offset: int) -> tuple[int, ...]:
+    _require(0 <= offset and offset + SAMPLE_SIZE <= len(data),
+             "truncated pose sample")
+    yaw, delta_qf = struct.unpack_from(">hH", data, offset)
+    x = _signed_be24(data[offset + 4:offset + 7])
+    y = _signed_be24(data[offset + 7:offset + 10])
+    z = _signed_be24(data[offset + 10:offset + 13])
+    pose = int.from_bytes(data[offset + 13:offset + 16], "big")
+    return (
+        x, y, z, yaw, delta_qf, pose >> 15,
+        (pose >> V4_ANIMATION_PHASE_SHIFT) & V4_ANIMATION_PHASE_MAX,
+        (pose >> V4_YOSHI_SHIFT) & V4_YOSHI_MASK,
+        pose & V4_HELD_INDEX_MASK,
+    )
 
 
 def _version(data: bytes, magic: bytes, label: str) -> int:
@@ -282,9 +355,9 @@ def validate_ghost(data: bytes) -> dict:
     _require(len(data) >= 8, "truncated ghost prefix")
     _require(data[:4] == GHOST_MAGIC, "bad ghost magic")
     version = struct.unpack_from(">H", data, 4)[0]
-    if version != GHOST_VERSION_V3:
+    if version not in (GHOST_VERSION_V3, GHOST_VERSION_V4):
         raise UnsupportedVersion(
-            f"unsupported ghost version {version}; reader supports 3"
+            f"unsupported ghost version {version}; reader supports 3 and 4"
         )
     _require(len(data) >= GHOST_HEADER_SIZE, "truncated ghost header")
     fields = _GHOST_PREFIX.unpack_from(data)
@@ -329,7 +402,7 @@ def validate_ghost(data: bytes) -> dict:
 
     _require(header_size == GHOST_HEADER_SIZE, "invalid ghost header size")
     _require(file_size == len(data), "ghost file size does not match bytes")
-    _require(file_size <= V3_MAX_GHOST_FILE_SIZE,
+    _require(file_size <= V4_MAX_GHOST_FILE_SIZE,
              "ghost exceeds canonical file limit")
     if checksum_kind != CHECKSUM_CRC32:
         raise UnsupportedFeature(f"unsupported checksum kind {checksum_kind}")
@@ -339,13 +412,21 @@ def validate_ghost(data: bytes) -> dict:
     expected_file_crc = _crc32_zeroed(data, (12, 16))
     _require(file_checksum == expected_file_crc, "ghost file checksum mismatch")
 
-    if required_features & ~SUPPORTED_REQUIRED_FEATURES:
+    supported_features = (SUPPORTED_REQUIRED_FEATURES_V4
+                          if version == GHOST_VERSION_V4
+                          else SUPPORTED_REQUIRED_FEATURES_V3)
+    if required_features & ~supported_features:
         raise UnsupportedFeature(
             f"unsupported required features {required_features:#010x}"
         )
+    _require(version != GHOST_VERSION_V4 or
+             required_features == REQUIRED_EXTENDED_CODEC,
+             "V4 attachment codec lacks its required feature")
     _require(recording_mode == RECORDING_POSE_QF,
              "unsupported recording mode")
-    _require(sample_codec == CODEC_RAW, "unsupported sample codec")
+    expected_codec = (CODEC_POSE_ATTACHMENTS
+                      if version == GHOST_VERSION_V4 else CODEC_RAW)
+    _require(sample_codec == expected_codec, "unsupported sample codec")
     _require(sample_stride == SAMPLE_SIZE, "invalid sample stride")
     _require(sample_interval_qf == SAMPLE_INTERVAL_QF, "invalid sample interval")
     _require(source_profile < PROFILE_COUNT, "invalid source profile")
@@ -375,147 +456,169 @@ def validate_ghost(data: bytes) -> dict:
     _require(payload_checksum == _crc32(payload), "ghost payload checksum mismatch")
     segments: list[dict] = []
 
+    attachment_descriptors: list[dict] = []
+    attachment_flags = 0
     if version == GHOST_VERSION_V3:
-        extension = _V3_EXTENSION.unpack_from(data, 184)
         (
-            segment_count,
-            segment_size,
-            segment_table_offset,
-            segment_table_size,
-            sample_data_offset,
-            sample_data_size,
-            segment_table_checksum,
-            *extension_reserved,
-        ) = extension
-        _require(1 <= segment_count <= V3_MAX_SEGMENTS,
-                 "V3 segment count outside bounds")
-        _require(segment_size == V3_SEGMENT_SIZE,
-                 "invalid V3 segment descriptor size")
-        _require(segment_table_offset == V3_SEGMENT_TABLE_OFFSET and
-                 segment_table_size == V3_SEGMENT_TABLE_SIZE and
-                 sample_data_offset == V3_SAMPLE_DATA_OFFSET,
-                 "invalid V3 payload offsets")
-        _require(sample_data_size == sample_count * sample_stride,
-                 "V3 sample-data size does not match sample count")
-        _require(payload_size == segment_table_size + sample_data_size,
-                 "V3 payload size does not match table and samples")
-        _require(payload_size <= V3_MAX_PAYLOAD_SIZE,
-                 "payload exceeds V3 limit")
-        _require(file_size == sample_data_offset + sample_data_size,
-                 "V3 ghost contains trailing or missing bytes")
+            segment_count, segment_size, segment_table_offset,
+            segment_table_size, sample_data_offset, sample_data_size,
+            segment_table_checksum, *extension_reserved,
+        ) = _V3_EXTENSION.unpack_from(data, 184)
         _require(not any(extension_reserved),
                  "nonzero V3 extension reserved bytes")
+    else:
+        extension = _V4_EXTENSION.unpack_from(data, 184)
+        (
+            segment_count, segment_size, segment_table_offset,
+            segment_table_size, sample_data_offset, sample_data_size,
+            segment_table_checksum, attachment_count, attachment_size,
+            attachment_flags, attachment_reserved, *descriptor_values,
+        ) = extension
+        _require(attachment_count <= V4_ATTACHMENT_DESCRIPTOR_COUNT,
+                 "V4 attachment descriptor count outside bounds")
+        _require(attachment_size == V4_ATTACHMENT_DESCRIPTOR_SIZE,
+                 "invalid V4 attachment descriptor size")
+        _require(not attachment_flags & ~V4_ATTACHMENT_FLAGS,
+                 "unknown V4 attachment flags")
+        _require(attachment_reserved == 0,
+                 "nonzero V4 attachment reserved field")
+        descriptors = list(zip(descriptor_values[::2], descriptor_values[1::2]))
+        for index, (object_id, name_key) in enumerate(descriptors):
+            if index < attachment_count:
+                _require(object_id != 0 or name_key != 0,
+                         f"V4 attachment descriptor {index} is empty")
+                _require((object_id, name_key) not in descriptors[:index],
+                         f"V4 attachment descriptor {index} is duplicated")
+                attachment_descriptors.append({
+                    "object_id": f"{object_id:08x}",
+                    "name_key": f"{name_key:04x}",
+                })
+            else:
+                _require(object_id == 0 and name_key == 0,
+                         "nonzero unused V4 attachment descriptor")
 
-        table = data[segment_table_offset:sample_data_offset]
-        _require(len(table) == V3_SEGMENT_TABLE_SIZE,
-                 "truncated V3 segment table")
-        _require(segment_table_checksum == _crc32(table),
-                 "V3 segment table checksum mismatch")
-        _require(not any(table[segment_count * segment_size:]),
-                 "nonzero unused V3 segment descriptors")
-        sample_data = data[sample_data_offset:file_size]
+    label = f"V{version}"
+    _require(1 <= segment_count <= V4_MAX_SEGMENTS,
+             f"{label} segment count outside bounds")
+    _require(segment_size == V4_SEGMENT_SIZE,
+             f"invalid {label} segment descriptor size")
+    _require(segment_table_offset == V4_SEGMENT_TABLE_OFFSET and
+             segment_table_size == V4_SEGMENT_TABLE_SIZE and
+             sample_data_offset == V4_SAMPLE_DATA_OFFSET,
+             f"invalid {label} payload offsets")
+    _require(sample_data_size == sample_count * sample_stride,
+             f"{label} sample-data size does not match sample count")
+    _require(payload_size == segment_table_size + sample_data_size,
+             f"{label} payload size does not match table and samples")
+    _require(payload_size <= V4_MAX_PAYLOAD_SIZE,
+             f"payload exceeds {label} limit")
+    _require(file_size == sample_data_offset + sample_data_size,
+             f"{label} ghost contains trailing or missing bytes")
 
-        expected_sample = 0
-        previous_end = None
-        for segment_index in range(segment_count):
-            offset = segment_index * segment_size
-            (
-                first_sample,
-                segment_samples,
-                segment_start,
-                segment_end,
-                segment_variant,
-                segment_area,
-                segment_episode,
-                segment_parent,
-                segment_flags,
-                reserved0,
-                reserved1,
-            ) = _SEGMENT.unpack_from(table, offset)
-            _require(first_sample == expected_sample,
-                     f"segment {segment_index} sample range is not contiguous")
-            _require(segment_samples >= 1 and
-                     expected_sample + segment_samples <= sample_count,
-                     f"segment {segment_index} sample count is invalid")
-            _require(segment_start <= QF_MAX and segment_end <= QF_MAX and
-                     segment_end >= segment_start,
-                     f"segment {segment_index} QFT range is invalid")
-            if previous_end is not None:
-                _require(segment_start >= previous_end,
-                         f"segment {segment_index} overlaps prior QFT range")
-            _validate_route(
-                segment_area, segment_episode, segment_parent, segment_flags,
-                segment_variant, f"segment {segment_index} route",
-            )
-            _require(reserved0 == 0 and reserved1 == 0,
-                     f"segment {segment_index} reserved fields are nonzero")
-            segment_route = {
-                "area": segment_area,
-                "episode": segment_episode,
-                "parent_area": segment_parent,
-                "flags": segment_flags,
-                "variant": segment_variant,
-            }
-            segments.append({
-                "first_sample": first_sample,
-                "sample_count": segment_samples,
-                "start_qf": segment_start,
-                "end_qf": segment_end,
-                "route": segment_route,
-            })
-            expected_sample += segment_samples
-            previous_end = segment_end
+    table = data[segment_table_offset:sample_data_offset]
+    _require(len(table) == V4_SEGMENT_TABLE_SIZE,
+             f"truncated {label} segment table")
+    _require(segment_table_checksum == _crc32(table),
+             f"{label} segment table checksum mismatch")
+    _require(not any(table[segment_count * segment_size:]),
+             f"nonzero unused {label} segment descriptors")
+    sample_data = data[sample_data_offset:file_size]
 
-        _require(expected_sample == sample_count,
-                 "V3 segments do not cover every sample")
-        _require(segments[0]["start_qf"] == start_qf and
-                 segments[-1]["end_qf"] == end_qf,
-                 "V3 segments do not span header QFT boundaries")
-        _require(segments[0]["route"] == {
-            "area": route_area,
-            "episode": route_episode,
-            "parent_area": route_parent_area,
-            "flags": route_flags,
-            "variant": route_variant,
-        }, "V3 first segment route differs from header")
-        if result_qf != RESULT_QF_NONE:
-            _require(segments[-1]["start_qf"] <= result_qf <=
-                     segments[-1]["end_qf"],
-                     "QFT result is outside final V3 segment")
+    expected_sample = 0
+    previous_end = None
+    for segment_index in range(segment_count):
+        offset = segment_index * segment_size
+        (
+            first_sample, segment_samples, segment_start, segment_end,
+            segment_variant, segment_area, segment_episode, segment_parent,
+            segment_flags, reserved0, reserved1,
+        ) = _SEGMENT.unpack_from(table, offset)
+        _require(first_sample == expected_sample,
+                 f"segment {segment_index} sample range is not contiguous")
+        _require(segment_samples >= 1 and
+                 expected_sample + segment_samples <= sample_count,
+                 f"segment {segment_index} sample count is invalid")
+        _require(segment_start <= QF_MAX and segment_end <= QF_MAX and
+                 segment_end >= segment_start,
+                 f"segment {segment_index} QFT range is invalid")
+        if previous_end is not None:
+            _require(segment_start >= previous_end,
+                     f"segment {segment_index} overlaps prior QFT range")
+        _validate_route(
+            segment_area, segment_episode, segment_parent, segment_flags,
+            segment_variant, f"segment {segment_index} route",
+        )
+        _require(reserved0 == 0 and reserved1 == 0,
+                 f"segment {segment_index} reserved fields are nonzero")
+        segment_route = {
+            "area": segment_area, "episode": segment_episode,
+            "parent_area": segment_parent, "flags": segment_flags,
+            "variant": segment_variant,
+        }
+        segments.append({
+            "first_sample": first_sample, "sample_count": segment_samples,
+            "start_qf": segment_start, "end_qf": segment_end,
+            "route": segment_route,
+        })
+        expected_sample += segment_samples
+        previous_end = segment_end
 
-        for segment_index, segment in enumerate(segments):
-            elapsed = 0
-            first = segment["first_sample"]
-            count = segment["sample_count"]
-            for local_index in range(count):
-                index = first + local_index
+    _require(expected_sample == sample_count,
+             f"{label} segments do not cover every sample")
+    _require(segments[0]["start_qf"] == start_qf and
+             segments[-1]["end_qf"] == end_qf,
+             f"{label} segments do not span header QFT boundaries")
+    _require(segments[0]["route"] == {
+        "area": route_area, "episode": route_episode,
+        "parent_area": route_parent_area, "flags": route_flags,
+        "variant": route_variant,
+    }, f"{label} first segment route differs from header")
+    if result_qf != RESULT_QF_NONE:
+        _require(segments[-1]["start_qf"] <= result_qf <=
+                 segments[-1]["end_qf"],
+                 f"QFT result is outside final {label} segment")
+
+    for segment_index, segment in enumerate(segments):
+        elapsed = 0
+        first = segment["first_sample"]
+        count = segment["sample_count"]
+        for local_index in range(count):
+            index = first + local_index
+            if version == GHOST_VERSION_V3:
                 (x, y, z, _yaw, delta_qf, animation_id,
-                 _animation_phase, animation_reserved) = _unpack_pose_sample(
-                    sample_data, index * SAMPLE_SIZE
-                )
-                _require(abs(x) <= MAX_POSITION_FIXED and
-                         abs(y) <= MAX_POSITION_FIXED and
+                 _phase, reserved) = _unpack_pose_sample(
+                    sample_data, index * SAMPLE_SIZE)
+                _require(reserved == 0,
+                         f"sample {index} animation reserved bits are nonzero")
+            else:
+                (x, y, z, _yaw, delta_qf, animation_id,
+                 _phase, yoshi, held) = _unpack_pose_sample_v4(
+                    sample_data, index * SAMPLE_SIZE)
+                _require(yoshi <= V4_YOSHI_UNKNOWN,
+                         f"sample {index} Yoshi state is invalid")
+                _require(held == 0 or held <= len(attachment_descriptors) or
+                         (held == V4_HELD_UNKNOWN and
+                          attachment_flags & V4_ATTACHMENT_HELD_OVERFLOW),
+                         f"sample {index} held descriptor index is invalid")
+            _require(abs(x) <= MAX_POSITION_FIXED and
+                     abs(y) <= MAX_POSITION_FIXED and
                      abs(z) <= MAX_POSITION_FIXED,
                      f"sample {index} position outside canonical bounds")
-                _require(animation_id <= ANIMATION_ID_MAX,
-                         f"sample {index} animation id outside bounds")
-                _require(animation_reserved == 0,
-                         f"sample {index} animation reserved bits are nonzero")
-                if local_index == 0:
-                    _require(delta_qf == 0,
-                             f"segment {segment_index} first delta is nonzero")
-                else:
-                    short_terminal = (
-                        local_index + 1 == count
-                        and 0 < delta_qf < sample_interval_qf
-                    )
-                    _require(delta_qf >= sample_interval_qf or short_terminal,
-                             f"sample {index} has an invalid short delta")
-                    elapsed += delta_qf
-                _require(elapsed <= segment["end_qf"] - segment["start_qf"],
-                         f"segment {segment_index} sample timeline overruns")
-            _require(elapsed == segment["end_qf"] - segment["start_qf"],
-                     f"segment {segment_index} duration differs from samples")
+            _require(animation_id <= ANIMATION_ID_MAX,
+                     f"sample {index} animation id outside bounds")
+            if local_index == 0:
+                _require(delta_qf == 0,
+                         f"segment {segment_index} first delta is nonzero")
+            else:
+                short_terminal = (local_index + 1 == count and
+                                  0 < delta_qf < sample_interval_qf)
+                _require(delta_qf >= sample_interval_qf or short_terminal,
+                         f"sample {index} has an invalid short delta")
+                elapsed += delta_qf
+            _require(elapsed <= segment["end_qf"] - segment["start_qf"],
+                     f"segment {segment_index} sample timeline overruns")
+        _require(elapsed == segment["end_qf"] - segment["start_qf"],
+                 f"segment {segment_index} duration differs from samples")
 
     ghost_id = (ghost_id_hi << 32) | ghost_id_lo
     _require(ghost_id != 0, "zero ghost id")
@@ -545,6 +648,8 @@ def validate_ghost(data: bytes) -> dict:
         "sample_count": sample_count,
         "segment_count": len(segments),
         "segments": segments,
+        "attachment_flags": attachment_flags,
+        "attachment_descriptors": attachment_descriptors,
         "created_unix": created_unix,
         "ghost_id": f"{ghost_id:016x}",
         "portable_filename": portable_ghost_filename(ghost_id),
@@ -671,8 +776,8 @@ def validate_index(data: bytes) -> dict:
         _require(end_qf >= start_qf and duration_qf == end_qf - start_qf,
                  f"entry {index} duration differs from boundaries")
         _require(ghost_file_size ==
-                     V3_SAMPLE_DATA_OFFSET + sample_count * SAMPLE_SIZE,
-                 f"entry {index} file size does not match V3 samples")
+                     V4_SAMPLE_DATA_OFFSET + sample_count * SAMPLE_SIZE,
+                 f"entry {index} file size does not match canonical samples")
         _require(ghost_file_size <= MAX_GHOST_FILE_SIZE,
                  f"entry {index} file is too large")
         if result_qf != RESULT_QF_NONE:

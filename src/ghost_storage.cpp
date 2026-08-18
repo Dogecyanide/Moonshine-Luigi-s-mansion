@@ -56,6 +56,7 @@ const char kIoError[] = "Ghost storage I/O error";
 const char kCatalogInvalid[] = "Ghost catalog failed validation";
 const char kEmptyName[] = "Empty slot";
 const char kUnsafeName[] = "Unsafe ghost";
+const char kUnnamedName[] = "Unnamed ghost";
 
 enum LoadDestination {
     LOAD_DESTINATION_RACE,
@@ -272,8 +273,18 @@ bool sanitizeSlot(const SusamuneGhostSlotInfo &raw,
         (raw.routeFlags & SUSAMUNE_GHOST_ROUTE_INTERNAL_SCENE) != 0;
     const bool parentStart =
         (raw.routeFlags & SUSAMUNE_GHOST_ROUTE_PARENT_START) != 0;
-    const u32 expectedV3Size = SUSAMUNE_GHOST_V3_SAMPLE_DATA_OFFSET +
+    const u32 expectedCanonicalSize = SUSAMUNE_GHOST_V4_SAMPLE_DATA_OFFSET +
         raw.sampleCount * SUSAMUNE_GHOST_POSE_SAMPLE_SIZE;
+    const bool canonicalV3 =
+        raw.canonicalVersion == SUSAMUNE_GHOST_FILE_VERSION_V3 &&
+        raw.requiredFeatures ==
+            SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V3 &&
+        raw.sampleCodec == SUSAMUNE_GHOST_CODEC_RAW;
+    const bool canonicalV4 =
+        raw.canonicalVersion == SUSAMUNE_GHOST_FILE_VERSION_V4 &&
+        raw.requiredFeatures ==
+            SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V4 &&
+        raw.sampleCodec == SUSAMUNE_GHOST_CODEC_POSE_ATTACHMENTS;
     const bool foreign = raw.gameId != kGameId;
     const bool namespaceSane = imported
         ? (raw.flags & SUSAMUNE_GHOST_SLOT_IMPORTED) != 0 &&
@@ -286,17 +297,14 @@ bool sanitizeSlot(const SusamuneGhostSlotInfo &raw,
     const bool sane = raw.generation != 0 && raw.status == 0 &&
         namespaceSane &&
         raw.discRevision == SUSAMUNE_GHOST_DISC_REVISION &&
-        raw.canonicalVersion == SUSAMUNE_GHOST_FILE_VERSION_V3 &&
-        raw.requiredFeatures ==
-            SUSAMUNE_GHOST_SUPPORTED_REQUIRED_FEATURES_V3 &&
+        (canonicalV3 || canonicalV4) &&
         raw.recordingMode == SUSAMUNE_GHOST_RECORDING_POSE_QF &&
-        raw.sampleCodec == SUSAMUNE_GHOST_CODEC_RAW &&
         raw.sampleIntervalQf == SUSAMUNE_GHOST_TRANSFORM_INTERVAL_QF &&
         raw.sampleCount >= SUSAMUNE_GHOST_MIN_SAMPLE_COUNT &&
         raw.sampleCount <= SUSAMUNE_GHOST_MAX_SAMPLE_COUNT &&
         raw.durationQf > 0 &&
         raw.durationQf <= SUSAMUNE_GHOST_MAX_DURATION_QF &&
-        raw.payloadSize == expectedV3Size &&
+        raw.payloadSize == expectedCanonicalSize &&
         raw.payloadSize <= SUSAMUNE_GHOST_MAX_FILE_SIZE &&
         (raw.resultQf == SUSAMUNE_GHOST_RESULT_QF_NONE ||
          raw.resultQf <= SUSAMUNE_GHOST_QF_MAX) &&
@@ -721,6 +729,14 @@ bool copyLiteral(char *out, u32 size, const char *text, u32 length) {
     return true;
 }
 
+bool copyVisibleName(char *out, u32 size, const char *text, u32 length) {
+    for (u32 i = 0; i < length; i++) {
+        if (text[i] != ' ') return copyLiteral(out, size, text, length);
+    }
+    // Printable catalog validation admits spaces; never show a live row blank.
+    return copyLiteral(out, size, kUnnamedName, sizeof(kUnnamedName) - 1);
+}
+
 }  // namespace
 
 void init() {
@@ -1016,6 +1032,10 @@ bool removeImported(int slot) {
 
 bool busy() { return sPendingCommand != SUSAMUNE_GHOST_CMD_NONE; }
 
+bool timedOut() {
+    return sPendingCommand != SUSAMUNE_GHOST_CMD_NONE && sTimedOut;
+}
+
 bool available() { return sAvailable; }
 
 bool catalogReady() { return sCatalogReady; }
@@ -1055,7 +1075,7 @@ bool copySlotName(int slot, char *out, u32 size) {
         return copyLiteral(out, size, kUnsafeName, sizeof(kUnsafeName) - 1);
     if ((info.flags & SUSAMUNE_GHOST_SLOT_PRESENT) == 0)
         return copyLiteral(out, size, kEmptyName, sizeof(kEmptyName) - 1);
-    return copyLiteral(out, size, info.name, info.nameLength);
+    return copyVisibleName(out, size, info.name, info.nameLength);
 }
 
 bool copyImportedSlotName(int slot, char *out, u32 size) {
@@ -1070,7 +1090,7 @@ bool copyImportedSlotName(int slot, char *out, u32 size) {
         return copyLiteral(out, size, kUnsafeName, sizeof(kUnsafeName) - 1);
     if ((info.flags & SUSAMUNE_GHOST_SLOT_PRESENT) == 0)
         return copyLiteral(out, size, kEmptyName, sizeof(kEmptyName) - 1);
-    return copyLiteral(out, size, info.name, info.nameLength);
+    return copyVisibleName(out, size, info.name, info.nameLength);
 }
 
 const SusamuneGhostSlotInfo *slot(int slot) {

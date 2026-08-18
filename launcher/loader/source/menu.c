@@ -197,7 +197,7 @@ void PrintSusamuneBuild(void)
 {
 	static const char BuildProduct[] = "Susamune Launcher";
 	static const char BuildTitle[] =
-		"V2.0.0 \"Ghosts of Delfino\".";
+		"V2.0.3 \"Ghosts of Delfino\".";
 	static const char BuildChecksum[] = "[" SUSAMUNE_BUILD_CHECKSUM "].";
 	PrintFormat(DEFAULT_SIZE, BLACK,
 	            640 - MENU_POS_X - ((int)sizeof(BuildProduct) - 1) * 10,
