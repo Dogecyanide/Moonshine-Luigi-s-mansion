@@ -300,7 +300,6 @@ namespace {
     DIRECT(SETTING_TIMER_FREEZE_ITEM, 0x80197208u, 0x801BF3C4u, 0x801B727Cu),
     DIRECT(SETTING_TIMER_FREEZE_ITEM, 0x801D5E54u, 0x801FE290u, 0x801F6174u),
     DIRECT(SETTING_TIMER_FREEZE_TALK, 0x80214F00u, 0x80153A34u, 0x801489B4u),
-    DIRECT(SETTING_TIMER_FREEZE_DEMO, 0x800ED89Cu, 0x8029A318u, 0x802921B0u),
     DIRECT(SETTING_TIMER_FREEZE_CLEANED, 0x8017A3D4u, 0x80215C6Cu, 0x8020DB50u),
     DIRECT(SETTING_TIMER_FREEZE_BOWSER, 0x801D3380u, 0x801FB7ACu, 0x801F3690u),
     DIRECT(SETTING_TIMER_FREEZE_YOSHI, 0x8014F830u, 0x802704D4u, 0x80268260u),
@@ -854,6 +853,16 @@ void QFTTimer::requestReset() {
   *sPlantQf            = -1;
   *sTransitionTarget   = 0xFFFF;
   resetSections();
+}
+
+void QFTTimer::freezeEvent() {
+  const int duration = freezeDuration();
+  if (duration == 0 || !sStageReady || sState->stopped ||
+      !gpMarDirector || gpMarDirector != sStageDirector) {
+    return;
+  }
+  sState->freezeQf = gpMarDirector->unk5C;
+  sState->freezeFrames = duration;
 }
 
 u32 QFTTimer::attemptSerial() const { return sAttemptSerial; }

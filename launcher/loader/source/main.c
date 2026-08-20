@@ -1535,6 +1535,10 @@ static char dev_es[] ATTRIBUTE_ALIGN(32) = "/dev/es";
 extern vu32 FoundVersion;
 int main(int argc, char **argv)
 {
+	bool presentationAttempted = false;
+	size_t launchDirLength;
+	char *first_slash;
+
 	// Exit after 10 seconds if there is an error
 	__exception_setreload(10);
 //	u64 timeout = 0;
@@ -1559,11 +1563,24 @@ int main(int argc, char **argv)
 	// menu, and the menu is the whole interface now. The branch below is kept
 	// so a "hold a button at startup to get back into the GUI" boot is a small
 	// change rather than a resurrection.
+	if(argc > 0 && argv != NULL && argv[0] != NULL)
+	{
+		first_slash = strrchr(argv[0], '/');
+		if (first_slash != NULL)
+		{
+			launchDirLength = (size_t)(first_slash - argv[0]) + 1u;
+			if (launchDirLength >= sizeof(launch_dir))
+				launchDirLength = sizeof(launch_dir) - 1u;
+			memcpy(launch_dir, argv[0], launchDirLength);
+			launch_dir[launchDirLength] = '\0';
+		}
+	}
+	gprintf("launch_dir = %s\r\n", launch_dir);
 
 	//Meh, doesnt do anything anymore anyways
 	//STM_RegisterEventHandler(HandleSTMEvent);
 
-	Initialise(false);
+	Initialise();
 
 	//for BT.c
 	CONF_GetPadDevices((conf_pads*)0x932C0000);
@@ -1582,12 +1599,36 @@ int main(int argc, char **argv)
 		DCStoreRange((void*)0x80001800, 0x1800);
 	}
 
+	// Load the launcher's presentation before its first visible frame. The
+	// temporary mount is closed before an IOS reload and reopened afterwards.
+	UseSD = (strncmp(launch_dir, "usb:", 4) != 0);
+	if (MountLauncherDevice() == false)
+	{
+		UseSD = !UseSD;
+		MountLauncherDevice();
+	}
+	if (devices[DEV_SD] || devices[DEV_USB])
+	{
+		SusamuneThemeLoad(GetRootDevice(), launch_dir, &background);
+		SusamuneMusicLoad(GetRootDevice(), launch_dir);
+		presentationAttempted = true;
+	}
+	RevealBackground(false);
+	if (SusamuneThemeWarning()[0] != '\0')
+	{
+		ShowMessageScreen(SusamuneThemeWarning());
+		usleep(2500000);
+	}
 	s32 fd;
 
 	/* Wii VC fw.img is pre-patched but Wii/vWii isnt, so we
 		still have to reload IOS on those with a patched kernel */
 	if(!isWiiVC)
 	{
+		UnmountDevice(DEV_SD);
+		UnmountDevice(DEV_USB);
+		primaryDevice = NULL;
+
 		// Preparing IOS58 Kernel...
 		ShowMessageScreen("Preparing IOS58 Kernel...");
 
@@ -1700,14 +1741,12 @@ int main(int argc, char **argv)
 
 	gprintf("Nintendont at your service!\r\n%s\r\n", NIN_BUILD_STRING);
 	KernelLoaded = 1;
-
-	// Seems like some programs start without any args
-	if(argc > 0 && argv != NULL && argv[0] != NULL)
+	SusamuneMusicStart();
+	if (SusamuneMusicWarning()[0] != '\0')
 	{
-		char* first_slash = strrchr(argv[0], '/');
-		if (first_slash != NULL) strncpy(launch_dir, argv[0], first_slash-argv[0]+1);
+		ShowMessageScreen(SusamuneMusicWarning());
+		usleep(2500000);
 	}
-	gprintf("launch_dir = %s\r\n", launch_dir);
 
 	// Checking for storage devices...
 	ShowMessageScreen("Checking storage devices...");
@@ -1752,18 +1791,25 @@ int main(int argc, char **argv)
 	free(fontbuffer);
 	//gprintf("Font: 0x1AFF00 starts with %.4s, 0x1FCF00 with %.4s\n", (char*)0x93100000, (char*)0x93100000 + 0x4D000);
 
-	// Keep the optional texture behind every mandatory startup allocation.
-	SusamuneThemeLoad(GetRootDevice(), launch_dir, &background);
-	if (SusamuneThemeWarning()[0] != '\0')
+	// An early device may have been unavailable until after the IOS reload.
+	if (!presentationAttempted)
 	{
-		ShowMessageScreen(SusamuneThemeWarning());
-		usleep(2500000);
-	}
-	SusamuneMusicLoad(GetRootDevice(), launch_dir);
-	if (SusamuneMusicWarning()[0] != '\0')
-	{
-		ShowMessageScreen(SusamuneMusicWarning());
-		usleep(2500000);
+		SusamuneThemeLoad(GetRootDevice(), launch_dir, &background);
+		SusamuneMusicLoad(GetRootDevice(), launch_dir);
+		SusamuneMusicStart();
+		ClearScreen();
+		GRRLIB_Render();
+		ClearScreen();
+		if (SusamuneThemeWarning()[0] != '\0')
+		{
+			ShowMessageScreen(SusamuneThemeWarning());
+			usleep(2500000);
+		}
+		if (SusamuneMusicWarning()[0] != '\0')
+		{
+			ShowMessageScreen(SusamuneMusicWarning());
+			usleep(2500000);
+		}
 	}
 
 	// Update meta.xml.

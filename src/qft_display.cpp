@@ -1,9 +1,15 @@
 #include "susamune/qft_display.hxx"
 
+#include "Dolphin/string.h"
+
 #include "susamune/menu.hxx"
 #include "susamune/mem2_map.h"
 
 namespace {
+
+bool sAnchorDrawn;
+int sAnchorWidth;
+char sAnchorText[20];
 
 inline int clampi(int value, int lo, int hi) {
     if (value < lo) return lo;
@@ -33,6 +39,15 @@ void QftDisplay::resetDefaults() {
     mDirty           = false;
     mDirtyBeforeEdit = false;
     mLeadingZero     = false;
+    sAnchorDrawn     = false;
+    sAnchorWidth     = 0;
+    sAnchorText[0]   = '\0';
+}
+
+void QftDisplay::beginOverlayFrame() {
+    sAnchorDrawn = false;
+    sAnchorWidth = 0;
+    sAnchorText[0] = '\0';
 }
 
 void QftDisplay::clamp() {
@@ -111,8 +126,37 @@ void QftDisplay::stageInto(volatile SusamuneQftDisplayCfg *dst) const {
 }
 
 void QftDisplay::draw(Menu *menu, const char *text) const {
+    if (!menu || !text) return;
+    const int size = clampi(20 * (int)mStyle.scale / 100, 10, 40);
+    sAnchorWidth = Creation::textWidth(text, size);
+    strncpy(sAnchorText, text, sizeof(sAnchorText));
+    sAnchorText[sizeof(sAnchorText) - 1] = '\0';
+    sAnchorDrawn = true;
     Creation::drawTextBox(menu, mStyle, mTextRgb,
                           SUSAMUNE_QFT_DISPLAY_TEXT_SLOTS, text, true);
+}
+
+bool QftDisplay::hasAnchor(const char *text) const {
+    return sAnchorDrawn && text && strcmp(sAnchorText, text) == 0;
+}
+
+bool QftDisplay::adjacentStyle(const char *anchorText, const char *text,
+                               CreationStyle *out) const {
+    if (!hasAnchor(anchorText) || !text || !out) return false;
+
+    const int pad = mStyle.padding == 0xff ? 0 : mStyle.padding;
+    const int anchorRight = (int)mStyle.x + sAnchorWidth + pad;
+    const int rightX = anchorRight + 10 + pad;
+    const int available = 640 - pad - rightX;
+    int size = clampi(20 * (int)mStyle.scale / 100, 10, 40);
+    while (size >= 10 && Creation::textWidth(text, size) > available) size--;
+    if (size < 10) return false;
+
+    *out = mStyle;
+    // Keep both backgrounds disjoint; a split delta never swaps sides.
+    out->x = (u16)rightX;
+    out->scale = (u8)(size * 5);
+    return true;
 }
 
 void QftDisplay::beginEditor() {

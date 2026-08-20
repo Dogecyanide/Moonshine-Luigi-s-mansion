@@ -4,6 +4,9 @@
 #include <Dolphin/types.h>
 
 class Menu;
+namespace LevelWarp {
+struct Dest;
+}
 
 namespace ILing {
 
@@ -15,6 +18,8 @@ int count();
 const char *label(int entry);
 const char *shortLabel(int entry);
 s32 pbQf(int entry);
+// Stable across catalogue reorderings; shared by PBs and per-level targets.
+int persistentSlot(int entry);
 void formatTime(s32 qf, char *out, u32 size,
                 const char *format = "%d:%02d.%03d");
 // Available only on Any% and only after every route IL has a PB.
@@ -33,6 +38,11 @@ int activeParentEpisode(u8 parentArea);
 // True when the current route deliberately entered a normally-main internal
 // area from its parent and Full Restart must return to that parent.
 bool forceParentFullRestart(u8 parentArea);
+// Pinna 1 deliberately uses retail Exit Area during both movie skips.
+bool preserveRetailExitArea();
+// Copy the exact selected start when its retail death would return to Plaza.
+// Internal scenes and other retail special retries stay untouched.
+bool copySessionDeathRetryDest(int entry, LevelWarp::Dest *out);
 
 bool start(int entry);
 bool start(int entry, u32 approvedDiscardToken);

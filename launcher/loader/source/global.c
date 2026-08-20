@@ -171,15 +171,15 @@ static void *font_ttf = NULL;
 static unsigned int font_ttf_size = 0;
 
 /**
- * Initialize the loader.
- * This also loads the background image.
- * @param autoboot Set if autobooting. (This disables the fade-in.)
+ * Initialize the loader graphics without exposing the stock background.
  */
-void Initialise(bool autoboot)
+void Initialise(void)
 {
-	int i;
 	CheckForGecko();
 	gprintf("GRRLIB_Init = %i\r\n", GRRLIB_Init());
+	VIDEO_SetBlack(TRUE);
+	VIDEO_Flush();
+	VIDEO_WaitVSync();
 	SusamuneMusicInit();
 	unzip_data(font_zip, font_zip_size, &font_ttf, &font_ttf_size);
 	gprintf("Decompressed font.ttf with %i bytes\r\n", font_ttf_size);
@@ -202,22 +202,42 @@ void Initialise(bool autoboot)
 		bg_xPos = 0;
 	}
 
-	if(autoboot == false)
+	gprintf("Initialize Finished\r\n");
+}
+
+/**
+ * Reveal the background after the launcher's theme assets have been loaded.
+ */
+void RevealBackground(bool autoboot)
+{
+	int i;
+
+	if (!autoboot)
 	{
 		for (i=0; i<255; i +=5) // Fade background image in from black screen
 		{
-			if (bg_isWidescreen)
+			SusamuneMusicService();
+			if (!SusamuneThemeDrawBackground(i, bg_xScale, bg_xPos))
 			{
-				// Clear the sides.
-				GRRLIB_Rectangle(0, 0, 80, 480, RGBA(222, 223, 224, i), true);
-				GRRLIB_Rectangle(80+480, 0, 80, 480, RGBA(222, 223, 224, i), true);
+				if (bg_isWidescreen)
+				{
+					GRRLIB_Rectangle(0, 0, 80, 480,
+						RGBA(222, 223, 224, i), true);
+					GRRLIB_Rectangle(80+480, 0, 80, 480,
+						RGBA(222, 223, 224, i), true);
+				}
+				GRRLIB_DrawImg(bg_xPos, 0, background, 0, bg_xScale, 1,
+					RGBA(255, 255, 255, i));
 			}
-			GRRLIB_DrawImg(bg_xPos, 0, background, 0, bg_xScale, 1, RGBA(255, 255, 255, i)); // Opacity increases as i does
 			GRRLIB_Render();
 		}
-		ClearScreen();
 	}
-	gprintf("Initialize Finished\r\n");
+	else
+	{
+		ClearScreen();
+		GRRLIB_Render();
+	}
+	ClearScreen();
 }
 
 static void (*stub)() = (void*)0x80001800;
@@ -363,14 +383,18 @@ bool LoadNinCFG(void)
 inline void ClearScreen()
 {
 	SusamuneMusicService();
-	if (bg_isWidescreen)
-	{
-		// Clear the sides.
-		GRRLIB_Rectangle(0, 0, 80, 480, RGBA(222, 223, 224, 255), true);
-		GRRLIB_Rectangle(80+480, 0, 80, 480, RGBA(222, 223, 224, 255), true);
-	}
 	if (!SusamuneThemeDrawBackground(255, bg_xScale, bg_xPos))
-		GRRLIB_DrawImg(bg_xPos, 0, background, 0, bg_xScale, 1, RGBA(255, 255, 255, 255));
+	{
+		if (bg_isWidescreen)
+		{
+			GRRLIB_Rectangle(0, 0, 80, 480,
+				RGBA(222, 223, 224, 255), true);
+			GRRLIB_Rectangle(80+480, 0, 80, 480,
+				RGBA(222, 223, 224, 255), true);
+		}
+		GRRLIB_DrawImg(bg_xPos, 0, background, 0, bg_xScale, 1,
+			RGBA(255, 255, 255, 255));
+	}
 }
 
 static inline char ascii(char s)

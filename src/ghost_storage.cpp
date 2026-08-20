@@ -64,9 +64,14 @@ enum LoadDestination {
     LOAD_DESTINATION_OBSERVER_SECONDARY,
 };
 
-SusamuneGhostSlotInfo sCatalog[SUSAMUNE_GHOST_SLOT_COUNT];
-SusamuneGhostSlotInfo
-    sImportedCatalog[SUSAMUNE_GHOST_IMPORTED_MAX_ENTRIES];
+SusamuneGhostSlotInfo *const sCatalog =
+    reinterpret_cast<SusamuneGhostSlotInfo *>(
+        SUSAMUNE_GHOST_CATALOG_CACHE_PPC_BASE);
+SusamuneGhostSlotInfo *const sImportedCatalog =
+    sCatalog + SUSAMUNE_GHOST_SLOT_COUNT;
+static_assert(kCatalogBytes + kImportedCatalogBytes ==
+                  SUSAMUNE_GHOST_CATALOG_CACHE_SIZE,
+              "ghost catalog cache layout changed");
 const char *sStatus = kUnavailable;
 u32 sSequence;
 u32 sPendingSequence;
@@ -124,13 +129,13 @@ bool validSlot(int slot) {
 }
 
 void clearCatalog() {
-    memset(sCatalog, 0, sizeof(sCatalog));
+    memset(sCatalog, 0, kCatalogBytes);
     sCatalogReady = false;
     sTotalDuration = 0;
 }
 
 void clearImportedCatalog() {
-    memset(sImportedCatalog, 0, sizeof(sImportedCatalog));
+    memset(sImportedCatalog, 0, kImportedCatalogBytes);
     sImportedCatalogReady = false;
     sImportedTotalDuration = 0;
     sImportedOverflow = 0;
@@ -740,8 +745,8 @@ bool copyVisibleName(char *out, u32 size, const char *text, u32 length) {
 }  // namespace
 
 void init() {
-    memset(sCatalog, 0, sizeof(sCatalog));
-    memset(sImportedCatalog, 0, sizeof(sImportedCatalog));
+    memset(sCatalog, 0, kCatalogBytes);
+    memset(sImportedCatalog, 0, kImportedCatalogBytes);
     sSequence = 0;
     sPendingSequence = 0;
     sPendingRecordToken = 0;

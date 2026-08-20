@@ -20,8 +20,9 @@ VERSION = 1
 HEADER_SIZE = 32
 
 
-def shared_hex_define(name):
-    header = Path(__file__).parent.parent / "include" / "susamune" / "mem2_map.h"
+def shared_hex_define(name, header_name="mem2_map.h"):
+    header = (Path(__file__).parent.parent / "include" / "susamune" /
+              header_name)
     match = re.search(
         r"^#define\s+{}\s+(0x[0-9a-fA-F]+)u?\s*$".format(re.escape(name)),
         header.read_text(), re.M)
@@ -34,12 +35,17 @@ def shared_hex_define(name):
 # that cannot be staged. Read the shared C header rather than duplicating it.
 STAGING_WINDOW_SIZE = shared_hex_define("SUSAMUNE_MEM2_MODBIN_SIZE")
 STAGED_FILE_MAX_SIZE = shared_hex_define("SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE")
+BLOB_MAX_SIZE = shared_hex_define("SUSAMUNE_MOD_BLOB_MAX_SIZE", "mod_bin.h")
 
 
 def build_mod_bin(manifest):
     code = bytes.fromhex(manifest["code"])
     if len(code) % 4:
         raise ValueError("code blob is not word-aligned")
+    if len(code) > BLOB_MAX_SIZE:
+        raise ValueError(
+            f"code blob is {len(code):#x} bytes, over the {BLOB_MAX_SIZE:#x} "
+            "MEM1 working cap")
 
     writes = manifest["writes"]
     body = code + b"".join(

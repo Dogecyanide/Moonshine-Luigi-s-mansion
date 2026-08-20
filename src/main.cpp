@@ -31,6 +31,9 @@
 #include "susamune/qft_display.hxx"
 #include "susamune/records.hxx"
 #include "susamune/records_persistence.hxx"
+#include "susamune/split_events.hxx"
+#include "susamune/split_stats.hxx"
+#include "susamune/stage_loader.hxx"
 #include "susamune/pattern_selector.hxx"
 #include "susamune/warp_wheel.hxx"
 #include "susamune/visible_goop.hxx"
@@ -78,6 +81,9 @@ extern "C" void onAppInit(TApplication* app) {
     Records::init();
     RecordsPersistence::init();
     ILing::init();
+    StageLoader::init();
+    SplitStats::init();
+    SplitEvents::init();
     GhostStorage::init();
 #if ENABLE_MEM_DIAGNOSTICS
     memDiagnosticsInit();
@@ -103,6 +109,9 @@ extern "C" void onAppInit(TApplication* app) {
 }
 
 extern "C" u8 onUpdateGameMode(TMarDirector* director) {
+    if (StageLoader::holdGameModeBeforeUpdate(director)) {
+        return director->mCurState;
+    }
     if (WarpWheel::holdGameModeBeforeUpdate(director)) {
         return director->mCurState;
     }
@@ -166,6 +175,7 @@ extern "C" void onSetup(TMarDirector* director) {
     // would otherwise inherit a pointer into the previous stage's freed heap.
     gpPollution = nullptr;
     GhostModel::beforeStageSetup();
+    SplitEvents::beforeStageSetup();
     if (Ghost::observerCleanupPending())
         ILing::resetAfterObserver();
     ILing::beforeStageSetup();
@@ -189,6 +199,8 @@ extern "C" void onSetup(TMarDirector* director) {
     actionsOnStageLoad();
     visibleGoopOnStageSetup();
     gQFTTimer.onStageSetup(director);
+    SplitEvents::onStageSetup(director);
+    SplitStats::onStageSetup();
     Ghost::onStageSetup(director);
     GhostModel::onStageSetup(director);
     const bool observerStage = Ghost::observerActive();
@@ -258,17 +270,41 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
                                  gInputDisplay.editing() ||
                                  gMetadataDisplay.editing() ||
                                  gCreationExtras.editing();
+    const bool sessionModalBeforeDirect = StageLoader::modal();
+    const bool sessionResultBeforeDirect = StageLoader::resultOwnsInput();
+    const bool menuOpenBeforeDirect = gMenu && gMenu->shown();
+    const bool wheelOpenBeforeDirect = WarpWheel::shown();
+    const bool wheelOwnsInputBeforeDirect =
+        wheelOpenBeforeDirect || WarpWheel::promptPending();
+    // A pending result must block new consumers without trapping an overlay
+    // that was already open before the finish was recorded.
+    const bool sessionBlocksNewInput = sessionModalBeforeDirect ||
+        (sessionResultBeforeDirect &&
+         !menuOpenBeforeDirect && !wheelOwnsInputBeforeDirect);
+    if (sessionResultBeforeDirect) {
+        WarpWheel::suppressClassicInstantUntilRelease();
+    }
+    if (sessionBlocksNewInput) gBinds.suppressUntilRelease();
+    if (sessionModalBeforeDirect && gpApplication.mGamePads[0]) {
+        // The modal dismisses from raw PAD state. Do not leave its fresh edge
+        // queued in the retail pad when the frozen director resumes.
+        gpApplication.mGamePads[0]->mButtons.mInput = 0;
+        gpApplication.mGamePads[0]->mButtons.mFrameInput = 0;
+        gpApplication.mGamePads[0]->mButtons.mRapidInput = 0;
+    }
     gQFTTimer.beginFrame();
+    SplitStats::beginFrame();
     gQFTTimer.update();
     GhostModel::beginFrame();
     // Before direct(): while the wheel is open it takes the pad away from
     // the game. A PB save can hide the prompt behind the Ghosts tab, but its
     // held action still needs storage ACK polling when warps are disabled.
     if (!creationEditing &&
-        (!gSettings.getBool(SETTING_DISABLE_WARPS) || WarpWheel::shown() ||
-         WarpWheel::promptPending()))
+        (!sessionResultBeforeDirect || wheelOwnsInputBeforeDirect) &&
+        (!gSettings.getBool(SETTING_DISABLE_WARPS) ||
+         wheelOpenBeforeDirect || WarpWheel::promptPending()))
         WarpWheel::update(gpApplication.mGamePads[0]);
-    PatternSelector::update(!creationEditing);
+    PatternSelector::update(!creationEditing && !sessionResultBeforeDirect);
 
     // Freeze the stage while an overlay is up. direct() runs the movement and
     // animation perform lists only outside the pause and stage-exit states, so
@@ -277,7 +313,8 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     // did produce would be a state change we never asked for, so drop it.
     const bool freeze = gpMarDirector &&
                         gpMarDirector->mCurState == TMarDirector::STATE_NORMAL &&
-                        ((gMenu && gMenu->shown()) || WarpWheel::shown());
+                        ((gMenu && gMenu->shown()) || WarpWheel::shown() ||
+                         sessionModalBeforeDirect);
     const bool marioActive = gpMarDirector &&
                              gpMarDirector->mCurState == TMarDirector::STATE_NORMAL &&
                              !freeze;
@@ -287,6 +324,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
         gpMarDirector->mCurState = TMarDirector::STATE_STAGE_EXIT_2;
     }
     Ghost::beforeDirect();
+    SplitEvents::beginFrame();
     int state = director->direct();
     if (freeze) {
         gpMarDirector->mCurState = TMarDirector::STATE_NORMAL;
@@ -304,7 +342,8 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
 
     // Exit Area is identified inside direct(). Delay the one pre-direct
     // bind-driven overlay toggle so its confirming A cannot leak into it.
-    if (!creationEditing)
+    const bool sessionResultAfterDirect = StageLoader::resultOwnsInput();
+    if (!creationEditing && !sessionResultAfterDirect)
         gInputDisplay.update();
 
 #if IS_EMULATOR
@@ -312,10 +351,17 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
 #endif
 
     gQFTTimer.update();
+    SplitEvents::update();
     const bool observerFrame = Ghost::observerStatsSuppressed();
     Ghost::update();
     Records::update(creationEditing, observerFrame);
     ILing::update();
+    StageLoader::update();
+    SplitStats::update();
+    WarpWheel::resolveDeferredRestart();
+    const bool sessionOwnsInput = sessionResultBeforeDirect ||
+                                  sessionResultAfterDirect ||
+                                  StageLoader::resultOwnsInput();
     GhostStorage::update();
     RecordsPersistence::update();
     if (observerFrame || !creationEditing)
@@ -325,13 +371,16 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
     // Runs every frame like the gecko handler; no-ops when nothing changed.
     featuresApply();
 
-    actionsApply(!creationEditing);
+    actionsApply(!creationEditing && !sessionOwnsInput);
     gCreationExtras.update();
 
-    if (gSavestateMgr && !creationEditing) {
+    if (gSavestateMgr && !creationEditing && !sessionOwnsInput) {
         gSavestateMgr->updateHook();
     }
-    if (gMenu) {
+    const bool allowExistingMenuToClose =
+        StageLoader::resultOwnsInput() && !StageLoader::modal() &&
+        menuOpenBeforeDirect;
+    if (gMenu && (!sessionOwnsInput || allowExistingMenuToClose)) {
         gMenu->update(gpApplication.mGamePads[0]);
     }
 #if ENABLE_MEM_DIAGNOSTICS
@@ -347,7 +396,8 @@ extern "C" void afterDraw() {
     // GPU work are all complete, while the next game frame has not begun.
     THPPlayerDrawDone();
     if (gSavestateMgr && !gQftDisplay.editing() && !gInputDisplay.editing() &&
-        !gMetadataDisplay.editing() && !gCreationExtras.editing())
+        !gMetadataDisplay.editing() && !gCreationExtras.editing() &&
+        !StageLoader::resultOwnsInput())
         gSavestateMgr->processPendingLoad();
     // gpPollution is stale until the async setup thread reaches onSetup.
     if (gpMarDirector && gpMarDirector->_260 != 0 &&
@@ -375,9 +425,12 @@ extern "C" void afterDraw() {
         memDiagnosticsDraw(gMenu);
 #endif
         ILing::draw(gMenu);
-        if (!gMenu || !gMenu->shown())
+        StageLoader::draw(gMenu);
+        const bool sessionModal = StageLoader::modal();
+        if (!sessionModal && (!gMenu || !gMenu->shown()))
             PatternSelector::draw(gMenu);
-        if (!gSettings.getBool(SETTING_DISABLE_WARPS) || WarpWheel::shown())
+        if (!sessionModal &&
+            (!gSettings.getBool(SETTING_DISABLE_WARPS) || WarpWheel::shown()))
             WarpWheel::draw();
     }
 }

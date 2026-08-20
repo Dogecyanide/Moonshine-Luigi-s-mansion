@@ -49,6 +49,20 @@ patches = [
      'sym': 'susamuneFireRideYoshi', 'type': PatchType.BL},
     {'jp': 0x80193e68, 'us': 0x801bbe80, 'pal': 0x801b3d38,
      'sym': 'susamuneFireGetNozzle', 'type': PatchType.BL},
+    # Split endpoints are observed independently of QFT's optional freeze
+    # hooks. Entry wrappers replay each displaced mflr before returning to the
+    # retail body. The status wrapper is installed by SplitEvents::init so the
+    # checked-in source-free BPS layouts need no new retail hook address.
+    {'jp': 0x801962c8, 'us': 0x801be428, 'pal': 0x801b62e0,
+     'sym': 'susamuneSplitCoinRedTaken', 'type': PatchType.B},
+    # These layouts already exclude ResetFruit::hold. Preserve that exact set
+    # with its retail mflr until layouts can be regenerated from clean discs.
+    {'jp': 0x801baef0, 'us': 0x801e3500, 'pal': 0x801db3d8,
+     'val': 0x7c0802a6, 'type': PatchType.W32},
+    {'jp': 0x80177cf0, 'us': 0x8021358c, 'pal': 0x8020b470,
+     'sym': 'susamuneSplitPiantaRecoverNerve', 'type': PatchType.BL},
+    {'jp': 0x8017a274, 'us': 0x80215b0c, 'pal': 0x8020d9f0,
+     'sym': 'susamuneSplitEmitHappyEffect', 'type': PatchType.B},
 #   {'jp': 0x800fa110, 'us': ..., 'pal': ..., 'sym': 'onFinishAppState', 'type': PatchType.BL},
     # insert NOPs to speed up boot process
     # initialize__12TApplicationFv + 0x2c / +0x40.
@@ -85,13 +99,20 @@ mod_region_size = 0x80000
 # the blob must not grow into. MUST match SUSAMUNE_SCRATCH in mod_bin.h.
 mod_scratch_size = 0x40
 
-# The packed header/code/write list must leave the reset-safe runtime tail
-# untouched. nop_count contributes one additional write per NOP.
-mod_file_max_size = 0x3F000
+# The raw blob ends where the fixed MEM1 attachment heap begins. The packed
+# header/code/write list can use the complete MEM2 prefix before the asset vault.
+mod_mem1_working_cap_size = 0x50000
+mod_attachment_heap_offset = 0x50000
+mod_attachment_heap_size = 0x20000
+mod_file_max_size = 0x5F000
 mod_write_count = sum(1 + patch.get('nop_count', 0) for patch in patches)
-mod_blob_max_size = min(
-    mod_region_size - mod_scratch_size,
-    mod_file_max_size - 32 - mod_write_count * 8)
+mod_blob_max_size = mod_mem1_working_cap_size
+assert mod_blob_max_size == mod_mem1_working_cap_size
+assert mod_attachment_heap_offset == mod_mem1_working_cap_size
+assert mod_attachment_heap_offset + mod_attachment_heap_size <= \
+    mod_region_size - mod_scratch_size
+assert (mod_attachment_heap_offset | mod_attachment_heap_size) & 31 == 0
+assert 32 + mod_blob_max_size + mod_write_count * 8 <= mod_file_max_size
 
 # OSInit returns the debug stack to the arena when no debug monitor is present
 # (BI2DebugFlag < 2), so the runtime __OSArenaLo is this far BELOW the

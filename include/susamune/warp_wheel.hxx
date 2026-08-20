@@ -43,8 +43,6 @@ void warpTo(const Dest &dest);
 // Guarded course arm. `selectedIL` lets a late PB abort unwind the attempt;
 // the token parameter remains ABI-compatible with the PR4 call sites.
 void warpToGuarded(const Dest &dest, u32 legacyToken, bool selectedIL);
-// Drop the Plaza return captured by a selected IL once that attempt ends.
-void clearPracticeReturn();
 // Warp to `dest`, but make the next director see `source` as the stage Mario
 // just left. Used by travel practice to select the retail Plaza return point.
 void warpFrom(const Dest &source, const Dest &dest);
@@ -88,6 +86,9 @@ u8 guardExitArea(u8 nextState);
 // Start an IL immediately when safe, or hide the menu and hold it behind the
 // shared unsaved-PB confirmation. False means warps are disabled.
 bool requestILStart(int entry);
+// A user-picked IL cancels an unfinished session, but an earned result, final
+// report and its protected-PB policy resolve first.
+bool requestExplicitILStart(int entry);
 // Savestate restores destroy volatile ghost state. The request opens the same
 // PB confirmation when needed; an approved load is returned exactly once.
 bool requestSavestateLoad();
@@ -105,6 +106,11 @@ bool promptShown();
 // A prompt suspended in the Ghosts save flow still owns the destructive
 // action and silences configured binds, even though its overlay is hidden.
 bool promptPending();
+// Keep the raw B+D-up selector latched while another global modal owns input.
+void suppressClassicInstantUntilRelease();
+// Restart chords are sampled before IL results. Resolve a one-frame deferred
+// restart after ILing/StageLoader have processed the same frame.
+void resolveDeferredRestart();
 // Return an exact token-bound Ghosts save flow to its original confirmation.
 bool resumePBPrompt(u32 token);
 // Call after Menu::draw(), which is what leaves the 2D state set up.

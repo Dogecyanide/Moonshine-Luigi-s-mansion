@@ -141,3 +141,5 @@ PLAZA("Noki Enter", 6, 2, FINISH_TRANSITION,
       TGameSequence::AREA_MARE, 110)
 PLAZA("Corona Enter", 9, 9, FINISH_TRANSITION,
       TGameSequence::AREA_COROEX6, 111)
+
+SHINE_ROUTE("Gelato GBS", 4, 0, 0, 27, GROUP_ANY_PERCENT, 125)

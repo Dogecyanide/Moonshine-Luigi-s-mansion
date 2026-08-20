@@ -505,6 +505,12 @@ int glyphCount(const char *text) {
     return count;
 }
 
+int textWidth(const char *text, int size) {
+    if (!text) return 0;
+    int count;
+    return splitTextWidth(text, size, &count);
+}
+
 void drawTextLine(Menu *menu, const CreationStyle &style,
                   const u8 (*textRgb)[3], u16 textSlots, const char *text,
                   int x, int y, int size, u16 firstSlot, bool shadow,

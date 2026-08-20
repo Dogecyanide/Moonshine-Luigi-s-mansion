@@ -62,6 +62,8 @@
 #include "susamune/ghost_storage.hxx"
 #include "susamune/mem2_map.h"
 #include "susamune/qft_timer.hxx"
+#include "susamune/split_events.hxx"
+#include "susamune/split_stats.hxx"
 #include "susamune/iling.hxx"
 #include "susamune/records.hxx"
 #include "susamune/warp_wheel.hxx"
@@ -640,6 +642,8 @@ bool SavestateManager::loadState() {
     OSRestoreInterrupts(ints);
 
     gQFTTimer.onSavestateLoaded();
+    SplitEvents::onSavestateLoaded();
+    SplitStats::onSavestateLoaded();
     Ghost::onSavestateLoaded();
     GhostStorage::onSavestateLoaded();
     // An armed warp lives in mod BSS, outside the restored game snapshot.

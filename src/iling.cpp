@@ -21,6 +21,8 @@
 #include "susamune/qft_timer.hxx"
 #include "susamune/records.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/split_stats.hxx"
+#include "susamune/stage_loader.hxx"
 #include "susamune/susamune_cfg.h"
 #if IS_EMULATOR
 #include "susamune/emulator_persistence.hxx"
@@ -108,6 +110,9 @@ const u8 kNoShine = 0xFF;
 #define SHINE_INSIDE(label, area, episode, parent, id, group, slot) \
     RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
         ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE, slot)
+#define SHINE_ROUTE(label, area, episode, parent, id, group, slot) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE, slot)
 #define SHINE_SECRET(label, area, episode, parent, id, group, slot) \
     RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
         ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE | ENTRY_CARRY_OVERLAY, slot)
@@ -130,6 +135,7 @@ constexpr Entry kEntries[] = {
 #undef SHINE_FULL
 #undef PINNA_EYG
 #undef SHINE_INSIDE
+#undef SHINE_ROUTE
 #undef SHINE_SECRET
 #undef PLAZA
 #undef RAW
@@ -254,6 +260,9 @@ constexpr bool verifyRegularLabel(const char *expected, int parent, int result,
 #define SHINE_INSIDE(label, area, episode, parent, id, group, slot) \
     static_assert((slot) == 52 || (slot) == 122 || (slot) == 123, \
                   "inside IL slot changed");
+#define SHINE_ROUTE(label, area, episode, parent, id, group, slot) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE, slot)
 #define SHINE_SECRET(label, area, episode, parent, id, group, slot) \
     RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
         ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE | ENTRY_CARRY_OVERLAY, slot)
@@ -271,6 +280,7 @@ constexpr bool verifyRegularLabel(const char *expected, int parent, int result,
 #undef SHINE_FULL
 #undef PINNA_EYG
 #undef SHINE_INSIDE
+#undef SHINE_ROUTE
 #undef SHINE_SECRET
 #undef PLAZA
 #undef RAW
@@ -297,6 +307,8 @@ constexpr bool verifyRegularLabel(const char *expected, int parent, int result,
 #define PINNA_EYG(label, slot) ENTRY_LABEL(GROUP_PINNA, label)
 #define SHINE_INSIDE(label, area, episode, parent, id, group, slot) \
     ENTRY_LABEL(group, label)
+#define SHINE_ROUTE(label, area, episode, parent, id, group, slot) \
+    ENTRY_LABEL(group, label)
 #define SHINE_SECRET(label, area, episode, parent, id, group, slot) ENTRY_LABEL(group, label)
 #define PLAZA(label, source, scenario, finish, result, slot) label "\0"
 #define RAW(label, area, episode, parent, finish, result, group, flags, prerequisite) \
@@ -309,7 +321,7 @@ const char kLiteralEntryLabels[] =
 constexpr char kLiteralShortLabels[] =
     "AS1\0ASR\0CM\0BOW\0DCS\0PAC\0DSL\0LIL\0GRS\0LHS\0BG1\0BG2\0LB\0RB\0"
     "CHK\0SG\0D100\0UB\0BS\0GB\0BP\0DSM\0TS\0GP\0PE\0HS\0RE\0B2E\0"
-    "SE\0NE\0CE";
+    "SE\0NE\0CE\0GGBS";
 
 constexpr int packedLabelCount(const char *pool, u32 bytes) {
     int count = 1;
@@ -327,6 +339,7 @@ constexpr int packedLabelCount(const char *pool, u32 bytes) {
 #undef SHINE_FULL
 #undef PINNA_EYG
 #undef SHINE_INSIDE
+#undef SHINE_ROUTE
 #undef SHINE_SECRET
 #undef PLAZA
 #undef RAW
@@ -373,6 +386,9 @@ constexpr int packedLabelCount(const char *pool, u32 bytes) {
 #define SHINE_INSIDE(label, area, episode, parent, id, group, slot) \
     RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
         ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE, slot)
+#define SHINE_ROUTE(label, area, episode, parent, id, group, slot) \
+    RAW(label, area, episode, parent, FINISH_SHINE, id, group, \
+        ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE, slot)
 #define SHINE_SECRET(label, area, episode, parent, id, group, slot) \
     static_assert(isSecretOnlyPbSlot(slot), \
                   "Secret-only IL left its reserved PB slot range");
@@ -390,14 +406,16 @@ constexpr int packedLabelCount(const char *pool, u32 bytes) {
 #undef SHINE_FULL
 #undef PINNA_EYG
 #undef SHINE_INSIDE
+#undef SHINE_ROUTE
 #undef SHINE_SECRET
 #undef PLAZA
 #undef RAW
 
 const u8 kPlazaStoryHigh[10] = {0x00, 0x10, 0xF0, 0xF0, 0xF0,
                                 0x30, 0xF0, 0xF0, 0xF0, 0xF0};
-const int kPbSlotCount = 125;
+const int kPbSlotCount = 126;
 const int kEntryGelato4Inside = 31;
+const int kEntryGelatoGbs = 121;
 const int kEntryPinnaEyg = 46;
 const u8 kPinnaEygParentEpisode = 2;
 const int kEntrySirena8 = 63;
@@ -424,12 +442,20 @@ static_assert(kEntries[kEntryNoki3Inside].start.area == 0x2C &&
               "Noki 3 Inside entry moved");
 static_assert(kEntries[kEntryNoki4Eel].prerequisite == 122,
               "Noki 4 Eel entry moved");
+static_assert(kEntries[kEntryGelatoGbs].start.area == 4 &&
+                  kEntries[kEntryGelatoGbs].start.episode == 0 &&
+                  kEntries[kEntryGelatoGbs].start.gameInt3 == 0 &&
+                  kEntries[kEntryGelatoGbs].result == 27 &&
+                  (kEntries[kEntryGelatoGbs].flags & ENTRY_FLAG_MASK) ==
+                      (ENTRY_CLEAR_RESULT | ENTRY_PB_OVERRIDE) &&
+                  kEntries[kEntryGelatoGbs].prerequisite == 125,
+              "Gelato GBS entry moved");
 static_assert(kEntries[kEntryCorona].result == 119 &&
               kEntries[kEntryBowser].result == 124,
               "Corona entries moved");
 const u8 kAnyPercentTheorySlots[] = {
     1, 2, 3, 4, 5, 6,                  // Bianco 2-7
-    27, 26,                            // Gelato 8, 7
+    125, 26,                           // Gelato GBS, 7
     10, 11, 12, 13, 14, 15, 16,       // Ricco 1-7
     60, 65, 62, 61, 64, 63, 66,       // Pianta 1-7
     30, 31, 32, 33, 121, 36,           // Pinna 1-4, EYG, 7
@@ -451,7 +477,7 @@ const u32 kPbSaveTimeoutFrames = 300;
 const u32 kPbRetryDelayFrames = 300;
 
 static_assert(sizeof(Entry) == 6, "ILing entry layout changed");
-static_assert(kEntryCount == 121, "ILing entry count changed");
+static_assert(kEntryCount == 122, "ILing entry count changed");
 static_assert(kEntryCount <= 0x100, "recent IL entry index exceeds u8");
 static_assert(sizeof(kAnyPercentTheorySlots) == 55,
               "Any% theory route changed");
@@ -468,6 +494,7 @@ struct AttemptState {
     bool carryRestorePending;
     bool transitionPending;
     bool recordsEligible;
+    bool childRetryContinuation;
     bool nativeIgt;
     bool havePlazaStoryFlags;
     u8 plazaStoryFlags;
@@ -560,6 +587,7 @@ static_assert(sizeof(ILingRuntime) <= SUSAMUNE_ILING_RUNTIME_SIZE,
 #define sCarryRestorePending sAttemptState.carryRestorePending
 #define sTransitionPending sAttemptState.transitionPending
 #define sRecordsEligible sAttemptState.recordsEligible
+#define sChildRetryContinuation sAttemptState.childRetryContinuation
 #define sNativeIgt sAttemptState.nativeIgt
 #define sHavePlazaStoryFlags sAttemptState.havePlazaStoryFlags
 #define sPlazaStoryFlags sAttemptState.plazaStoryFlags
@@ -870,9 +898,6 @@ bool acceptsSkipOrigin(const Entry &item) {
     if ((hidden || hundred) && sAttemptStart.area == item.start.area) {
         return true;
     }
-    if (item.result == 27 && item.start.area == 4 && item.start.episode == 7) {
-        return sAttemptStart.area == 4 && sAttemptStart.episode == 0;
-    }
     if (item.result == 1 && item.start.area == 2 && item.start.episode == 1) {
         return sAttemptStart.area == 2 && sAttemptStart.episode == 0;
     }
@@ -881,6 +906,19 @@ bool acceptsSkipOrigin(const Entry &item) {
 
 bool sceneMatches(const TGameSequence &scene, const LevelWarp::Dest &dest) {
     return scene.mAreaID == dest.area && scene.mEpisodeID == dest.episode;
+}
+
+bool isPinnaOneRouteScene(const TGameSequence &scene) {
+    return (scene.mAreaID == 0x0D &&
+            (scene.mEpisodeID == 0 || scene.mEpisodeID == 6 ||
+             scene.mEpisodeID == 7)) ||
+           (scene.mAreaID == 0x3A && scene.mEpisodeID == 1);
+}
+
+bool acceptsSelectedOriginScene(const Entry &item,
+                                const TGameSequence &scene) {
+    if (!acceptsAnySelectedOrigin(item)) return false;
+    return item.result == 30 ? isPinnaOneRouteScene(scene) : true;
 }
 
 bool stageObjectsLive() {
@@ -914,6 +952,7 @@ int entryForChildMode(const TGameSequence &scene, int active) {
     int secret = -1;
     int reds = -1;
     for (int i = 0; i < kEntryCount; i++) {
+        if (i == kEntryGelatoGbs) continue;
         const Entry &item = kEntries[i];
         if (!sceneMatches(scene, item.start)) {
             continue;
@@ -951,11 +990,16 @@ int entryForChildMode(const TGameSequence &scene, int active) {
 int entryForResult(u8 result) {
     if (validEntry(sSelectedEntry)) {
         const Entry &selected = kEntries[sSelectedEntry];
-        if (acceptsAnySelectedOrigin(selected) &&
+        if ((acceptsAnySelectedOrigin(selected) ||
+             sSelectedEntry == kEntryGelatoGbs) &&
             entryFinish(selected) == FINISH_SHINE &&
             selected.result == result) {
             return sSelectedEntry;
         }
+    }
+    const Entry &gbs = kEntries[kEntryGelatoGbs];
+    if (result == gbs.result && sameDest(sAttemptStart, gbs.start)) {
+        return kEntryGelatoGbs;
     }
     for (int i = 0; i < kEntryCount; i++) {
         const Entry &item = kEntries[i];
@@ -1150,7 +1194,7 @@ TMapObjBase *findCoverFruit() {
 }
 
 void clearAttempt() {
-    LevelWarp::clearPracticeReturn();
+    const bool hadAttempt = sRunning;
     restorePlazaSetupState();
     restorePlazaStoryFlags();
     restoreOverlayFlags(isPlazaEntry(sSelectedEntry));
@@ -1169,11 +1213,16 @@ void clearAttempt() {
     sAttemptReady = false;
     sTransitionPending = false;
     sRecordsEligible = false;
+    sChildRetryContinuation = false;
     sNativeIgt = false;
     sSecretOnly = false;
     sSelectedEntry = -1;
     sRocketEquipPending = false;
     Records::onILAttemptEnded();
+    if (hadAttempt) {
+        StageLoader::onILAttemptEnded();
+        SplitStats::onILAttemptEnded();
+    }
 }
 
 void armAttempt(const Entry &entry, int selected) {
@@ -1182,6 +1231,7 @@ void armAttempt(const Entry &entry, int selected) {
     sRunning = true;
     sAttemptReady = false;
     sTransitionPending = false;
+    sChildRetryContinuation = false;
     sAttemptStart = entry.start;
     sFinishKind = entryFinish(entry);
     sSelectedEntry = selected;
@@ -1197,7 +1247,10 @@ void armAttempt(const Entry &entry, int selected) {
                        !actionsFastForwardActive();
     sNativeIgt = false;
     Records::onILAttemptStarted(entryIndex);
-    if (!sRecordsEligible) Records::invalidateAttempt();
+    if (!sRecordsEligible) {
+        Records::invalidateAttempt();
+        StageLoader::invalidatePlaylistBest();
+    }
 }
 
 void formatDelta(s32 qf, char *out, u32 size) {
@@ -1234,15 +1287,15 @@ bool secretAttemptUsedFludd() {
            gpMarioOriginal->mFludd->mIsEmitWater;
 }
 
-void recordPB(int entry, s32 qf) {
+bool recordPB(int entry, s32 qf) {
     if (!attemptPBRecordingEnabled()) {
-        return;
+        return false;
     }
 
     const int slot = pbSlot(entry);
     s32 *pbs = activePBs();
     if (pbs[slot] >= 0 && qf >= pbs[slot]) {
-        return;
+        return false;
     }
 
     const s32 previous = pbs[slot];
@@ -1276,9 +1329,15 @@ void recordPB(int entry, s32 qf) {
         sAchievementChimeBlockFrames = kBannerFrames;
         startPbFanfare();
     }
+    return true;
 }
 
 void recordResult(int entry, s32 qf) {
+    if (sChildRetryContinuation) {
+        // The session owns the retry, but this clock began inside the child.
+        StageLoader::onILResult(entry, qf, false);
+        return;
+    }
     sRecentQf[sRecentNext] = qf;
     sRecentEntry[sRecentNext] = (u8)entry;
     if (++sRecentNext == kRecentCount) {
@@ -1293,7 +1352,9 @@ void recordResult(int entry, s32 qf) {
                               : -1;
     Records::onILResult(entry, (u8)pbSlot(entry), qf, igtCentis,
                         sRecordsEligible);
+    StageLoader::onILResult(entry, qf, sRecordsEligible);
     recordPB(entry, qf);
+    SplitStats::onILResult(entry, qf);
 }
 
 }  // namespace
@@ -1390,6 +1451,10 @@ s32 pbQf(int entry) {
     return activePBs()[pbSlot(entry)];
 }
 
+int persistentSlot(int entry) {
+    return validEntry(entry) ? pbSlot(entry) : -1;
+}
+
 bool anyPercentTheoryQf(s32 *out) {
     if (!out || sActivePbProfile != 0) return false;
     s32 total = 0;
@@ -1418,6 +1483,7 @@ bool pbProfileNameEditable(int profile) {
 }
 
 void cyclePbProfile(int direction) {
+    SplitStats::invalidateAttempt();
     sActivePbProfile = (u8)((sActivePbProfile +
         SUSAMUNE_ILING_PROFILE_COUNT + direction) %
         SUSAMUNE_ILING_PROFILE_COUNT);
@@ -1477,6 +1543,49 @@ int activeParentEpisode(u8 parentArea) {
 bool forceParentFullRestart(u8 parentArea) {
     return sPinnaEygRestart &&
            parentArea == TGameSequence::AREA_PINNABEACH;
+}
+
+bool preserveRetailExitArea() {
+    if (!sRunning || !validEntry(sSelectedEntry) ||
+        kEntries[sSelectedEntry].result != 30) {
+        return false;
+    }
+    const TGameSequence &scene = gpApplication.mCurrentScene;
+    return (scene.mAreaID == 0x0D && scene.mEpisodeID == 0) ||
+           (scene.mAreaID == 0x3A && scene.mEpisodeID == 1);
+}
+
+bool copySessionDeathRetryDest(int entry, LevelWarp::Dest *out) {
+    if (!out || entry < 0 || entry >= kEntryCount || !sRunning ||
+        !sAttemptReady || sSelectedEntry != entry || isPlazaEntry(entry) ||
+        entryFinish(kEntries[entry]) == FINISH_DEATH ||
+        !stageObjectsLive() ||
+        gpMarDirector->mCurState != TMarDirector::STATE_DEATH ||
+        !TFlagManager::smInstance) {
+        return false;
+    }
+
+    const TGameSequence &scene = gpApplication.mCurrentScene;
+    const u8 area = scene.mAreaID;
+    // Retail retries internal scenes in place. Only a death in the selected
+    // start scene needs a redirect before it can fall back to the Plaza.
+    if (!sceneMatches(scene, sAttemptStart)) return false;
+
+    // Direct Secrets and Sunshine's special retries keep their own death
+    // semantics.
+    const bool specialRetry =
+        sSelectedEntry == kEntryNoki4Eel ||
+        (area >= 0x14 && area < 0x35) ||
+        area == TGameSequence::AREA_AIRPORT ||
+        area == TGameSequence::AREA_CORONABOSS;
+    if (specialRetry ||
+        (u8)TFlagManager::smInstance->getFlag(0x40003) !=
+            sAttemptStart.gameInt3) {
+        return false;
+    }
+
+    *out = sAttemptStart;
+    return true;
 }
 
 void restoreWarpStartSnapshot() {
@@ -1546,6 +1655,7 @@ bool copyWarpDiscardName(int entry, char *out, u32 size, u32 *outToken) {
 }
 
 void cancelWarpStart() {
+    StageLoader::onILWarpCancelled();
     clearAttempt();
     restoreWarpStartSnapshot();
 }
@@ -1616,7 +1726,7 @@ void beforeStageSetup() {
             return;
         }
         if (validEntry(sSelectedEntry) &&
-            acceptsAnySelectedOrigin(kEntries[sSelectedEntry])) {
+            acceptsSelectedOriginScene(kEntries[sSelectedEntry], scene)) {
             // Their cutscene hops do not restart QFT, so keep the selected
             // attempt eligible across every intermediate scene.
             sAttemptReady = true;
@@ -1692,10 +1802,14 @@ void update() {
          actionsFastForwardActive())) {
         sRecordsEligible = false;
         Records::invalidateAttempt();
+        StageLoader::invalidatePlaylistBest();
+        SplitStats::invalidateAttempt();
     }
     if (secretAttemptUsedFludd()) {
         sRecordsEligible = false;
         Records::invalidateAttempt();
+        StageLoader::invalidatePlaylistBest();
+        SplitStats::invalidateAttempt();
     }
     if (sRunning && stageObjectsLive() && gpMarDirector->mGCConsole &&
         gpMarDirector->mGCConsole->mIsTimerMoving) {
@@ -1799,12 +1913,17 @@ void update() {
     const u32 serial = gQFTTimer.attemptSerial();
     if (sAttemptReady && serial != sAttemptSerial) {
         const TGameSequence &scene = gpApplication.mCurrentScene;
-        if (sceneMatches(scene, sAttemptStart) ||
+        const bool sessionChildReset =
+            validEntry(sSelectedEntry) && StageLoader::active() &&
+            isInternalScene(sAttemptStart, scene);
+        if (sceneMatches(scene, sAttemptStart) || sessionChildReset ||
             (validEntry(sSelectedEntry) &&
-             acceptsAnySelectedOrigin(kEntries[sSelectedEntry]))) {
-            // A same-scene reset keeps its explicitly selected Secret/Reds mode.
+             acceptsSelectedOriginScene(kEntries[sSelectedEntry], scene))) {
+            // A session that reached a child keeps its parent route identity;
+            // retail already respawned it at the correct internal checkpoint.
             sAttemptSerial = serial;
-            sRecordsEligible =
+            sChildRetryContinuation = sessionChildReset;
+            sRecordsEligible = !sessionChildReset &&
                 !gSettings.getBool(SETTING_STAGE_INTRO_SKIP) &&
                 !actionsFastForwardActive();
             sNativeIgt = false;
@@ -1812,7 +1931,20 @@ void update() {
                                   ? sSelectedEntry
                                   : entryForStartScene(scene);
             Records::onILAttemptStarted(entry);
-            if (!sRecordsEligible) Records::invalidateAttempt();
+            if (entry >= 0) {
+                StageLoader::onILAttemptStarted(entry);
+                // A full-route split attempt cannot restart inside its child:
+                // its parent checkpoints are no longer reachable.
+                if (sessionChildReset)
+                    SplitStats::onILAttemptEnded();
+                else
+                    SplitStats::onILAttemptStarted(entry, sRecordsEligible);
+            }
+            if (!sRecordsEligible) {
+                Records::invalidateAttempt();
+                StageLoader::invalidatePlaylistBest();
+                SplitStats::invalidateAttempt();
+            }
         } else {
             // A child reset becomes an independent Secret/Reds attempt. Read
             // the temporary main-Shine mode before clearAttempt restores it.
@@ -1824,6 +1956,8 @@ void update() {
                 armAttempt(kEntries[entry], entry);
                 sAttemptSerial = serial;
                 sAttemptReady = true;
+                StageLoader::onILAttemptStarted(entry);
+                SplitStats::onILAttemptStarted(entry, sRecordsEligible);
             }
             return;
         }
@@ -1841,6 +1975,13 @@ void update() {
         }
         sAttemptSerial = serial;
         sAttemptReady = true;
+        const int entry = validEntry(sSelectedEntry)
+                              ? sSelectedEntry
+                              : entryForStartScene(gpApplication.mCurrentScene);
+        if (entry >= 0) {
+            StageLoader::onILAttemptStarted(entry);
+            SplitStats::onILAttemptStarted(entry, sRecordsEligible);
+        }
     }
 
     s32 qf;
@@ -1891,13 +2032,14 @@ void onSavestateSaved() {
 }
 
 void onSavestateLoaded() {
-    LevelWarp::clearPracticeReturn();
     sFanfareDelay = 0;
     sAchievementChimeBlockFrames = 0;
     sBannerFrames = 0;
     sHaveSetupShineCount = false;
     sHaveSetupMovieFlag = false;
+    if (sRunning) StageLoader::invalidatePlaylistBest();
     if (!sHaveSavedAttempt) {
+        if (sRunning) StageLoader::onILAttemptEnded();
         sRunning = false;
         sAttemptReady = false;
         sCarryRestorePending = false;
@@ -1920,6 +2062,8 @@ void invalidateForAssist() {
     if (!sRunning || !sRecordsEligible) return;
     sRecordsEligible = false;
     Records::invalidateAttempt();
+    StageLoader::invalidatePlaylistBest();
+    SplitStats::invalidateAttempt();
 }
 
 bool achievementChimeBlocked() {

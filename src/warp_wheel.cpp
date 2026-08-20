@@ -24,6 +24,8 @@
 #include "susamune/qft_timer.hxx"
 #include "susamune/raw_prompt_input.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/split_events.hxx"
+#include "susamune/stage_loader.hxx"
 
 namespace {
 
@@ -80,14 +82,18 @@ bool             sLastValid;
 bool             sTailPending;
 bool             sClassicInstantHeld;
 bool             sClassicInstantPending;
+bool             sClassicInstantSuppressed;
+u8               sDeferredRestart;
+bool             sDeferredRestartAfterResult;
 bool             sDeathSequence;
+bool             sWaitForRetailDeathTail;
+bool             sQueuedSessionDeathRestart;
 bool             sWaitForSave;
 u8               sSaveIdleFrames;
 bool             sCourseGuard;
 bool             sArmStartedIL;
 bool             sExitSelectorPending;
-bool             sPracticeReturnValid;
-LevelWarp::Dest  sPracticeReturn;
+bool             sExplicitRetailExit;
 bool             sShown;
 int              sArmedILIndex = -1;
 
@@ -104,6 +110,26 @@ enum PromptAction : u8 {
     PROMPT_SAVESTATE_LOAD,
     PROMPT_NATURAL_DEPARTURE,
 };
+
+enum DeferredRestart : u8 {
+    DEFERRED_RESTART_NONE,
+    DEFERRED_RESTART_KEEP,
+    DEFERRED_RESTART_FULL,
+    DEFERRED_RESTART_SAVE_KEEP,
+    DEFERRED_RESTART_SAVE_FULL,
+};
+
+enum HeldSessionDeparture : u8 {
+    HELD_SESSION_DEPARTURE_NONE,
+    HELD_SESSION_DEPARTURE_WARP,
+    HELD_SESSION_DEPARTURE_IL,
+    HELD_SESSION_DEPARTURE_EXIT_AREA,
+    HELD_SESSION_DEPARTURE_TITLE,
+};
+
+HeldSessionDeparture sHeldSessionDeparture;
+LevelWarp::Dest       sHeldSessionDest = {0, 0, 0};
+s32                   sHeldSessionDetail = -1;
 
 enum PBSavePolicy : u8 {
     PB_SAVE_ASK,
@@ -137,10 +163,13 @@ bool           sHoldNaturalDeparture;
 void cancelArmedCourseWarp();
 void close();
 void executePromptAction();
+void armWarp(const LevelWarp::Dest &dest, bool keepSpawn,
+             bool overrideSource);
 
 void armExitAreaWarp(const LevelWarp::Dest &dest) {
-    LevelWarp::warpToGuarded(dest, 0, false);
-    sArmedAction = PROMPT_EXIT_AREA;
+    // The PB prompt already resolved every protected token. A second course
+    // guard can race the approved exit and leave stale selector state behind.
+    armWarp(dest, false, false);
     sExitSelectorPending = true;
 }
 
@@ -163,31 +192,6 @@ u8 currentGameInt3() {
         value |= LevelWarp::Dest::POST_CORONA;
     }
     return value;
-}
-
-// Exit Area still has episode 0xff here; mirror moveStage's resolver so the
-// discard check predicts the concrete Plaza route without mutating game state.
-u8 retailPlazaScenario() {
-    TFlagManager *flags = TFlagManager::smInstance;
-    if (flags->getBool(kPostCoronaFlag)) return 2;
-
-    const u8 kFinalShines[] = {0x06, 0x10, 0x1a, 0x24,
-                               0x2e, 0x38, 0x42};
-    bool finalPlaza = true;
-    for (u32 i = 0; i < sizeof(kFinalShines); i++) {
-        if (!flags->getShineFlag(kFinalShines[i])) {
-            finalPlaza = false;
-            break;
-        }
-    }
-    if (finalPlaza) return 9;
-    if (flags->getBool(0x10389)) return 8;
-    if (flags->getBool(0x10386) && flags->getBool(0x10387)) {
-        return flags->getFlag(0x40000) >= 10 ? 7 : 6;
-    }
-    if (flags->getBool(0x10385)) return 5;
-    if (flags->getBool(0x10384)) return 1;
-    return 0;
 }
 
 enum ClassicCommand {
@@ -561,12 +565,7 @@ void executePromptAction() {
         }
         break;
     case PROMPT_EXIT_AREA:
-        if (gSettings.getBool(SETTING_AREA_LOCK) &&
-            !gSettings.getBool(SETTING_DISABLE_WARPS)) {
-            LevelWarp::restart(true);
-        } else {
-            armExitAreaWarp(action.dest);
-        }
+        armExitAreaWarp(action.dest);
         break;
     case PROMPT_TITLE:
         sPendingTitleExit = true;
@@ -658,10 +657,41 @@ void updatePrompt() {
     }
 }
 
+void cancelExplicitPractice() {
+    const bool armedSelectedIL = sArmed && sArmStartedIL;
+    StageLoader::cancel();
+    // Scrub both an arm and its already-consumed transition tail. A tail lives
+    // outside stage memory and must not redirect a later retail Exit Area.
+    LevelWarp::cancelPending(false);
+    if (!armedSelectedIL) ILing::cancelWarpStart();
+    sDeferredRestart = DEFERRED_RESTART_NONE;
+    sDeferredRestartAfterResult = false;
+    sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+    sHeldSessionDetail = -1;
+}
+
+bool restartPromptPending() {
+    switch (sPrompt.action) {
+    case PROMPT_RESTART_KEEP:
+    case PROMPT_RESTART_FULL:
+    case PROMPT_RESTART_SAVE_KEEP:
+    case PROMPT_RESTART_SAVE_FULL:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool requestCourseWarp(const LevelWarp::Dest &dest) {
+    if (StageLoader::departureResultPending()) {
+        sHeldSessionDeparture = HELD_SESSION_DEPARTURE_WARP;
+        sHeldSessionDest = dest;
+        sHeldSessionDetail = -1;
+        return true;
+    }
     // A new explicit destination replaces any still-card-delayed command now,
     // even if this request itself opens the PB guard.
-    if (sArmed) cancelArmedCourseWarp();
+    cancelExplicitPractice();
     if (beginPrompt(PROMPT_WARP, dest)) return true;
     LevelWarp::warpToGuarded(dest, 0, false);
     return true;
@@ -685,8 +715,30 @@ void requestRestart(bool full, bool afterSave) {
     }
 }
 
+void requestOrDeferRestart(bool full, bool afterSave) {
+    if (StageLoader::departureResultPending() ||
+        StageLoader::deferRestartInput()) {
+        sDeferredRestart = full
+            ? (afterSave ? DEFERRED_RESTART_SAVE_FULL
+                         : DEFERRED_RESTART_FULL)
+            : (afterSave ? DEFERRED_RESTART_SAVE_KEEP
+                         : DEFERRED_RESTART_KEEP);
+        sDeferredRestartAfterResult = false;
+        return;
+    }
+    requestRestart(full, afterSave);
+}
+
 bool updateClassicInstant(TMarioGamePad *pad) {
     const u16 buttons = JUTGamePad::mPadStatus[0].mButton;
+    if (sClassicInstantSuppressed) {
+        sClassicInstantHeld = false;
+        sClassicInstantPending = false;
+        if ((buttons & kInstantBase) == 0) {
+            sClassicInstantSuppressed = false;
+        }
+        return false;
+    }
     const bool held = (buttons & kInstantBase) == kInstantBase;
     if (!held) {
         sClassicInstantHeld = false;
@@ -712,8 +764,12 @@ bool updateClassicInstant(TMarioGamePad *pad) {
     case CLASSIC_WARP:
         requestCourseWarp(dest);
         return true;
-    case CLASSIC_RESTART_KEEP:    requestRestart(false, false); return true;
-    case CLASSIC_RESTART_DEFAULT: requestRestart(true, false); return true;
+    case CLASSIC_RESTART_KEEP:
+        requestOrDeferRestart(false, false);
+        return true;
+    case CLASSIC_RESTART_DEFAULT:
+        requestOrDeferRestart(true, false);
+        return true;
     case CLASSIC_WARP_LAST:
         if (sLastValid) requestCourseWarp(sLast);
         return true;
@@ -737,10 +793,12 @@ void applyDest(const LevelWarp::Dest &dest) {
     flags->setBool(true, 0x30006);   // got a shine in the previous stage --
     flags->setBool(false, 0x30004);  // together these suppress the death and
                                      // Peach-kidnapped openings
-    if (dest.area == TGameSequence::AREA_DOLPIC) {
-        flags->setBool((dest.gameInt3 & LevelWarp::Dest::POST_CORONA) != 0,
-                       kPostCoronaFlag);
-    }
+    // A deliberate Plaza destination owns its story variant. Every practice
+    // warp back into a level resets the ordinary retail return to the stable
+    // post-Corona Plaza instead of inheriting Flooded forever.
+    flags->setBool(dest.area != TGameSequence::AREA_DOLPIC ||
+                       (dest.gameInt3 & LevelWarp::Dest::POST_CORONA) != 0,
+                   kPostCoronaFlag);
 
     gpApplication.mNextScene.mAreaID    = dest.area;
     gpApplication.mNextScene.mEpisodeID = dest.episode;
@@ -770,6 +828,8 @@ void prepareArmedDeparture() {
     }
     sArmed       = false;
     sTailPending = true;
+    sWaitForRetailDeathTail = false;
+    sQueuedSessionDeathRestart = false;
     if (sArmStartedIL) ILing::commitWarpStart();
     sCourseGuard = false;
     sArmStartedIL = false;
@@ -795,6 +855,7 @@ __attribute__((noinline)) void armWarp(const LevelWarp::Dest &dest,
                                        bool keepSpawn, bool overrideSource) {
     sDest = dest;
     sArmed = true;
+    sWaitForRetailDeathTail = false;
     sKeepSpawn = keepSpawn;
     sOverrideSource = overrideSource;
     sWaitForSave = false;
@@ -802,6 +863,7 @@ __attribute__((noinline)) void armWarp(const LevelWarp::Dest &dest,
     sArmStartedIL = false;
     sArmedAction = PROMPT_NONE;
     sExitSelectorPending = false;
+    sExplicitRetailExit = false;
     sArmedILIndex = -1;
 }
 
@@ -814,34 +876,12 @@ void armGuardedWarp(const LevelWarp::Dest &dest, bool overrideSource,
     sCourseGuard = true;
     sArmStartedIL = selectedIL;
     sArmedAction = selectedIL ? PROMPT_IL : PROMPT_WARP;
-
-    if (!selectedIL) return;
-
-    const TGameSequence *source = nullptr;
-    const TGameSequence &current = gpApplication.mCurrentScene;
-    const TGameSequence &previous = gpApplication.mPrevScene;
-    if (current.mAreaID == TGameSequence::AREA_DOLPIC &&
-        current.mEpisodeID <= 9) {
-        source = &current;
-    } else if (previous.mAreaID == TGameSequence::AREA_DOLPIC &&
-               previous.mEpisodeID <= 9) {
-        source = &previous;
-    }
-
-    sPracticeReturnValid = source != nullptr;
-    if (source) {
-        const u8 plazaFlags = TFlagManager::smInstance &&
-                TFlagManager::smInstance->getBool(kPostCoronaFlag)
-            ? LevelWarp::Dest::POST_CORONA : 0;
-        sPracticeReturn.area = TGameSequence::AREA_DOLPIC;
-        sPracticeReturn.episode = source->mEpisodeID;
-        sPracticeReturn.gameInt3 = plazaFlags;
-    }
 }
 
 void cancelArmedCourseWarp() {
     const bool cancelIL = sArmStartedIL;
     sArmed = false;
+    sWaitForRetailDeathTail = false;
     sKeepSpawn = false;
     sOverrideSource = false;
     sWaitForSave = false;
@@ -889,6 +929,8 @@ SelectorResult applyTransitionSelector() {
     LevelWarp::Dest selected;
     ClassicCommand command =
         resolveClassicSelector(gpApplication.mGamePads[0], false, &selected);
+    const bool restartCommand = command == CLASSIC_RESTART_DEFAULT ||
+                                command == CLASSIC_RESTART_PARENT;
     bool parentRestart = false;
     if (command == CLASSIC_RESTART_DEFAULT) {
         selected = currentDest(false);
@@ -909,6 +951,7 @@ SelectorResult applyTransitionSelector() {
         if (gMenu) gMenu->toast("Save PB ghost before chart warp");
         return SELECTOR_BLOCKED;
     }
+    if (!restartCommand) cancelExplicitPractice();
     applyDest(selected);
     if (parentRestart) overrideSourceForDefaultSpawn(selected);
     return SELECTOR_REDIRECTED;
@@ -925,10 +968,6 @@ void warpTo(const Dest &dest) {
 void warpToGuarded(const Dest &dest, u32 legacyToken, bool selectedIL) {
     (void)legacyToken;
     armGuardedWarp(dest, false, selectedIL);
-}
-
-void clearPracticeReturn() {
-    sPracticeReturnValid = false;
 }
 
 void warpFrom(const Dest &source, const Dest &dest) {
@@ -948,11 +987,13 @@ void warpToLast() {
 
 void cancelPending(bool keepExitApproval) {
     if (keepExitApproval) {
-        const bool keepExitState = sExitSelectorPending &&
-            (sArmed || sTailPending);
-        if (!keepExitState) {
+        const bool keepExitTail =
+            sExitSelectorPending && (sArmed || sTailPending);
+        if (!keepExitTail) {
             if (sArmed) cancelArmedCourseWarp();
             sTailPending = false;
+            sWaitForRetailDeathTail = false;
+            sQueuedSessionDeathRestart = false;
             sKeepSpawn = false;
             sOverrideSource = false;
             sWaitForSave = false;
@@ -975,6 +1016,11 @@ void cancelPending(bool keepExitApproval) {
         default:
             break;
         }
+        if (sHeldSessionDeparture == HELD_SESSION_DEPARTURE_WARP ||
+            sHeldSessionDeparture == HELD_SESSION_DEPARTURE_IL) {
+            sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+            sHeldSessionDetail = -1;
+        }
         return;
     }
 
@@ -983,6 +1029,8 @@ void cancelPending(bool keepExitApproval) {
     // arm but before its fade reaches onDirected(). That tail lives in mod BSS,
     // outside the snapshot, and must not fire on some later retail departure.
     sTailPending = false;
+    sWaitForRetailDeathTail = false;
+    sQueuedSessionDeathRestart = false;
     sKeepSpawn = false;
     sOverrideSource = false;
     sWaitForSave = false;
@@ -991,11 +1039,16 @@ void cancelPending(bool keepExitApproval) {
     sArmStartedIL = false;
     sArmedAction = PROMPT_NONE;
     sExitSelectorPending = false;
+    sExplicitRetailExit = false;
     sArmedILIndex = -1;
     clearPrompt();
     sSavestateLoadApproved = false;
     sPendingTitleExit = false;
     sHoldNaturalDeparture = false;
+    sDeferredRestart = DEFERRED_RESTART_NONE;
+    sDeferredRestartAfterResult = false;
+    sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+    sHeldSessionDetail = -1;
 }
 
 void restart(bool keepSpawn) {
@@ -1033,6 +1086,11 @@ u8 kick(TMarDirector *director, u8 state) {
     if (!sArmed) {
         return state;
     }
+    if (sQueuedSessionDeathRestart || sWaitForRetailDeathTail) return state;
+    // A requested warp remains armed, but the authoritative session report
+    // gets the first departure. This also covers Shine-demo frames where the
+    // result cannot safely own input yet.
+    if (StageLoader::departureResultPending()) return state;
     if (sWaitForSave) {
         if (saveFlowActive()) {
             sSaveIdleFrames = 0;
@@ -1052,15 +1110,36 @@ u8 kick(TMarDirector *director, u8 state) {
 }
 
 s32 onDirected(s32 appState) {
-    // Non-zero means the director has finished leaving the stage and is
-    // handing the app its next state; anything else is an ordinary frame.
     if (appState == 0) {
         return appState;
     }
-    // If the director reaches an app-state handoff before another game-mode
-    // tick, the card becoming idle is sufficient to release the queued exit.
+    // The app's two direct-loop values are ordinary director returns. An
+    // automatic death retry must wait for retail's real post-animation exit.
+    if (sDeathSequence &&
+        appState <= TApplication::CONTEXT_DIRECT_MAIN_LOOP &&
+        ((sQueuedSessionDeathRestart || sWaitForRetailDeathTail) ||
+         (!sArmed && !sTailPending))) {
+        return appState;
+    }
+    // Result publication runs after direct(). Hold a terminal death handoff
+    // until that frame's deferred session restart has been resolved.
+    if (sDeathSequence && sQueuedSessionDeathRestart && !sArmed) return 0;
+    // A protected-PB decision may outlive the fade. Keep the completed retail
+    // death director until the exact restart action is ready to arm.
+    if (sDeathSequence && restartPromptPending()) return 0;
+    sWaitForRetailDeathTail = false;
+    sQueuedSessionDeathRestart = false;
+    // Ordinary returns still respect the save UI. At a true app handoff that
+    // state is stale; only the card worker can still own the queued restart.
     if (sArmed && sWaitForSave) {
-        if (saveFlowActive()) return 0;
+        if (appState <= TApplication::CONTEXT_DIRECT_MAIN_LOOP &&
+            saveFlowActive()) {
+            return appState;
+        }
+        if (gpCardManager &&
+            gpCardManager->getLastStatus() == CARD_ERROR_BUSY) {
+            return 0;
+        }
         sWaitForSave = false;
     }
     if (sArmed) {
@@ -1075,6 +1154,8 @@ s32 onDirected(s32 appState) {
         }
     }
     sDeathSequence = false;
+    const bool explicitRetailExit = sExplicitRetailExit;
+    sExplicitRetailExit = false;
 
     if (sTailPending) {
         sTailPending = false;
@@ -1105,6 +1186,9 @@ s32 onDirected(s32 appState) {
             return TApplication::CONTEXT_DIRECT_STAGE;
         if (selector == SELECTOR_BLOCKED) return appState;
     }
+
+    // Pause-menu Exit Area is an explicit escape hatch, even with Area Lock.
+    if (explicitRetailExit) return appState;
 
     if (appState > 1 && gSettings.getBool(SETTING_AREA_LOCK)) {
         // Turn every departure into a restart of the area being left, with
@@ -1551,6 +1635,24 @@ bool requestILStart(int entry) {
     return true;
 }
 
+bool requestExplicitILStart(int entry) {
+    if (entry < 0 || entry >= ILing::count() ||
+        gSettings.getBool(SETTING_DISABLE_WARPS)) {
+        return false;
+    }
+    if (StageLoader::departureResultPending()) {
+        sHeldSessionDeparture = HELD_SESSION_DEPARTURE_IL;
+        sHeldSessionDest.area = 0;
+        sHeldSessionDest.episode = 0;
+        sHeldSessionDest.gameInt3 = 0;
+        sHeldSessionDetail = entry;
+        return true;
+    }
+
+    cancelExplicitPractice();
+    return requestILStart(entry);
+}
+
 bool requestSavestateLoad() {
     const LevelWarp::Dest key = {0, 0, 0};
     return !beginPrompt(PROMPT_SAVESTATE_LOAD, key);
@@ -1596,7 +1698,8 @@ u8 applyPendingGameModeAction(TMarDirector *director, u8 state) {
 }
 
 bool retailExitPending() {
-    return sPrompt.action == PROMPT_EXIT_AREA ||
+    return sExplicitRetailExit || sPrompt.action == PROMPT_EXIT_AREA ||
+           sHeldSessionDeparture == HELD_SESSION_DEPARTURE_EXIT_AREA ||
            ((sArmed || sTailPending) && sExitSelectorPending);
 }
 
@@ -1605,6 +1708,96 @@ bool promptShown() {
 }
 
 bool promptPending() { return sPrompt.action != PROMPT_NONE; }
+
+void suppressClassicInstantUntilRelease() {
+    sClassicInstantSuppressed = true;
+    sClassicInstantHeld = false;
+    sClassicInstantPending = false;
+}
+
+void resolveDeferredRestart() {
+    if (sHeldSessionDeparture != HELD_SESSION_DEPARTURE_NONE) {
+        if (StageLoader::departureResultPending()) return;
+
+        const HeldSessionDeparture held = sHeldSessionDeparture;
+        const LevelWarp::Dest heldDest = sHeldSessionDest;
+        const s32 heldDetail = sHeldSessionDetail;
+        sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+        sHeldSessionDetail = -1;
+        cancelExplicitPractice();
+
+        LevelWarp::Dest dest = heldDest;
+        PromptAction action = PROMPT_NONE;
+        if (held == HELD_SESSION_DEPARTURE_WARP) {
+            action = PROMPT_WARP;
+        } else if (held == HELD_SESSION_DEPARTURE_IL) {
+            action = PROMPT_IL;
+        } else if (held == HELD_SESSION_DEPARTURE_EXIT_AREA) {
+            action = PROMPT_EXIT_AREA;
+        } else if (held == HELD_SESSION_DEPARTURE_TITLE) {
+            action = PROMPT_TITLE;
+        }
+        if (held == HELD_SESSION_DEPARTURE_EXIT_AREA) {
+            dest.area = TGameSequence::AREA_DOLPIC;
+            dest.episode = 2;
+            dest.gameInt3 = LevelWarp::Dest::POST_CORONA;
+        }
+        if (action == PROMPT_NONE || beginPrompt(action, dest, heldDetail)) return;
+        if (action == PROMPT_WARP) {
+            LevelWarp::warpToGuarded(dest, 0, false);
+        } else if (action == PROMPT_IL) {
+            if (ILing::start(heldDetail, 0)) {
+                sArmedILIndex = heldDetail;
+            } else if (gMenu) {
+                gMenu->toast("Warps disabled");
+            }
+        } else if (action == PROMPT_EXIT_AREA) {
+            armExitAreaWarp(dest);
+        } else {
+            sPendingTitleExit = true;
+        }
+        return;
+    }
+
+    const DeferredRestart deferred = (DeferredRestart)sDeferredRestart;
+    if (deferred == DEFERRED_RESTART_NONE) return;
+
+    // A same-frame Shine result replaces the completed attempt with its own
+    // retry. JP can carry the early Shine latch through that stage load; do not
+    // let the old input become valid again when the new attempt starts.
+    // Death inputs are different: their requested restart must wait for the
+    // retail death animation and then own the one departure at its tail.
+    if (!sQueuedSessionDeathRestart && StageLoader::retryOwnsDeparture()) {
+        sDeferredRestart = DEFERRED_RESTART_NONE;
+        sDeferredRestartAfterResult = false;
+        return;
+    }
+
+    if (StageLoader::departureResultPending()) {
+        if (StageLoader::resultPending()) {
+            sDeferredRestartAfterResult = true;
+        }
+        return;
+    }
+
+    sDeferredRestart = DEFERRED_RESTART_NONE;
+    const bool afterResult = sDeferredRestartAfterResult;
+    sDeferredRestartAfterResult = false;
+    // A non-final result owns the next route. A completed session preserves
+    // the requested restart until its report has been dismissed.
+    if (!afterResult && !StageLoader::acceptDeferredRestart()) {
+        sQueuedSessionDeathRestart = false;
+        return;
+    }
+
+    switch (deferred) {
+    case DEFERRED_RESTART_KEEP:      requestRestart(false, false); break;
+    case DEFERRED_RESTART_FULL:      requestRestart(true, false); break;
+    case DEFERRED_RESTART_SAVE_KEEP: requestRestart(false, true); break;
+    case DEFERRED_RESTART_SAVE_FULL: requestRestart(true, true); break;
+    default: break;
+    }
+}
 
 bool resumePBPrompt(u32 token) {
     if (!sPromptSaving || sPrompt.action == PROMPT_NONE ||
@@ -1625,33 +1818,44 @@ u8 guardExitArea(u8 nextState) {
     if (nextState != kPauseTitle && nextState != kPauseExitArea)
         return nextState;
 
-    LevelWarp::Dest dest = {0, 0, 0};
-    PromptAction action = PROMPT_TITLE;
-    bool practiceReturn = false;
-    if (nextState == kPauseExitArea) {
-        if (!TFlagManager::smInstance) return nextState;
-        practiceReturn = sPracticeReturnValid &&
-                         !gSettings.getBool(SETTING_AREA_LOCK);
-        if (practiceReturn) {
-            dest = sPracticeReturn;
-        } else {
-            const u8 plazaFlags =
-                TFlagManager::smInstance->getBool(kPostCoronaFlag)
-                    ? LevelWarp::Dest::POST_CORONA : 0;
-            dest.area = TGameSequence::AREA_DOLPIC;
-            dest.episode = retailPlazaScenario();
-            dest.gameInt3 = plazaFlags;
-        }
-        action = PROMPT_EXIT_AREA;
+    if (StageLoader::departureResultPending()) {
+        sHeldSessionDeparture = nextState == kPauseExitArea
+            ? HELD_SESSION_DEPARTURE_EXIT_AREA
+            : HELD_SESSION_DEPARTURE_TITLE;
+        sHeldSessionDest.area = 0;
+        sHeldSessionDest.episode = 0;
+        sHeldSessionDest.gameInt3 = 0;
+        sHeldSessionDetail = -1;
+        return kPauseResume;
     }
-    if (sArmed) cancelArmedCourseWarp();
-    if (beginPrompt(action, dest)) return kPauseResume;
-    if (!practiceReturn) return nextState;
-    armExitAreaWarp(dest);
 
-    // getNextState() has already closed the pause object. Resume first; the
-    // raw-pad overlay owns no retail UI pointer.
-    return kPauseResume;
+    if (nextState == kPauseExitArea && ILing::preserveRetailExitArea()) {
+        // Pinna 1 uses retail Exit Area to skip both of its movies. The
+        // movie's own setNextStage remains responsible for the destination.
+        SplitEvents::armPinnaOneRetailExit();
+        sExplicitRetailExit = true;
+        return nextState;
+    }
+
+    // Restore every temporary IL flag before approving the explicit exit.
+    cancelExplicitPractice();
+    LevelWarp::Dest dest = {0, 0, 0};
+    if (nextState == kPauseTitle) {
+        return beginPrompt(PROMPT_TITLE, dest) ? kPauseResume : nextState;
+    }
+
+    dest.area = TGameSequence::AREA_DOLPIC;
+    dest.episode = 2;
+    dest.gameInt3 = LevelWarp::Dest::POST_CORONA;
+    if (beginPrompt(PROMPT_EXIT_AREA, dest)) return kPauseResume;
+
+    // Retail consumes result 5 in this same call stack. Set the story marker
+    // only after IL cleanup, then let decideNextStage()/moveStage() own exit.
+    if (TFlagManager::smInstance) {
+        TFlagManager::smInstance->setBool(true, kPostCoronaFlag);
+    }
+    sExplicitRetailExit = true;
+    return nextState;
 }
 
 void update(TMarioGamePad *pad) {
@@ -1660,6 +1864,12 @@ void update(TMarioGamePad *pad) {
         sSavestateLoadApproved = false;
         sPendingTitleExit = false;
         sHoldNaturalDeparture = false;
+        sExplicitRetailExit = false;
+        sDeferredRestart = DEFERRED_RESTART_NONE;
+        sDeferredRestartAfterResult = false;
+        sQueuedSessionDeathRestart = false;
+        sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+        sHeldSessionDetail = -1;
         close();
         return;
     }
@@ -1675,13 +1885,24 @@ void update(TMarioGamePad *pad) {
     }
 
     const u8 state = gpMarDirector->mCurState;
+    const bool enteringDeath = state == TMarDirector::STATE_DEATH &&
+                               !sDeathSequence;
     if (state == TMarDirector::STATE_DEATH) {
         sDeathSequence = true;
     }
     if (state != TMarDirector::STATE_NORMAL) {
         close();
-        sClassicInstantHeld = false;
-        sClassicInstantPending = false;
+        const u16 rawButtons = JUTGamePad::mPadStatus[0].mButton;
+        if (sDeathSequence &&
+            (rawButtons & kInstantBase) == kInstantBase) {
+            // The configured restart below consumes this press. Latch the raw
+            // chart path so holding the chord through the load cannot repeat it.
+            sClassicInstantHeld = true;
+            sClassicInstantPending = false;
+        } else {
+            sClassicInstantHeld = false;
+            sClassicInstantPending = false;
+        }
         const bool deathExit = sDeathSequence &&
             (state == TMarDirector::STATE_DEATH ||
              state == TMarDirector::STATE_STAGE_EXIT ||
@@ -1695,9 +1916,28 @@ void update(TMarioGamePad *pad) {
         const bool instantRestart = gBinds.wasPressed(BIND_INSTANT_RESTART);
         if ((deathExit || saveDialog) &&
             (fullRestart || instantRestart)) {
-            requestRestart(fullRestart, saveDialog);
-            if (gMenu && gSettings.getBool(SETTING_RESTART_QUEUED_FEEDBACK))
+            const bool queueDeathRestart =
+                deathExit && StageLoader::deferRestartInput();
+            if (queueDeathRestart && sArmed) cancelArmedCourseWarp();
+            requestOrDeferRestart(fullRestart, saveDialog);
+            sQueuedSessionDeathRestart = queueDeathRestart;
+            if ((queueDeathRestart || saveDialog) && gMenu &&
+                gSettings.getBool(SETTING_RESTART_QUEUED_FEEDBACK)) {
                 gMenu->toast("Restart queued");
+            }
+        } else if (enteringDeath && !sArmed && !sTailPending &&
+                   sDeferredRestart == DEFERRED_RESTART_NONE &&
+                   sHeldSessionDeparture == HELD_SESSION_DEPARTURE_NONE &&
+                   !sPendingTitleExit && !Ghost::hasUnsavedPB() &&
+                   !gSettings.getBool(SETTING_DISABLE_WARPS)) {
+            LevelWarp::Dest retry;
+            if (StageLoader::copyDeathRetryDest(&retry)) {
+                // Preserve the live IL until the next attempt serial proves
+                // the reset, but let retail finish the death animation first.
+                armWarp(retry, false, true);
+                sSource = retry;
+                sWaitForRetailDeathTail = true;
+            }
         }
         return;
     }
@@ -1709,10 +1949,10 @@ void update(TMarioGamePad *pad) {
         // Bianco 1 rather than the bare B+D-up restart bind.
         closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_INSTANT_RESTART)) {
-        requestRestart(false, false);
+        requestOrDeferRestart(false, false);
         closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_FULL_RESTART)) {
-        requestRestart(true, false);
+        requestOrDeferRestart(true, false);
         closeForCommand = true;
     } else if (gBinds.wasPressed(BIND_WARP_LAST)) {
         if (sLastValid) requestCourseWarp(sLast);

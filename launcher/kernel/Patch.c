@@ -4082,10 +4082,9 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 		UseReadLimit = 0;
 }
 
-// The staged mod_<region>.bin, if the loader found one for this disc. Valid
-// only between SusamuneModStaged() returning non-NULL and the end of
-// PatchSusamune(); the buffer is a loader-to-kernel handoff and nothing keeps
-// it alive past the copy into MEM1.
+// The staged mod_<region>.bin, if the loader found one for this disc. PatchGame
+// can consume this immutable prefix again after an in-session reset; the asset
+// vault begins at the staged-file ceiling after PatchSusamune copies the code.
 static const struct SusamuneModHeader *SusamuneModStaged(void)
 {
 	const struct SusamuneModHeader *hdr = SUSAMUNE_MOD_PHYS_PTR;
@@ -4104,11 +4103,12 @@ static const struct SusamuneModHeader *SusamuneModStaged(void)
 
 	// The file is untrusted input off an SD card: refuse anything whose parts
 	// do not add up, rather than memcpy'ing a bogus length into MEM1.
-	if (hdr->codeSize > SUSAMUNE_MEM2_MODBIN_SIZE - SUSAMUNE_MOD_HEADER_SIZE
+	if (hdr->codeSize > SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE -
+			SUSAMUNE_MOD_HEADER_SIZE
 			|| (hdr->codeSize & 3))
 		return NULL;
 	codeEnd = SUSAMUNE_MOD_HEADER_SIZE + hdr->codeSize;
-	if (hdr->writeCount > (SUSAMUNE_MEM2_MODBIN_SIZE - codeEnd) / 8)
+	if (hdr->writeCount > (SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE - codeEnd) / 8)
 		return NULL;
 	if (hdr->fileSize != codeEnd + hdr->writeCount * 8)
 		return NULL;

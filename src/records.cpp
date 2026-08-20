@@ -86,7 +86,7 @@ constexpr TimeRule kTimeRules[] = {
     {9100, 21, TIME_IGT | 15}, {6000, 38, 30}, {3500, 83, 79},
     {3000, 66, 51}, {12600, 46, 121}, {5600, 43, 33},
     {9000, 87, 67}, {3500, 67, 52}, {3100, 72, 78},
-    {8000, 1, 1}, {2900, 35, 27}, {12000, 24, 101},
+    {8000, 1, 1}, {2900, 121, 125}, {12000, 24, 101},
     {6200, 9, TIME_IGT | 9}, {6000, 11, 7}, {7600, 92, 119},
     {4300, 5, 3}, {1300, 49, 36}, {4200, 41, TIME_IGT | 38},
     {2990, 72, 78}, {5100, 53, 41}, {15200, 61, TIME_IGT | 45},
@@ -127,7 +127,7 @@ struct StreakRule {
 
 // Rule order is persistent Streaks ID order.
 const StreakRule kStreakRules[] = {
-    {0, 35, 5, STREAK_FINISH, 0},      // Getting There!
+    {0, 121, 5, STREAK_FINISH, 0},     // Getting There!
     {0, 82, 5, STREAK_FINISH, 0},      // Chuckster Chatter
     {5300, 17, 5, STREAK_QFT, 0},      // Pegged
     {3500, 93, 5, STREAK_QFT, 0},      // Disturbed the Family Vacation
@@ -152,7 +152,7 @@ const StreakRule kStreakRules[] = {
     {4300, 5, 5, STREAK_QFT, 0},        // I Didn't Hear No Bell
     {5400, 65, 5, STREAK_QFT, 0},       // Mole Mangler
     {2750, 47, 5, STREAK_QFT, 0},       // Clockwork Crisis
-    {2700, 35, 10, STREAK_QFT, 0},      // Lord of the Nut
+    {2700, 121, 10, STREAK_QFT, 0},     // Lord of the Nut
 };
 
 struct WorldPBRule {
@@ -166,7 +166,7 @@ struct WorldPBRule {
 const u8 kAnySlots[] = {
     1, 2, 3, 4, 5, 6,
     10, 11, 12, 13, 14, 15, 16,
-    27, 26,
+    125, 26,
     30, 31, 32, 33, 121, 36,
     40, 41, 42, 43, 44, 45, 46,
     50, 51, 52, 53, 54, 55, 56,
@@ -177,7 +177,7 @@ const u8 kAnySlots[] = {
 const u8 kAllSlots[] = {
     0, 1, 2, 70, 8, 3, 4, 5, 71, 9, 6, 7, 100,
     10, 11, 19, 12, 13, 72, 18, 14, 15, 16, 17, 101,
-    20, 73, 28, 21, 22, 23, 123, 24, 25, 26, 27, 29, 102,
+    20, 73, 28, 21, 22, 23, 123, 24, 25, 26, 27, 125, 29, 102,
     30, 31, 74, 38, 32, 33, 34, 35, 121, 75, 39, 36, 37, 103,
     40, 41, 76, 48, 42, 43, 77, 49, 44, 45, 46, 47, 104,
     50, 51, 52, 53, 122, 54, 55, 78, 58, 56, 57, 59, 105,
@@ -190,12 +190,12 @@ const u8 kAllSlots[] = {
 const WorldPBRule kWorldPBRules[] = {
     {0, 6, 0, 13},
     {6, 7, 13, 12},
-    {13, 2, 25, 13},
-    {15, 6, 38, 14},
-    {21, 7, 52, 13},
-    {28, 7, 65, 13},
-    {35, 7, 78, 12},
-    {42, 13, 90, 31},
+    {13, 2, 25, 14},
+    {15, 6, 39, 14},
+    {21, 7, 53, 13},
+    {28, 7, 66, 13},
+    {35, 7, 79, 12},
+    {42, 13, 91, 31},
 };
 
 struct CourseRule {
@@ -208,7 +208,7 @@ struct CourseRule {
 const CourseRule kCourseRules[] = {
     {420, 420, 765, 765}, // Bianco 7:00 / 12:45
     {315, 315, 585, 585}, // Ricco 5:15 / 9:45
-    {60, 60, 645, 645},   // Gelato 1:00 / 10:45
+    {60, 60, 675, 675},   // Gelato 1:00 / 11:15
     {320, 323, 660, 663}, // Pinna 5:20 (JP 5:23) / 11:00 (JP 11:03)
     {570, 575, 1030, 1035}, // Sirena 9:30 (JP 9:35) / 17:10 (JP 17:15)
     {345, 345, 640, 640}, // Noki 5:45 / 10:40
@@ -365,7 +365,7 @@ static_assert(kNuttyTimeIndex ==
 static_assert(sizeof(kStreakRules) / sizeof(kStreakRules[0]) == 26,
               "Streak rule count changed");
 static_assert(sizeof(kAnySlots) == 55, "Any-percent PB route changed");
-static_assert(sizeof(kAllSlots) == 121, "all-IL PB route changed");
+static_assert(sizeof(kAllSlots) == 122, "all-IL PB route changed");
 static_assert(sizeof(kWorldPBRules) / sizeof(kWorldPBRules[0]) ==
                   Records::WORLD_COUNT,
               "world PB ranges changed");
@@ -471,7 +471,7 @@ struct RecordsState {
 };
 
 static_assert(sizeof(RecordsState) <= SUSAMUNE_RECORDS_RUNTIME_SIZE,
-              "Records runtime exceeds its MEM2 window");
+              "Records runtime exceeds its fixed MEM2 subwindow");
 
 RecordsState *const sState = reinterpret_cast<RecordsState *>(
     SUSAMUNE_MEM2_RECORDS_RUNTIME_PPC_BASE);
@@ -765,6 +765,14 @@ void resetWrongEntryStreaks(int entry) {
     for (u32 i = 0; i < sizeof(kStreakRules) / sizeof(kStreakRules[0]); i++) {
         if (kStreakRules[i].entry != entry) sStreakProgress[i] = 0;
     }
+}
+
+int canonicalResultEntry(int entry) {
+    // Older playlists express GBS as Gelato 1 plus a result alias to Gelato 8.
+    return entry == 35 && sAttemptStartArea == 4 &&
+                   sAttemptStartEpisode == 0
+               ? 121
+               : entry;
 }
 
 void failCurrentAttempt() {
@@ -1263,8 +1271,9 @@ void onILAttemptEnded() {
 
 void onILResult(int entry, u8 pbSlot, s32 qf, s32 igtCentis,
                 bool challengeEligible) {
+    const int routeEntry = canonicalResultEntry(entry);
     addStat(STAT_IL_FINISHES, 1);
-    addStat(worldFinishStat(worldForEntry(entry)), 1);
+    addStat(worldFinishStat(worldForEntry(routeEntry)), 1);
 
     const bool eligible = challengeEligible && sAttemptEligible &&
                           !introSkipEnabled();
@@ -1278,7 +1287,7 @@ void onILResult(int entry, u8 pbSlot, s32 qf, s32 igtCentis,
 
     // Streaks follow consecutive completed results. Some valid routes start
     // from a different catalog entry than the result they produce.
-    resetWrongEntryStreaks(entry);
+    resetWrongEntryStreaks(routeEntry);
 
     if (sActivePBs && pbSlot < sActivePBCount &&
         sActivePBs[pbSlot] >= 0 && sActivePBs[pbSlot] == qf)
@@ -1286,7 +1295,7 @@ void onILResult(int entry, u8 pbSlot, s32 qf, s32 igtCentis,
 
     for (u32 i = 0; i < sizeof(kTimeRules) / sizeof(kTimeRules[0]); i++) {
         const TimeRule &rule = kTimeRules[i];
-        if (entry != rule.entry) continue;
+        if (routeEntry != rule.entry) continue;
         const u16 value = timeRuleValue(i);
         const bool passed = (rule.slotFlags & TIME_IGT)
             ? igtCentis >= 0 && (u32)igtCentis >= value
@@ -1297,20 +1306,19 @@ void onILResult(int entry, u8 pbSlot, s32 qf, s32 igtCentis,
     }
 
     if (entry == 46) unlock(ACH_PLATFORM_RIDER);
-    if (entry == 35) unlock(ACH_OH_MY_GOD);
+    if (entry == 35 || routeEntry == 121) unlock(ACH_OH_MY_GOD);
     if (entry == 75 && !(sActionFlags & ACTION_HOVER))
         unlock(ACH_FISH_FINDER);
     if (entry == 105 &&
         !(sActionFlags & (ACTION_ROCKET | ACTION_TURBO | ACTION_YOSHI)))
         unlock(ACH_THE_LONG_WAY_UP);
-    if (entry == 35 && sAttemptStartArea == 4 &&
-        sAttemptStartEpisode == 0 &&
+    if (routeEntry == 121 &&
         !(sActionFlags & (ACTION_YOSHI | ACTION_HOVER)))
         unlock(ACH_NOHOVER);
 
     for (u32 i = 0; i < sizeof(kStreakRules) / sizeof(kStreakRules[0]); i++) {
         const StreakRule &rule = kStreakRules[i];
-        if (entry != rule.entry) continue;
+        if (routeEntry != rule.entry) continue;
         if (streakSucceeded(i, qf, igtCentis)) {
             if (sStreakProgress[i] < rule.goal) sStreakProgress[i]++;
             if (sStreakProgress[i] >= rule.goal)
@@ -1470,6 +1478,7 @@ World worldForArea(Area area) {
 }
 
 World worldForEntry(int entry) {
+    if (entry == 121) return WORLD_GELATO;
     if (entry >= 0 && entry < 13) return WORLD_BIANCO;
     if (entry < 25) return entry >= 13 ? WORLD_RICCO : WORLD_INVALID;
     if (entry < 38) return WORLD_GELATO;
