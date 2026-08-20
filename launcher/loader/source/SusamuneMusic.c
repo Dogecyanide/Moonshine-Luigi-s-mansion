@@ -68,7 +68,7 @@ void SusamuneMusicInit(void)
 	ASND_Init();
 	MP3Player_Init();
 	sAudioReady = true;
-	gprintf("Susamune music: ASND/MP3 ready before IOS reload\n");
+	gprintf("Susamune music: ASND/MP3 ready; playback deferred\n");
 }
 
 bool SusamuneMusicLoad(const char *launcherDevice, const char *launchDir)
@@ -82,7 +82,7 @@ bool SusamuneMusicLoad(const char *launcherDevice, const char *launchDir)
 
 	sWarning[0] = '\0';
 	if (sBuffer != NULL)
-		return sPlaying;
+		return true;
 	if (!BuildMusicPath(path, sizeof(path), launcherDevice, launchDir))
 	{
 		snprintf(sWarning, sizeof(sWarning),
@@ -144,19 +144,30 @@ bool SusamuneMusicLoad(const char *launcherDevice, const char *launchDir)
 		gprintf("Susamune music rejected %s: no consecutive MP3 frames\n", path);
 		return false;
 	}
+	LogHeap("staged");
+	gprintf("Susamune music staged %s (%u bytes)\n", path,
+		(unsigned int)sBufferSize);
+	return true;
+}
+
+bool SusamuneMusicStart(void)
+{
+	if (sPlaying)
+		return true;
+	if (sBuffer == NULL || sBufferSize <= 0)
+		return false;
+
+	// The IOS reload and Nintendont kernel setup can interrupt the decoder.
+	// The caller waits until both are stable, giving it one lifetime per launch.
 	if (!sAudioReady || MP3Player_PlayBuffer(sBuffer, sBufferSize, NULL) < 0)
 	{
-		free(sBuffer);
-		sBuffer = NULL;
-		sBufferSize = 0;
 		snprintf(sWarning, sizeof(sWarning),
 			"Theme MP3 could not start.\nContinuing without music.");
+		gprintf("Susamune music: delayed start failed\n");
 		return false;
 	}
 	sPlaying = true;
-	LogHeap("loaded");
-	gprintf("Susamune music loaded %s (%u bytes)\n", path,
-		(unsigned int)sBufferSize);
+	gprintf("Susamune music: playback started\n");
 	return true;
 }
 

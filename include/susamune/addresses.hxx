@@ -91,6 +91,8 @@
 #define SUSAMUNE_ADDR_MOD_BASE \
     SUSAMUNE_MEM1_ADDR(SUSAMUNE_MOD_BASE_JP, SUSAMUNE_MOD_BASE_US, \
                        SUSAMUNE_MOD_BASE_PAL)
+#define SUSAMUNE_ADDR_MOD_ATTACHMENT_HEAP \
+    (SUSAMUNE_ADDR_MOD_BASE + SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET)
 
 // The mod links at __ArenaLo, but OSInit hands the debug stack back to the
 // arena when no debug monitor is present (BI2DebugFlag < 2), leaving the

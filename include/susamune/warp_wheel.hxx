@@ -86,6 +86,9 @@ u8 guardExitArea(u8 nextState);
 // Start an IL immediately when safe, or hide the menu and hold it behind the
 // shared unsaved-PB confirmation. False means warps are disabled.
 bool requestILStart(int entry);
+// A user-picked IL cancels an unfinished session, but an earned result, final
+// report and its protected-PB policy resolve first.
+bool requestExplicitILStart(int entry);
 // Savestate restores destroy volatile ghost state. The request opens the same
 // PB confirmation when needed; an approved load is returned exactly once.
 bool requestSavestateLoad();

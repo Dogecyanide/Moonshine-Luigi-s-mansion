@@ -65,7 +65,7 @@ enum {
 };
 
 constexpr u8 kFastAny[] = {
-    1, 2, 5, 6, 25, 34, 78, 79, 80, 81, 82, 85, 86, 38, 39, 42, 43,
+    0, 2, 5, 6, 121, 34, 78, 79, 80, 81, 82, 85, 86, 38, 39, 42, 43,
     46, 49, 13, 14, 16, 17, 20, 21, 22, 7, 10, 52, 53, 56, 57, 60, 61,
     62, 65, 66, 67, 68, 70, 71, 74, 92,
 };
@@ -74,7 +74,11 @@ constexpr u8 kRedsWorldTour[] = {
     4, 5, 9, 11, 19, 21, 27, 31, 33, 41, 42, 48,
     55, 59, 63, 67, 73, 75, 84, 87, 91, 98, 95, 97,
 };
-enum { kFastAnyPv5Position = 10 };
+enum {
+    kFastAnyBiancoPosition = 0,
+    kFastAnyPv5Position = 10,
+    kInvalidPlaylistId = 0xff,
+};
 
 static_assert(sizeof(kFastAny) == 43 && sizeof(kAllSecrets) == 9 &&
                   sizeof(kRedsWorldTour) == 24,
@@ -89,6 +93,23 @@ u32 sPlaylistWaitFrames;
 u32 sPlaylistLastError;
 bool sPlaylistsAvailable;
 bool sPlaylistSavePending;
+enum PlaylistSaveKind {
+    PLAYLIST_SAVE_NONE,
+    PLAYLIST_SAVE_MAINTENANCE,
+    PLAYLIST_SAVE_CUSTOM,
+    PLAYLIST_SAVE_BEST,
+};
+u8 sPlaylistSaveKind;
+u8 sPlaylistPendingDraftId;
+u32 sPlaylistPendingDraftHash;
+
+#if defined(SUSAMUNE_VERSION_JP)
+enum { kPlaylistRegion = 0 };
+#elif defined(SUSAMUNE_VERSION_US)
+enum { kPlaylistRegion = 1 };
+#else
+enum { kPlaylistRegion = 2 };
+#endif
 
 struct StageLoaderRuntime {
     u64 totalObservedActiveQf;
@@ -99,6 +120,10 @@ struct StageLoaderRuntime {
     u32 qualifyingSuccesses;
     u32 golds;
     u32 lastShineSerial;
+    u32 draftPlaylistHash;
+    u32 activePlaylistHash;
+    u32 priorPlaylistBestQf;
+    u32 finalPlaylistQf;
     s32 targetQf;
     s32 lastQf;
     s32 lastObservedQf;
@@ -121,13 +146,18 @@ struct StageLoaderRuntime {
     u8 modalReady;
     u8 holdingDeparture;
     u8 shineDemoSeen;
-    u8 activeFastTextOff[kQueueActionBytes];
+    u8 modalWaitForShineDemo;
+    u8 draftPlaylistId;
+    u8 activePlaylistId;
+    u8 playlistPbEligible;
+    u8 playlistTimeOverflow;
+    u8 activeActions[kQueueActionBytes];
 };
 
 struct StageLoaderQueues {
     u8 draft[StageLoader::QUEUE_CAPACITY];
     u8 active[StageLoader::QUEUE_CAPACITY];
-    u8 draftFastTextOff[kQueueActionBytes];
+    u8 draftActions[kQueueActionBytes];
     u8 reserved[SUSAMUNE_STAGE_LOADER_QUEUE_SIZE -
                 StageLoader::QUEUE_CAPACITY * 2 - kQueueActionBytes];
 };
@@ -136,7 +166,7 @@ struct StageLoaderQueues {
     SUSAMUNE_MEM2_STAGE_LOADER_RUNTIME_PPC_BASE))
 #define sQueues (*reinterpret_cast<StageLoaderQueues *>( \
     SUSAMUNE_MEM2_STAGE_LOADER_QUEUE_PPC_BASE))
-static_assert(sizeof(StageLoaderRuntime) == 96,
+static_assert(sizeof(StageLoaderRuntime) == 120,
               "Stage Loader runtime layout changed");
 static_assert(sizeof(StageLoaderRuntime) <= SUSAMUNE_STAGE_LOADER_RUNTIME_SIZE,
               "Stage Loader runtime exceeds its MEM2 window");
@@ -152,6 +182,72 @@ void setAction(u8 *bits, int position, bool enabled) {
     const u8 mask = (u8)(1u << (position & 7));
     if (enabled) bits[position >> 3] |= mask;
     else bits[position >> 3] &= (u8)~mask;
+}
+
+u32 playlistHashWord(u32 hash, u32 value) {
+    return (hash ^ value) * 16777619u;
+}
+
+u32 playlistContentHash(u8 playlistId, u32 revision, u8 count,
+                        const u8 *entries, const u8 *actions) {
+    u32 hash = 2166136261u;
+    hash = playlistHashWord(
+        hash, (SUSAMUNE_STAGE_PLAYLIST_ACTION_SCHEMA << 24) |
+                  ((u32)playlistId << 16) | count);
+    hash = playlistHashWord(hash, revision);
+    for (int i = 0; i < StageLoader::QUEUE_CAPACITY; i++) {
+        hash = (hash ^ entries[i]) * 16777619u;
+        hash = (hash ^ (actionAt(actions, i) ? 1u : 0u)) * 16777619u;
+    }
+    return hash;
+}
+
+bool builtinDefinition(int preset, const u8 **entries, u8 *count) {
+    if (!entries || !count) return false;
+    switch (preset) {
+    case 0:
+        *entries = kFastAny;
+        *count = sizeof(kFastAny);
+        return true;
+    case 1:
+        *entries = kAllSecrets;
+        *count = sizeof(kAllSecrets);
+        return true;
+    case 2:
+        *entries = kRedsWorldTour;
+        *count = sizeof(kRedsWorldTour);
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool builtinActionAt(int preset, int position) {
+    return preset == 0 &&
+           (position == kFastAnyBiancoPosition ||
+            position == kFastAnyPv5Position);
+}
+
+u32 builtinContentHash(int preset) {
+    const u8 *entries = nullptr;
+    u8 count = 0;
+    if (!builtinDefinition(preset, &entries, &count)) return 0;
+    u32 hash = 2166136261u;
+    hash = playlistHashWord(
+        hash, (SUSAMUNE_STAGE_PLAYLIST_ACTION_SCHEMA << 24) |
+                  ((u32)preset << 16) | count);
+    hash = playlistHashWord(hash, 0);
+    for (int i = 0; i < StageLoader::QUEUE_CAPACITY; i++) {
+        hash = (hash ^ (i < count ? entries[i] : 0)) * 16777619u;
+        hash = (hash ^ (builtinActionAt(preset, i) ? 1u : 0u)) *
+               16777619u;
+    }
+    return hash;
+}
+
+void invalidateDraftIdentity() {
+    sRuntime.draftPlaylistId = kInvalidPlaylistId;
+    sRuntime.draftPlaylistHash = 0;
 }
 
 u32 shineSerial() {
@@ -200,6 +296,9 @@ void resetSession() {
     sRuntime.eligibleCompletes = 0;
     sRuntime.qualifyingSuccesses = 0;
     sRuntime.golds = 0;
+    sRuntime.activePlaylistHash = 0;
+    sRuntime.priorPlaylistBestQf = SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET;
+    sRuntime.finalPlaylistQf = SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET;
     sRuntime.targetQf = -1;
     sRuntime.lastQf = -1;
     sRuntime.lastObservedQf = -1;
@@ -220,9 +319,12 @@ void resetSession() {
     sRuntime.modalState = MODAL_NONE;
     sRuntime.modalReady = 0;
     sRuntime.holdingDeparture = 0;
+    sRuntime.modalWaitForShineDemo = 0;
+    sRuntime.activePlaylistId = kInvalidPlaylistId;
+    sRuntime.playlistPbEligible = 0;
+    sRuntime.playlistTimeOverflow = 0;
     clearShinePublishLatch();
-    memset(sRuntime.activeFastTextOff, 0,
-           sizeof(sRuntime.activeFastTextOff));
+    memset(sRuntime.activeActions, 0, sizeof(sRuntime.activeActions));
 }
 
 void resetAll() {
@@ -231,6 +333,10 @@ void resetAll() {
     sRuntime.targetQf = -1;
     sRuntime.lastQf = -1;
     sRuntime.lastObservedQf = -1;
+    sRuntime.priorPlaylistBestQf = SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET;
+    sRuntime.finalPlaylistQf = SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET;
+    invalidateDraftIdentity();
+    sRuntime.activePlaylistId = kInvalidPlaylistId;
     clearShinePublishLatch();
 }
 
@@ -239,7 +345,55 @@ bool validPlaylistMailbox(
     return playlists->magic == SUSAMUNE_STAGE_PLAYLIST_MAGIC &&
            playlists->version == SUSAMUNE_STAGE_PLAYLIST_VERSION &&
            playlists->slotCount == SUSAMUNE_STAGE_PLAYLIST_COUNT &&
-           playlists->capacity == SUSAMUNE_STAGE_PLAYLIST_CAPACITY;
+           playlists->capacity == SUSAMUNE_STAGE_PLAYLIST_CAPACITY &&
+           playlists->builtinCount == SUSAMUNE_STAGE_PLAYLIST_BUILTIN_COUNT &&
+           playlists->regionCount == SUSAMUNE_STAGE_PLAYLIST_REGION_COUNT &&
+           playlists->actionBytes == SUSAMUNE_STAGE_PLAYLIST_ACTION_BYTES &&
+           playlists->actionSchema == SUSAMUNE_STAGE_PLAYLIST_ACTION_SCHEMA;
+}
+
+void storePlaylistPayload(volatile SusamuneStagePlaylistsCfg *playlists) {
+    DCStoreRange((void *)playlists->counts,
+                 sizeof(*playlists) -
+                     __builtin_offsetof(SusamuneStagePlaylistsCfg, counts));
+}
+
+bool publishPlaylistSave(PlaylistSaveKind kind) {
+#if IS_EMULATOR
+    (void)kind;
+    return false;
+#else
+    if (!sPlaylistsAvailable || sPlaylistSavePending) return false;
+    volatile SusamuneStagePlaylistsCfg *playlists =
+        SUSAMUNE_STAGE_PLAYLIST_PPC_PTR;
+    storePlaylistPayload(playlists);
+    sPlaylistSaveSeq++;
+    playlists->saveSeq = sPlaylistSaveSeq;
+    DCStoreRange((void *)playlists, 32);
+    sPlaylistSavePending = true;
+    sPlaylistWaitFrames = 0;
+    sPlaylistLastError = 0;
+    sPlaylistSaveKind = (u8)kind;
+    return true;
+#endif
+}
+
+bool reconcileBuiltinHashes(
+    volatile SusamuneStagePlaylistsCfg *playlists) {
+    bool changed = false;
+    for (int preset = 0; preset < StageLoader::BUILTIN_PLAYLIST_COUNT;
+         preset++) {
+        const u32 hash = builtinContentHash(preset);
+        if (playlists->contentHashes[preset] == hash) continue;
+        playlists->contentHashes[preset] = hash;
+        for (int region = 0;
+             region < SUSAMUNE_STAGE_PLAYLIST_REGION_COUNT; region++) {
+            playlists->bestQf[region][preset] =
+                SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET;
+        }
+        changed = true;
+    }
+    return changed;
 }
 
 void initPlaylistPersistence() {
@@ -248,6 +402,9 @@ void initPlaylistPersistence() {
     sPlaylistLastError = 0;
     sPlaylistsAvailable = false;
     sPlaylistSavePending = false;
+    sPlaylistSaveKind = PLAYLIST_SAVE_NONE;
+    sPlaylistPendingDraftId = kInvalidPlaylistId;
+    sPlaylistPendingDraftHash = 0;
 #if !IS_EMULATOR
     volatile SusamuneCfg *cfg = SUSAMUNE_CFG_PPC_PTR;
     DCInvalidateRange((void *)cfg, 32);
@@ -266,6 +423,13 @@ void initPlaylistPersistence() {
     }
     sPlaylistSaveSeq = playlists->saveSeq;
     sPlaylistsAvailable = true;
+    if (playlists->ackSeq != playlists->saveSeq) {
+        // V1 migration already owns the immutable payload until this ACK.
+        sPlaylistSavePending = true;
+        sPlaylistSaveKind = PLAYLIST_SAVE_MAINTENANCE;
+    } else if (reconcileBuiltinHashes(playlists)) {
+        publishPlaylistSave(PLAYLIST_SAVE_MAINTENANCE);
+    }
 #endif
 }
 
@@ -276,12 +440,35 @@ void pollPlaylistSave() {
         SUSAMUNE_STAGE_PLAYLIST_PPC_PTR;
     DCInvalidateRange((void *)&playlists->ackSeq, 32);
     if (playlists->ackSeq == sPlaylistSaveSeq) {
+        const PlaylistSaveKind kind = (PlaylistSaveKind)sPlaylistSaveKind;
         sPlaylistSavePending = false;
         sPlaylistWaitFrames = 0;
         sPlaylistLastError = playlists->status;
+        sPlaylistSaveKind = PLAYLIST_SAVE_NONE;
+        if (sPlaylistLastError != 0) {
+            // The staged payload is no longer an acknowledged view of disk.
+            // Reboot can safely recover the last valid V2 generation.
+            sPlaylistsAvailable = false;
+            if (kind == PLAYLIST_SAVE_CUSTOM &&
+                sRuntime.draftPlaylistId == sPlaylistPendingDraftId &&
+                sRuntime.draftPlaylistHash == sPlaylistPendingDraftHash) {
+                invalidateDraftIdentity();
+            }
+        }
+        sPlaylistPendingDraftId = kInvalidPlaylistId;
+        sPlaylistPendingDraftHash = 0;
+        if (sPlaylistLastError == 0 &&
+            kind == PLAYLIST_SAVE_MAINTENANCE &&
+            reconcileBuiltinHashes(playlists)) {
+            publishPlaylistSave(PLAYLIST_SAVE_MAINTENANCE);
+        }
         if (gMenu) {
             if (sPlaylistLastError == 0) {
-                gMenu->toast("Playlist saved");
+                if (kind == PLAYLIST_SAVE_CUSTOM) {
+                    gMenu->toast("Playlist saved");
+                } else if (kind == PLAYLIST_SAVE_BEST) {
+                    gMenu->toast("Playlist best saved");
+                }
             } else {
                 char message[40];
                 snprintf(message, sizeof(message), "Playlist save failed: %u",
@@ -305,10 +492,18 @@ void addSaturated(u64 &total, u64 amount) {
     total = maximum - total < amount ? maximum : total + amount;
 }
 
-int expectedEntry() {
+int expectedStartEntry() {
     return sRuntime.activeIndex < sRuntime.activeCount
                ? sQueues.active[sRuntime.activeIndex]
                : -1;
+}
+
+int expectedResultEntry() {
+    const int entry = expectedStartEntry();
+    if (!actionAt(sRuntime.activeActions, sRuntime.activeIndex)) return entry;
+    if (entry == SUSAMUNE_STAGE_PLAYLIST_ACTION_BIANCO_1) return 1;
+    if (entry == SUSAMUNE_STAGE_PLAYLIST_ACTION_GELATO_1) return 121;
+    return entry;
 }
 
 s32 liveQf() {
@@ -355,8 +550,21 @@ bool liveResultDirector(const TMarDirector *director) {
            director->mDemoState == 0;
 }
 
+bool resultPresentationReady(const TMarDirector *director) {
+    if (sRuntime.modalWaitForShineDemo) {
+        const bool shineDemoStarted =
+            director &&
+            gpApplication.mContext == TApplication::CONTEXT_DIRECT_STAGE &&
+            gpMarDirector == director && director->_260 != 0 &&
+            (director->mGameState & 0x1) == 0 && director->mDemoState != 0;
+        if (shineDemoStarted) sRuntime.modalWaitForShineDemo = 0;
+        return false;
+    }
+    return liveResultDirector(director);
+}
+
 bool requestCurrent() {
-    const int entry = expectedEntry();
+    const int entry = expectedStartEntry();
     if (entry < 0 || entry >= ILing::count()) return false;
 
     sRuntime.state = STATE_REQUESTING;
@@ -389,7 +597,8 @@ void beginAttempt(u32 serial) {
 
 void queueFailure(Outcome outcome, s32 qf) {
     clearShinePublishLatch();
-    const int entry = expectedEntry();
+    sRuntime.modalWaitForShineDemo = 0;
+    const int entry = expectedStartEntry();
     if (qf >= 0) observeQf(qf);
     if (entry >= 0) sRuntime.lastEntry = (u8)entry;
     sRuntime.lastQf = qf;
@@ -404,11 +613,45 @@ void queueFailure(Outcome outcome, s32 qf) {
     sRuntime.state = STATE_RETRY_DELAY;
 }
 
-void queueSuccess(s32 qf) {
+void finishPlaylistBest() {
+    if (sRuntime.totalObservedActiveQf == 0 ||
+        sRuntime.totalObservedActiveQf >=
+            SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET) {
+        sRuntime.playlistTimeOverflow = 1;
+        sRuntime.finalPlaylistQf = SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET;
+        return;
+    }
+    sRuntime.finalPlaylistQf = (u32)sRuntime.totalObservedActiveQf;
+    if (!sPlaylistsAvailable || sPlaylistSavePending ||
+        !sRuntime.playlistPbEligible ||
+        sRuntime.activePlaylistId >= SUSAMUNE_STAGE_PLAYLIST_TOTAL_COUNT) {
+        return;
+    }
+    if (sRuntime.priorPlaylistBestQf !=
+            SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET &&
+        sRuntime.finalPlaylistQf >= sRuntime.priorPlaylistBestQf) {
+        return;
+    }
+
+#if !IS_EMULATOR
+    volatile SusamuneStagePlaylistsCfg *playlists =
+        SUSAMUNE_STAGE_PLAYLIST_PPC_PTR;
+    const u8 id = sRuntime.activePlaylistId;
+    // Identity changes are committed separately with all regional bests
+    // cleared. Never combine that migration with a newly earned best.
+    if (playlists->contentHashes[id] != sRuntime.activePlaylistHash) return;
+    playlists->bestQf[kPlaylistRegion][id] = sRuntime.finalPlaylistQf;
+    publishPlaylistSave(PLAYLIST_SAVE_BEST);
+#endif
+}
+
+void queueSuccess(int resultEntry, s32 qf) {
+    const bool normalShine =
+        gpMarioOriginal && gpMarioOriginal->mState == kMarioWinDemoState;
     clearShinePublishLatch();
-    const int entry = expectedEntry();
+    sRuntime.modalWaitForShineDemo = 0;
     observeQf(qf);
-    sRuntime.lastEntry = (u8)entry;
+    sRuntime.lastEntry = (u8)resultEntry;
     sRuntime.lastQf = qf;
     sRuntime.outcome = OUTCOME_SUCCESS;
     incrementSaturated(sRuntime.qualifyingSuccesses);
@@ -423,6 +666,7 @@ void queueSuccess(s32 qf) {
         if (sRuntime.progress >= sRuntime.goal) {
             sRuntime.retryFrames = 0;
             sRuntime.state = STATE_COMPLETE;
+            sRuntime.modalWaitForShineDemo = normalShine;
             sRuntime.modalState = MODAL_PENDING;
         } else {
             sRuntime.retryFrames = kRetryDelayFrames;
@@ -436,6 +680,8 @@ void queueSuccess(s32 qf) {
     if (sRuntime.activeIndex >= sRuntime.activeCount) {
         sRuntime.retryFrames = 0;
         sRuntime.state = STATE_COMPLETE;
+        finishPlaylistBest();
+        sRuntime.modalWaitForShineDemo = normalShine;
         sRuntime.modalState = MODAL_PENDING;
     } else {
         sRuntime.retryFrames = kRetryDelayFrames;
@@ -448,6 +694,7 @@ u16 modalHeld() {
 }
 
 void showModal() {
+    sRuntime.modalWaitForShineDemo = 0;
     sRuntime.modalState = MODAL_VISIBLE;
     sRuntime.modalPrevious = modalHeld();
     sRuntime.modalReady = sRuntime.modalPrevious == 0;
@@ -469,6 +716,7 @@ void updateModal() {
     sRuntime.modalState = MODAL_NONE;
     sRuntime.modalReady = 0;
     sRuntime.holdingDeparture = 0;
+    sRuntime.modalWaitForShineDemo = 0;
     sRuntime.state = STATE_INACTIVE;
 }
 
@@ -500,9 +748,54 @@ void formatDuration(u64 qf, char *out, u32 size) {
 }
 
 void drawModalRow(Menu *menu, int y, const char *name, const char *value) {
+    const Color color(120, 220, 150, 255);
     menu->drawText(name, 108, y, 15, 15, Color(200, 206, 220, 255));
     menu->drawText(value, 532 - Menu::textWidth(value, 15), y, 15, 15,
-                   Color(120, 220, 150, 255));
+                   color);
+}
+
+void drawModalRowColor(Menu *menu, int y, const char *name,
+                       const char *value, const Color &color) {
+    menu->drawText(name, 108, y, 15, 15, Color(200, 206, 220, 255));
+    menu->drawText(value, 532 - Menu::textWidth(value, 15), y, 15, 15,
+                   color);
+}
+
+u32 completionPercent() {
+    if (sRuntime.attempts == 0) return 0;
+    if (sRuntime.eligibleCompletes >= sRuntime.attempts) return 100;
+    return (u32)(((u64)sRuntime.eligibleCompletes * 100u +
+                  sRuntime.attempts / 2u) /
+                 sRuntime.attempts);
+}
+
+void formatPlaylistDelta(char *out, u32 size) {
+    if (sRuntime.activePlaylistId >= SUSAMUNE_STAGE_PLAYLIST_TOTAL_COUNT ||
+        !sPlaylistsAvailable) {
+        strcpy(out, "--");
+        return;
+    }
+    if (!sRuntime.playlistPbEligible) {
+        strcpy(out, "Ineligible");
+        return;
+    }
+    if (sRuntime.playlistTimeOverflow) {
+        strcpy(out, "Overflow");
+        return;
+    }
+    if (sRuntime.priorPlaylistBestQf ==
+        SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET) {
+        strcpy(out, "--");
+        return;
+    }
+    const bool faster = sRuntime.finalPlaylistQf <
+                        sRuntime.priorPlaylistBestQf;
+    const u32 difference = faster
+        ? sRuntime.priorPlaylistBestQf - sRuntime.finalPlaylistQf
+        : sRuntime.finalPlaylistQf - sRuntime.priorPlaylistBestQf;
+    char time[24];
+    formatDuration(difference, time, sizeof(time));
+    snprintf(out, size, "%c%s", faster ? '-' : '+', time);
 }
 
 void drawFinalModal(Menu *menu) {
@@ -519,7 +812,23 @@ void drawFinalModal(Menu *menu) {
     menu->drawText(title, 320 - Menu::textWidth(title, 20) / 2,
                    y + 16, 20, 20, Color(255, 255, 255, 255));
 
+    char playlistName[28];
     const char *route = ILing::label(sRuntime.lastEntry);
+    if (loader) {
+        if (sRuntime.activePlaylistId <
+            StageLoader::BUILTIN_PLAYLIST_COUNT) {
+            route = StageLoader::builtinPlaylistName(
+                sRuntime.activePlaylistId);
+        } else if (sRuntime.activePlaylistId <
+                   SUSAMUNE_STAGE_PLAYLIST_TOTAL_COUNT) {
+            snprintf(playlistName, sizeof(playlistName), "Custom %u",
+                     (unsigned)(sRuntime.activePlaylistId -
+                                StageLoader::BUILTIN_PLAYLIST_COUNT + 1));
+            route = playlistName;
+        } else {
+            route = "Unsaved playlist";
+        }
+    }
     int routeSize = 16;
     while (routeSize > 10 && Menu::textWidth(route, routeSize) > w - 44) {
         routeSize--;
@@ -551,22 +860,52 @@ void drawFinalModal(Menu *menu) {
 
     char value[32];
     int rowY = y + 119;
-    snprintf(value, sizeof(value), "%u / %u",
+    snprintf(value, sizeof(value), "%u/%u (%u pct)",
              (unsigned)sRuntime.eligibleCompletes,
-             (unsigned)sRuntime.attempts);
+             (unsigned)sRuntime.attempts,
+             (unsigned)completionPercent());
     drawModalRow(menu, rowY, "Completes / attempts", value);
     rowY += 34;
-    formatDuration(sRuntime.totalObservedActiveQf, value, sizeof(value));
-    drawModalRow(menu, rowY, "Active time", value);
-    rowY += 34;
-    if (sRuntime.eligibleCompletes) {
-        formatDuration(sRuntime.completedQfTotal /
-                           sRuntime.eligibleCompletes,
-                       value, sizeof(value));
+    if (loader && sRuntime.playlistTimeOverflow) {
+        strcpy(value, "Overflow");
     } else {
-        strcpy(value, "--");
+        formatDuration(sRuntime.totalObservedActiveQf, value, sizeof(value));
     }
-    drawModalRow(menu, rowY, "Average time", value);
+    drawModalRow(menu, rowY, loader ? "Playlist time" : "Active time", value);
+    rowY += 34;
+    if (loader) {
+        u32 best = sRuntime.priorPlaylistBestQf;
+        if (sPlaylistsAvailable && sRuntime.playlistPbEligible &&
+            !sRuntime.playlistTimeOverflow &&
+            sRuntime.activePlaylistId <
+                SUSAMUNE_STAGE_PLAYLIST_TOTAL_COUNT &&
+            (best == SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET ||
+             sRuntime.finalPlaylistQf < best)) {
+            best = sRuntime.finalPlaylistQf;
+        }
+        if (best == SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET ||
+            !sPlaylistsAvailable) {
+            strcpy(value, "--");
+        } else {
+            formatDuration(best, value, sizeof(value));
+        }
+        drawModalRow(menu, rowY, "Best time", value);
+        rowY += 34;
+        formatPlaylistDelta(value, sizeof(value));
+        const bool slower = value[0] == '+' && strcmp(value, "+0:00:00.000");
+        drawModalRowColor(menu, rowY, "Delta", value,
+                          slower ? Color(245, 95, 85, 255)
+                                 : Color(120, 220, 150, 255));
+    } else {
+        if (sRuntime.eligibleCompletes) {
+            formatDuration(sRuntime.completedQfTotal /
+                               sRuntime.eligibleCompletes,
+                           value, sizeof(value));
+        } else {
+            strcpy(value, "--");
+        }
+        drawModalRow(menu, rowY, "Average time", value);
+    }
     rowY += 34;
     drawModalRow(menu, rowY, "Golds", "--");
 
@@ -712,21 +1051,23 @@ bool appendQueue(int entry) {
         return false;
     }
     // Repeated routes are distinct playlist positions by design.
+    invalidateDraftIdentity();
     const int position = sRuntime.draftCount++;
     sQueues.draft[position] = (u8)entry;
-    setAction(sQueues.draftFastTextOff, position, false);
+    setAction(sQueues.draftActions, position, false);
     return true;
 }
 
 bool removeQueue(int position) {
     if (position < 0 || position >= sRuntime.draftCount) return false;
+    invalidateDraftIdentity();
     for (int i = position + 1; i < sRuntime.draftCount; i++) {
         sQueues.draft[i - 1] = sQueues.draft[i];
-        setAction(sQueues.draftFastTextOff, i - 1,
-                  actionAt(sQueues.draftFastTextOff, i));
+        setAction(sQueues.draftActions, i - 1,
+                  actionAt(sQueues.draftActions, i));
     }
     sQueues.draft[--sRuntime.draftCount] = 0;
-    setAction(sQueues.draftFastTextOff, sRuntime.draftCount, false);
+    setAction(sQueues.draftActions, sRuntime.draftCount, false);
     return true;
 }
 
@@ -738,26 +1079,27 @@ bool moveQueue(int position, int direction) {
         destination == position) {
         return false;
     }
+    invalidateDraftIdentity();
     const u8 entry = sQueues.draft[position];
     sQueues.draft[position] = sQueues.draft[destination];
     sQueues.draft[destination] = entry;
-    const bool action = actionAt(sQueues.draftFastTextOff, position);
-    setAction(sQueues.draftFastTextOff, position,
-              actionAt(sQueues.draftFastTextOff, destination));
-    setAction(sQueues.draftFastTextOff, destination, action);
+    const bool action = actionAt(sQueues.draftActions, position);
+    setAction(sQueues.draftActions, position,
+              actionAt(sQueues.draftActions, destination));
+    setAction(sQueues.draftActions, destination, action);
     return true;
 }
 
 void clearQueue() {
     memset(sQueues.draft, 0, sizeof(sQueues.draft));
-    memset(sQueues.draftFastTextOff, 0,
-           sizeof(sQueues.draftFastTextOff));
+    memset(sQueues.draftActions, 0, sizeof(sQueues.draftActions));
     sRuntime.draftCount = 0;
+    invalidateDraftIdentity();
 }
 
 const char *builtinPlaylistName(int preset) {
     switch (preset) {
-    case 0: return "Fast Any%";
+    case 0: return "Fast Any percent";
     case 1: return "All Secrets";
     case 2: return "Reds World Tour";
     default: return "Unknown";
@@ -766,30 +1108,18 @@ const char *builtinPlaylistName(int preset) {
 
 bool loadBuiltinPlaylist(int preset) {
     const u8 *entries = nullptr;
-    u32 count = 0;
-    switch (preset) {
-    case 0:
-        entries = kFastAny;
-        count = sizeof(kFastAny);
-        break;
-    case 1:
-        entries = kAllSecrets;
-        count = sizeof(kAllSecrets);
-        break;
-    case 2:
-        entries = kRedsWorldTour;
-        count = sizeof(kRedsWorldTour);
-        break;
-    default:
-        return false;
-    }
+    u8 count = 0;
+    if (!builtinDefinition(preset, &entries, &count)) return false;
 
     clearQueue();
     memcpy(sQueues.draft, entries, count);
     sRuntime.draftCount = (u8)count;
     if (preset == 0) {
-        setAction(sQueues.draftFastTextOff, kFastAnyPv5Position, true);
+        setAction(sQueues.draftActions, kFastAnyBiancoPosition, true);
+        setAction(sQueues.draftActions, kFastAnyPv5Position, true);
     }
+    sRuntime.draftPlaylistId = (u8)preset;
+    sRuntime.draftPlaylistHash = builtinContentHash(preset);
     return true;
 }
 
@@ -811,10 +1141,14 @@ bool loadCustomPlaylist(int slot) {
     }
 
     memset(sQueues.draft, 0, sizeof(sQueues.draft));
-    memset(sQueues.draftFastTextOff, 0,
-           sizeof(sQueues.draftFastTextOff));
+    memset(sQueues.draftActions, 0, sizeof(sQueues.draftActions));
     memcpy(sQueues.draft, (const void *)playlists->entries[slot], count);
+    memcpy(sQueues.draftActions, (const void *)playlists->actions[slot],
+           sizeof(sQueues.draftActions));
     sRuntime.draftCount = count;
+    sRuntime.draftPlaylistId = (u8)(BUILTIN_PLAYLIST_COUNT + slot);
+    sRuntime.draftPlaylistHash =
+        playlists->contentHashes[sRuntime.draftPlaylistId];
     return true;
 #endif
 }
@@ -825,6 +1159,7 @@ bool saveCustomPlaylist(int slot) {
     return false;
 #else
     if (!sPlaylistsAvailable || sPlaylistSavePending ||
+        sRuntime.state != STATE_INACTIVE ||
         sRuntime.draftCount == 0 || slot < 0 ||
         slot >= CUSTOM_PLAYLIST_COUNT) {
         return false;
@@ -836,16 +1171,25 @@ bool saveCustomPlaylist(int slot) {
            sizeof(playlists->entries[slot]));
     memcpy((void *)playlists->entries[slot], sQueues.draft,
            sRuntime.draftCount);
-    DCStoreRange((void *)playlists->counts,
-                 sizeof(playlists->counts) + sizeof(playlists->entries));
+    memcpy((void *)playlists->actions[slot], sQueues.draftActions,
+           sizeof(playlists->actions[slot]));
+    playlists->revisions[slot]++;
+    const u8 id = (u8)(BUILTIN_PLAYLIST_COUNT + slot);
+    const u32 hash = playlistContentHash(
+        id, playlists->revisions[slot], sRuntime.draftCount,
+        sQueues.draft, sQueues.draftActions);
+    playlists->contentHashes[id] = hash;
+    for (int region = 0;
+         region < SUSAMUNE_STAGE_PLAYLIST_REGION_COUNT; region++) {
+        playlists->bestQf[region][id] =
+            SUSAMUNE_STAGE_PLAYLIST_BEST_UNSET;
+    }
 
-    sPlaylistSaveSeq++;
-    playlists->saveSeq = sPlaylistSaveSeq;
-    DCStoreRange((void *)playlists, 32);
-    sPlaylistSavePending = true;
-    sPlaylistWaitFrames = 0;
-    sPlaylistLastError = 0;
-    return true;
+    sRuntime.draftPlaylistId = id;
+    sRuntime.draftPlaylistHash = hash;
+    sPlaylistPendingDraftId = id;
+    sPlaylistPendingDraftHash = hash;
+    return publishPlaylistSave(PLAYLIST_SAVE_CUSTOM);
 #endif
 }
 
@@ -876,18 +1220,35 @@ u32 customPlaylistLastError() {
 }
 
 bool startLoader() {
-    if (!sRuntime.draftCount || Ghost::observerPreparing() ||
+    if (!sRuntime.draftCount || sPlaylistSavePending ||
+        Ghost::observerPreparing() ||
         Ghost::observerStatsSuppressed()) {
         return false;
     }
     const u8 count = sRuntime.draftCount;
+    const u8 playlistId = sRuntime.draftPlaylistId;
+    const u32 playlistHash = sRuntime.draftPlaylistHash;
     resetSession();
     memcpy(sQueues.active, sQueues.draft, count);
-    memcpy(sRuntime.activeFastTextOff, sQueues.draftFastTextOff,
-           sizeof(sRuntime.activeFastTextOff));
+    memcpy(sRuntime.activeActions, sQueues.draftActions,
+           sizeof(sRuntime.activeActions));
     sRuntime.activeCount = count;
     sRuntime.goal = count;
     sRuntime.mode = MODE_LOADER;
+    sRuntime.activePlaylistId = playlistId;
+    sRuntime.activePlaylistHash = playlistHash;
+    sRuntime.playlistPbEligible = 1;
+#if !IS_EMULATOR
+    if (sPlaylistsAvailable &&
+        playlistId < SUSAMUNE_STAGE_PLAYLIST_TOTAL_COUNT) {
+        volatile SusamuneStagePlaylistsCfg *playlists =
+            SUSAMUNE_STAGE_PLAYLIST_PPC_PTR;
+        if (playlists->contentHashes[playlistId] == playlistHash) {
+            sRuntime.priorPlaylistBestQf =
+                playlists->bestQf[kPlaylistRegion][playlistId];
+        }
+    }
+#endif
     if (requestCurrent()) return true;
     resetSession();
     return false;
@@ -963,7 +1324,15 @@ bool fastTextSuppressed() {
            sRuntime.state != STATE_COMPLETE &&
            sRuntime.state != STATE_BLOCKED &&
            sRuntime.activeIndex < sRuntime.activeCount &&
-           actionAt(sRuntime.activeFastTextOff, sRuntime.activeIndex);
+           expectedStartEntry() ==
+               SUSAMUNE_STAGE_PLAYLIST_ACTION_PIANTA_5 &&
+           actionAt(sRuntime.activeActions, sRuntime.activeIndex);
+}
+
+bool activeRouteMatches(int startEntry, int resultEntry) {
+    return sRuntime.state == STATE_RUNNING &&
+           expectedStartEntry() == startEntry &&
+           expectedResultEntry() == resultEntry;
 }
 
 bool deferRestartInput() {
@@ -975,12 +1344,19 @@ bool acceptDeferredRestart() {
            sRuntime.modalState == MODAL_NONE;
 }
 
+bool retryOwnsDeparture() {
+    return sRuntime.state == STATE_REQUESTING ||
+           sRuntime.state == STATE_WAITING ||
+           sRuntime.state == STATE_RETRY_DELAY ||
+           sRuntime.state == STATE_RETRY_PENDING;
+}
+
 bool holdGameModeBeforeUpdate(TMarDirector *director) {
     const bool live = liveResultDirector(director);
 
     if (sRuntime.modalState == MODAL_VISIBLE) return live;
     if (sRuntime.modalState == MODAL_PENDING) {
-        if (!live) return false;
+        if (!resultPresentationReady(director)) return false;
         showModal();
         return true;
     }
@@ -1002,6 +1378,17 @@ bool holdGameModeBeforeUpdate(TMarDirector *director) {
     return false;
 }
 
+bool copyDeathRetryDest(LevelWarp::Dest *out) {
+    if (!out || sRuntime.state != STATE_RUNNING ||
+        sRuntime.activeIndex >= sRuntime.activeCount ||
+        gpApplication.mContext != TApplication::CONTEXT_DIRECT_STAGE ||
+        !gpMarDirector || gpMarDirector->_260 == 0 ||
+        gpMarDirector->mCurState != TMarDirector::STATE_DEATH) {
+        return false;
+    }
+    return ILing::copySessionDeathRetryDest(expectedStartEntry(), out);
+}
+
 void update() {
     pollPlaylistSave();
     const bool shinePending = shinePublishPending();
@@ -1010,7 +1397,7 @@ void update() {
         return;
     }
     if (sRuntime.modalState == MODAL_PENDING) {
-        if (liveResultDirector(gpMarDirector) &&
+        if (resultPresentationReady(gpMarDirector) &&
             (!gMenu || !gMenu->shown()) &&
             !WarpWheel::shown() && !WarpWheel::promptPending()) {
             showModal();
@@ -1050,7 +1437,7 @@ void onILAttemptStarted(int entry) {
     }
 
     const u32 serial = gQFTTimer.attemptSerial();
-    if (entry != expectedEntry()) {
+    if (entry != expectedStartEntry()) {
         if (sRuntime.state == STATE_RUNNING) {
             queueFailure(OUTCOME_WRONG_ROUTE, -1);
         } else if (sRuntime.state == STATE_WAITING) {
@@ -1076,7 +1463,8 @@ void onILAttemptEnded() {
 
 void onILResult(int entry, s32 qf, bool eligible) {
     if (sRuntime.state != STATE_RUNNING) return;
-    if (entry != expectedEntry()) {
+    if (!eligible) invalidatePlaylistBest();
+    if (entry != expectedResultEntry()) {
         queueFailure(OUTCOME_WRONG_ROUTE, qf);
         return;
     }
@@ -1092,13 +1480,19 @@ void onILResult(int entry, s32 qf, bool eligible) {
         queueFailure(OUTCOME_TARGET_MISS, qf);
         return;
     }
-    queueSuccess(qf);
+    queueSuccess(entry, qf);
 }
 
 void onILWarpCancelled() {
     if (sRuntime.state == STATE_WAITING) {
         sRuntime.retryFrames = 0;
         sRuntime.state = STATE_RETRY_PENDING;
+    }
+}
+
+void invalidatePlaylistBest() {
+    if (sRuntime.mode == MODE_LOADER && sRuntime.state != STATE_INACTIVE) {
+        sRuntime.playlistPbEligible = 0;
     }
 }
 

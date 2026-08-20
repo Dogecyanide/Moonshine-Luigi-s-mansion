@@ -26,6 +26,9 @@ def check_shared_layout():
         "SUSAMUNE_MOD_BASE_PAL": patches.base_addr["pal"],
         "SUSAMUNE_MOD_REGION_SIZE": patches.mod_region_size,
         "SUSAMUNE_MOD_BLOB_MAX_SIZE": patches.mod_blob_max_size,
+        "SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE": patches.mod_mem1_working_cap_size,
+        "SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET": patches.mod_attachment_heap_offset,
+        "SUSAMUNE_MOD_ATTACHMENT_HEAP_SIZE": patches.mod_attachment_heap_size,
         "SUSAMUNE_SCRATCH": patches.mod_scratch_size,
         "SUSAMUNE_DEBUG_STACK_SIZE": patches.debug_stack_size,
     }
@@ -38,12 +41,20 @@ def check_shared_layout():
 
     mem2_header = header.parent / "mem2_map.h"
     mem2_text = mem2_header.read_text()
-    match = re.search(
-        r"^#define\s+SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE\s+"
-        r"(0x[0-9a-fA-F]+)u?\s*$", mem2_text, re.M)
-    if not match or int(match.group(1), 16) != patches.mod_file_max_size:
+    def mem2_hex_define(name):
+        match = re.search(
+            r"^#define\s+{}\s+(0x[0-9a-fA-F]+)u?\s*$".format(
+                re.escape(name)), mem2_text, re.M)
+        if not match:
+            raise RuntimeError("{} not found as a hex constant in {}".format(
+                name, mem2_header))
+        return int(match.group(1), 16)
+
+    staged_max = mem2_hex_define("SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE")
+    vault_offset = mem2_hex_define("SUSAMUNE_GHOST_ASSET_VAULT_OFFSET")
+    if staged_max != patches.mod_file_max_size or staged_max != vault_offset:
         raise RuntimeError(
-            "reset-safe mod file ceiling differs between mem2_map.h and patches.py")
+            "mod file ceiling, asset vault, and patches.py disagree")
 
 
 def check_arena_reserve(linker_script, base):

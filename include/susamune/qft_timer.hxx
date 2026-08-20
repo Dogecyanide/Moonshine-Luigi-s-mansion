@@ -31,6 +31,7 @@ class QFTTimer {
 
   // Susamune warps are new attempts, not an in-level transition.
   void requestReset();
+  void freezeEvent();
 
   // Changes only when the timer actually starts a fresh stage attempt.
   u32 attemptSerial() const;

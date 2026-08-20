@@ -5,6 +5,9 @@
 
 class Menu;
 class TMarDirector;
+namespace LevelWarp {
+struct Dest;
+}
 
 namespace StageLoader {
 
@@ -62,11 +65,20 @@ bool resultPending();
 bool departureResultPending();
 // Preset-only action overlay. The persisted Fast Text preference is untouched.
 bool fastTextSuppressed();
+// True only while the active playlist item deliberately credits a different
+// result than the level it starts in.
+bool activeRouteMatches(int startEntry, int resultEntry);
 // Restart inputs are sampled before IL results. Defer them until the result
 // pass so a finish on the same frame wins deterministically.
 bool deferRestartInput();
 bool acceptDeferredRestart();
+// A non-final result already owns the next departure. A restart captured from
+// the completed attempt must not survive into the replacement director.
+bool retryOwnsDeparture();
 bool holdGameModeBeforeUpdate(TMarDirector *director);
+// Main-scene deaths that would lose the selected route can reuse its exact
+// start after the retail death sequence finishes. Internal retries stay put.
+bool copyDeathRetryDest(LevelWarp::Dest *out);
 
 void update();
 void draw(Menu *menu);
@@ -76,6 +88,9 @@ void onILAttemptStarted(int entry);
 void onILAttemptEnded();
 void onILResult(int entry, s32 qf, bool eligible);
 void onILWarpCancelled();
+// Once an assist invalidates any attempt, the whole playlist run is excluded
+// from persistent bests even if later retries are clean.
+void invalidatePlaylistBest();
 
 }  // namespace StageLoader
 

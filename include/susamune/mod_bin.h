@@ -43,9 +43,9 @@
 #define SUSAMUNE_MOD_REGION_SIZE 0x80000u
 #define SUSAMUNE_SCRATCH 0x40u
 #define SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE 0x50000u
-// V2.0.3 reserves the staged-file tail for reset-safe attachment playback.
-// The packed-file ceiling is therefore stricter than the MEM1 working cap.
-#define SUSAMUNE_MOD_BLOB_MAX_SIZE 0x3EF50u
+#define SUSAMUNE_MOD_BLOB_MAX_SIZE 0x50000u
+#define SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET 0x50000u
+#define SUSAMUNE_MOD_ATTACHMENT_HEAP_SIZE 0x20000u
 #define SUSAMUNE_MOD_SCRATCH_OFFSET \
     (SUSAMUNE_MOD_REGION_SIZE - SUSAMUNE_SCRATCH)
 #define SUSAMUNE_DEBUG_STACK_SIZE 0x2000u
@@ -93,7 +93,23 @@ typedef char susamune_mod_window_size_check
 typedef char susamune_mod_blob_scratch_check
     [(SUSAMUNE_MOD_BLOB_MAX_SIZE <= SUSAMUNE_MOD_SCRATCH_OFFSET) ? 1 : -1];
 typedef char susamune_mod_working_cap_check
-    [(SUSAMUNE_MOD_BLOB_MAX_SIZE <= SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE) ? 1 : -1];
+    [(SUSAMUNE_MOD_BLOB_MAX_SIZE == SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE) ? 1 : -1];
+typedef char susamune_mod_attachment_offset_check
+    [(SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET ==
+      SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE) ? 1 : -1];
+typedef char susamune_mod_attachment_bounds_check
+    [(SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET +
+      SUSAMUNE_MOD_ATTACHMENT_HEAP_SIZE <= SUSAMUNE_MOD_SCRATCH_OFFSET) ? 1 : -1];
+typedef char susamune_mod_attachment_alignment_check
+    [(((SUSAMUNE_MOD_BASE_JP | SUSAMUNE_MOD_BASE_US |
+        SUSAMUNE_MOD_BASE_PAL | SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET |
+        SUSAMUNE_MOD_ATTACHMENT_HEAP_SIZE) & 31u) == 0) ? 1 : -1];
+typedef char susamune_mod_staging_vault_check
+    [(SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE ==
+      SUSAMUNE_GHOST_ASSET_VAULT_OFFSET) ? 1 : -1];
+typedef char susamune_mod_file_capacity_check
+    [(SUSAMUNE_MOD_HEADER_SIZE + SUSAMUNE_MOD_BLOB_MAX_SIZE <=
+      SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE) ? 1 : -1];
 
 #define SUSAMUNE_MOD_PPC_PTR  ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PPC_BASE)
 #define SUSAMUNE_MOD_PHYS_PTR ((struct SusamuneModHeader *)SUSAMUNE_MEM2_MODBIN_PHYS_BASE)

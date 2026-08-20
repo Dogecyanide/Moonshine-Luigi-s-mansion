@@ -29,7 +29,9 @@
 #include "susamune/records.hxx"
 #include "susamune/records_persistence.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/split_stats.hxx"
 #include "susamune/stage_loader.hxx"
+#include "susamune/stage_targets.hxx"
 #include "susamune/susamune_cfg.h"
 #include "susamune/wallkick_display.hxx"
 #include "susamune/warp_wheel.hxx"
@@ -123,6 +125,48 @@ int      sFontWidth   = 1;      // design cell width; every advance scales by si
 int      sCharSpacing = 0;      // J2DTextBox's spacing, handed to J2DPrint
 bool     sFontFixed   = false;  // font advances every glyph by sFontFixedW
 int      sFontFixedW  = 0;
+
+#if defined(SUSAMUNE_VERSION_JP)
+// JP's font has no one-byte slash. Keep raw UI/custom text portable without
+// making every dynamic format string know the regional encoding.
+char sFontSafeText[512];
+
+const char *fontSafeText(const char *text) {
+    u32 bytes = 0;
+    u32 slashes = 0;
+    const unsigned char *scan =
+        reinterpret_cast<const unsigned char *>(text);
+    while (*scan) {
+        if (sFont && sFont->isLeadByte(*scan) && scan[1]) {
+            bytes += 2;
+            scan += 2;
+        } else {
+            if (*scan == '/') slashes++;
+            bytes++;
+            scan++;
+        }
+    }
+    if (!slashes || bytes + slashes >= sizeof(sFontSafeText)) return text;
+
+    char *out = sFontSafeText;
+    scan = reinterpret_cast<const unsigned char *>(text);
+    while (*scan) {
+        if (sFont && sFont->isLeadByte(*scan) && scan[1]) {
+            *out++ = (char)*scan++;
+            *out++ = (char)*scan++;
+            continue;
+        } else if (*scan == '/') {
+            *out++ = (char)0x81;
+            *out++ = (char)0x5e;
+        } else {
+            *out++ = (char)*scan;
+        }
+        scan++;
+    }
+    *out = '\0';
+    return sFontSafeText;
+}
+#endif
 
 // -------- layout ----------------------------------------------------------
 const int PANEL_X = 40;
@@ -274,23 +318,25 @@ class ILingTab : public MenuTab {
 public:
     ILingTab()
         : mSel(0), mConfirmDelete(false), mEditingName(false),
-          mNameCursor(0), mNamePage(0), mNameLength(0), mNameUpper(false) {
+          mNameCursor(0), mNamePage(0), mNameLength(0), mNameUpper(false),
+          mShowingStats(false), mShowingSegments(false),
+          mConfirmGoldDelete(false), mStatsEntry(-1), mStatsSegment(0) {
         mNameBuffer[0] = '\0';
     }
 
     const char *title() const override { return "ILs"; }
     bool grabsInput() const override {
-        return mConfirmDelete || mEditingName ||
+        return mConfirmDelete || mEditingName || mShowingStats ||
                gCreationExtras.editing();
     }
     bool suppressesBinds() const override {
-        if (mConfirmDelete || mEditingName) return true;
+        if (mConfirmDelete || mEditingName || mShowingStats) return true;
         const u16 held = JUTGamePad::mPadStatus[0].mButton;
         return !isOption() &&
-               (held & (JUTGamePad::A | JUTGamePad::X)) != 0;
+               (held & (JUTGamePad::A | JUTGamePad::X | JUTGamePad::Y)) != 0;
     }
     bool fullScreen() const override {
-        return mEditingName || gCreationExtras.editing();
+        return mEditingName || mShowingStats || gCreationExtras.editing();
     }
 
     void update(Menu *menu, TMarioGamePad *pad) override {
@@ -302,9 +348,82 @@ public:
             updateNameEditor(pad);
             return;
         }
+        if (mShowingStats) {
+            const u16 pressed = mPromptInput.update();
+            if (mConfirmGoldDelete) {
+                if (pressed & JUTGamePad::A) {
+                    const SplitStats::DeleteGoldResult result =
+                        SplitStats::deleteGold(mStatsEntry, mStatsSegment);
+                    mConfirmGoldDelete = false;
+                    mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                                       JUTGamePad::X | JUTGamePad::START);
+                    if (result == SplitStats::DELETE_GOLD_OK) {
+                        menu->toast(SplitStats::storageState() ==
+                                            SplitStats::STORAGE_SESSION
+                                        ? "Gold deleted (session only)"
+                                        : "Gold deleted");
+                    } else if (result == SplitStats::DELETE_GOLD_READ_ONLY) {
+                        menu->toast("Stats are read only");
+                    } else {
+                        menu->toast("No Gold saved");
+                    }
+                } else if (pressed & JUTGamePad::B) {
+                    mConfirmGoldDelete = false;
+                    mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                                       JUTGamePad::X | JUTGamePad::START);
+                }
+                return;
+            }
+            if (!mShowingSegments && (pressed & JUTGamePad::A)) {
+                mShowingSegments = true;
+                mStatsSegment = 0;
+                mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                                   JUTGamePad::X | JUTGamePad::START);
+            } else if (mShowingSegments && (pressed & JUTGamePad::X)) {
+                SplitStats::Summary stats;
+                if (!SplitStats::summary(mStatsEntry, &stats) ||
+                    mStatsSegment >= stats.segmentCount ||
+                    stats.segments[mStatsSegment].goldQf < 0) {
+                    menu->toast("No Gold saved");
+                } else if (SplitStats::storageState() ==
+                           SplitStats::STORAGE_READ_ONLY) {
+                    menu->toast("Stats are read only");
+                } else {
+                    mConfirmGoldDelete = true;
+                    mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                                       JUTGamePad::X);
+                }
+            } else if (mShowingSegments && (pressed & JUTGamePad::B)) {
+                mShowingSegments = false;
+                mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                                   JUTGamePad::X | JUTGamePad::START);
+            } else if ((!mShowingSegments && (pressed & JUTGamePad::B)) ||
+                       (pressed & JUTGamePad::START)) {
+                mShowingStats = false;
+                mShowingSegments = false;
+                mConfirmGoldDelete = false;
+                mStatsEntry = -1;
+                mPromptInput.clear();
+            }
+            if (mShowingSegments) {
+                SplitStats::Summary stats;
+                const u32 navigation = menu->navigationInput(pad);
+                if (SplitStats::summary(mStatsEntry, &stats) &&
+                    stats.segmentCount > 0) {
+                    if (navigation & TMarioGamePad::CSTICK_UP)
+                        mStatsSegment = (u8)wrap(
+                            (int)mStatsSegment - 1, stats.segmentCount);
+                    else if (navigation & TMarioGamePad::CSTICK_DOWN)
+                        mStatsSegment = (u8)wrap(
+                            (int)mStatsSegment + 1, stats.segmentCount);
+                }
+            }
+            return;
+        }
         if (mConfirmDelete) {
             const u16 pressed = mPromptInput.update();
             if (pressed & JUTGamePad::A) {
+                SplitStats::onPBDeleted(selectedEntry(), ILing::pbProfile());
                 ILing::clearPB(selectedEntry());
                 mConfirmDelete = false;
                 mPromptInput.clear();
@@ -347,8 +466,7 @@ public:
                 activateOption(menu, +1);
             } else {
                 const int entry = selectedEntry();
-                StageLoader::cancel();
-                if (WarpWheel::requestILStart(entry)) {
+                if (WarpWheel::requestExplicitILStart(entry)) {
                     menu->hide();
                 } else {
                     menu->toast("Warps disabled");
@@ -358,6 +476,18 @@ public:
                    ILing::pbQf(selectedEntry()) >= 0) {
             mConfirmDelete = true;
             mPromptInput.begin(JUTGamePad::A | JUTGamePad::B);
+        } else if (!isOption() && (rapid & TMarioGamePad::Y)) {
+            if (SplitStats::supportsEntry(selectedEntry())) {
+                mStatsEntry = selectedEntry();
+                mShowingStats = true;
+                mShowingSegments = false;
+                mConfirmGoldDelete = false;
+                mStatsSegment = 0;
+                mPromptInput.begin(JUTGamePad::A | JUTGamePad::B |
+                                   JUTGamePad::X | JUTGamePad::START);
+            } else {
+                menu->toast("Split stats coming later");
+            }
         }
     }
 
@@ -369,6 +499,10 @@ public:
         }
         if (mEditingName) {
             drawNameEditor(menu);
+            return;
+        }
+        if (mShowingStats) {
+            drawStats(menu);
             return;
         }
         if (mConfirmDelete) {
@@ -493,8 +627,7 @@ public:
               " U" SUSAMUNE_GLYPH_SLASH "D Select L"
               SUSAMUNE_GLYPH_SLASH "R Section"
             : SUSAMUNE_GLYPH_A " Start  " SUSAMUNE_GLYPH_X " Delete  "
-              SUSAMUNE_GLYPH_C " U" SUSAMUNE_GLYPH_SLASH "D Select L"
-              SUSAMUNE_GLYPH_SLASH "R Section";
+              SUSAMUNE_GLYPH_Y " Stats  " SUSAMUNE_GLYPH_C " Move";
         menu->drawText(hint, x + 4, y + h - FOOT_SZ,
                        FOOT_SZ, FOOT_SZ, cFooter());
     }
@@ -642,6 +775,156 @@ private:
                              mNamePage, mNameUpper, mNameCursor);
     }
 
+    static void formatStatsTime(s32 qf, char *out, u32 size) {
+        if (qf < 0) {
+            snprintf(out, size, "--");
+            return;
+        }
+        const u64 millis64 = (u64)(u32)qf * 1001u / 120u;
+        const u32 millis = (u32)millis64;
+        if (millis < 60000u)
+            snprintf(out, size, "%lu.%03lu", millis / 1000u,
+                     millis % 1000u);
+        else
+            snprintf(out, size, "%lu:%02lu.%03lu", millis / 60000u,
+                     (millis / 1000u) % 60u, millis % 1000u);
+    }
+
+    static void formatPlayedTime(u32 qf, char *out, u32 size) {
+        const u64 seconds = ((u64)qf * 1001u) / 120000u;
+        snprintf(out, size, "%lu:%02lu:%02lu",
+                 (u32)(seconds / 3600u),
+                 (u32)((seconds / 60u) % 60u),
+                 (u32)(seconds % 60u));
+    }
+
+    void drawStats(Menu *menu) const {
+        SplitStats::Summary stats;
+        if (!SplitStats::summary(mStatsEntry, &stats)) return;
+
+        const int x = 52;
+        const int y = 40;
+        const int w = 536;
+        const int h = mShowingSegments ? 360 : 320;
+        menu->fillBox(0, 0, 640, 480, cBackdrop());
+        menu->fillBox(x, y, w, h, cPanel());
+        menu->fillBox(x, y, w, 3, cAccent());
+        menu->drawText(mShowingSegments ? "IL SEGMENTS" : "IL STATS",
+                       x + 20, y + 16, TITLE_SZ, TITLE_SZ, cTitle());
+        menu->drawText(stats.routeName, x + 20, y + 47,
+                       ROW_SZ, ROW_SZ, cRowSel());
+
+        char scope[40];
+#if defined(SUSAMUNE_VERSION_JP)
+        const char *region = "JP";
+#elif defined(SUSAMUNE_VERSION_US)
+        const char *region = "US";
+#else
+        const char *region = "PAL";
+#endif
+        snprintf(scope, sizeof(scope), "%s / PB: %s", region,
+                 ILing::pbProfileName(ILing::pbProfile()));
+        menu->drawText(scope, x + 20, y + 71, FOOT_SZ, FOOT_SZ, cRowDim());
+
+        int rowY = y + 100;
+        if (mShowingSegments) {
+            drawSectionHeader(menu, x + 16, rowY, w - 32,
+                              "PB SPLIT (SEGMENT) / GOLD");
+            rowY += ROW_H;
+            for (u8 i = 0; i < stats.segmentCount; i++, rowY += ROW_H) {
+                const SplitStats::Summary::Segment &segment = stats.segments[i];
+                char label[16];
+                char split[20];
+                char duration[20];
+                char gold[20];
+                char value[64];
+                if (stats.segmentCount == 1)
+                    snprintf(label, sizeof(label), "Terminal");
+                else
+                    snprintf(label, sizeof(label), "Segment %d", (int)i + 1);
+                formatStatsTime(segment.pbSplitQf, split, sizeof(split));
+                formatStatsTime(segment.pbSegmentQf, duration,
+                                sizeof(duration));
+                formatStatsTime(segment.goldQf, gold, sizeof(gold));
+                if (i == 0)
+                    snprintf(value, sizeof(value), "%s   Gold: %s", split, gold);
+                else
+                    snprintf(value, sizeof(value), "%s (%ss)   Gold: %s",
+                             split, duration, gold);
+                drawValueRow(menu, x + 16, rowY, w - 32, label, value,
+                             i == mStatsSegment, false, false);
+            }
+        } else {
+            const SplitStats::StorageState storageState =
+                SplitStats::storageState();
+            static const char *const kStorageNames[] = {
+                "Session only", "Read only", "Saving...", "Save failed",
+                "SD-backed",
+            };
+            const char *storage = kStorageNames[storageState];
+            menu->drawText(storage,
+                           x + w - 20 - Menu::textWidth(storage, FOOT_SZ),
+                           y + 71, FOOT_SZ, FOOT_SZ,
+                           storageState == SplitStats::STORAGE_FAILED
+                               ? col(245, 95, 85, 255)
+                               : cRowDim());
+
+            char values[5][32];
+            drawSectionHeader(menu, x + 16, rowY, w - 32, "SUMMARY");
+            rowY += ROW_H;
+            snprintf(values[0], sizeof(values[0]), "%lu", stats.attempts);
+            const u32 pct = stats.attempts
+                                ? (u32)(((u64)stats.finishes * 10000u) /
+                                        stats.attempts)
+                                : 0;
+            snprintf(values[1], sizeof(values[1]), "%lu (%lu.%02lu pct)",
+                     stats.finishes, pct / 100u, pct % 100u);
+            snprintf(values[2], sizeof(values[2]), "%lu", stats.golds);
+            if (stats.sumBestQf >= 0)
+                formatStatsTime(stats.sumBestQf, values[3], sizeof(values[3]));
+            else
+                snprintf(values[3], sizeof(values[3]), "Incomplete");
+            formatPlayedTime(stats.playedQf, values[4], sizeof(values[4]));
+            static const char *const kLabels[] = {
+                "Total attempts", "Finished", "Golds", "Sum of best",
+                "Time played",
+            };
+            for (u8 i = 0; i < 5; i++, rowY += ROW_H)
+                drawValueRow(menu, x + 16, rowY, w - 32,
+                             kLabels[i], values[i], false, false, false);
+        }
+
+        const char *hint = mShowingSegments
+                               ? SUSAMUNE_GLYPH_C " Select   "
+                                 SUSAMUNE_GLYPH_X " Delete Gold   "
+                                 SUSAMUNE_GLYPH_B " Summary   START Close"
+                               : SUSAMUNE_GLYPH_A " Segments   "
+                                 SUSAMUNE_GLYPH_B SUSAMUNE_GLYPH_SLASH
+                                 "START Back";
+        menu->drawText(hint,
+                       x + (w - Menu::textWidth(hint, FOOT_SZ)) / 2,
+                       y + h - 25, FOOT_SZ, FOOT_SZ, cFooter());
+
+        if (mConfirmGoldDelete) {
+            char question[40];
+            snprintf(question, sizeof(question), "Delete Segment %d Gold?",
+                     (int)mStatsSegment + 1);
+            const char *confirm =
+                SUSAMUNE_GLYPH_A " Yes    " SUSAMUNE_GLYPH_B " No";
+            menu->fillBox(x + 78, y + 132, w - 156, 104,
+                          JUtility::TColor(36, 30, 20, 250));
+            menu->fillBox(x + 78, y + 132, w - 156, 3, cAccent());
+            menu->drawText(
+                question,
+                x + (w - Menu::textWidth(question, ROW_SZ)) / 2,
+                y + 153, ROW_SZ, ROW_SZ, cRowSel());
+            menu->drawText(
+                confirm,
+                x + (w - Menu::textWidth(confirm, FOOT_SZ)) / 2,
+                y + 205, FOOT_SZ, FOOT_SZ, cFooter());
+        }
+    }
+
     int mSel;
     bool mConfirmDelete;
     RawPromptInput mPromptInput;
@@ -651,6 +934,11 @@ private:
     u8 mNameLength;
     bool mNameUpper;
     char mNameBuffer[SUSAMUNE_ILING_PROFILE_NAME_SIZE];
+    bool mShowingStats;
+    bool mShowingSegments;
+    bool mConfirmGoldDelete;
+    s16 mStatsEntry;
+    u8 mStatsSegment;
 };
 
 // ---------------------------------------------------------------------
@@ -2328,20 +2616,29 @@ private:
         char unlocked[20];
         snprintf(unlocked, sizeof(unlocked), "%d " SUSAMUNE_GLYPH_SLASH
                  " %d", Records::unlockedCount(), Records::achievementCount());
-        drawValueRow(menu, x, y, w, "Achievements  >", unlocked,
+        int ry = y;
+        drawSectionHeader(menu, x, ry, w, "BROWSE");
+        ry += ROW_H;
+        drawValueRow(menu, x, ry, w, "Achievements  >", unlocked,
                      mSel == 0, false, true);
-        drawValueRow(menu, x, y + ROW_H, w, "Statistics overview  >", nullptr,
+        ry += ROW_H;
+        drawValueRow(menu, x, ry, w, "Statistics overview  >", nullptr,
                      mSel == 1, false, true);
-        drawValueRow(menu, x, y + ROW_H * 2, w, "Worlds  >", nullptr,
+        ry += ROW_H;
+        drawValueRow(menu, x, ry, w, "Worlds  >", nullptr,
                      mSel == 2, false, true);
-        drawValueRow(menu, x, y + ROW_H * 3, w, "Region",
+        ry += ROW_H;
+        drawSectionHeader(menu, x, ry, w, "OPTIONS");
+        ry += ROW_H;
+        drawValueRow(menu, x, ry, w, "Region",
                      RecordsPersistence::scopeName(
                          (RecordsPersistence::Scope)mScope),
                      mSel == 3, false, true);
-        drawValueRow(menu, x, y + ROW_H * 4, w, "Unlock popup & chime",
+        ry += ROW_H;
+        drawValueRow(menu, x, ry, w, "Unlock popup & chime",
                      gSettings.valueLabel(SETTING_ACHIEVEMENT_NOTIFICATIONS),
                      mSel == 4, false, true);
-        menu->drawText("V2.1.0 Pre-Release 3 \"Hot Streak\"",
+        menu->drawText("V2.1.0 Release Candidate 2 \"Hot Streak\"",
                        x + 4, y + h - 44, FOOT_SZ, FOOT_SZ, cRowDim());
         menu->drawText(storageStatus(), x + 4, y + h - 24,
                        FOOT_SZ, FOOT_SZ,
@@ -3380,6 +3677,8 @@ public:
           mEditor(EDIT_NONE), mTextCursor(0), mTextPage(1), mTextLength(0),
           mTextUpper(false) {
         mText[0] = '\0';
+        StageTargets::init();
+        mTargetQf = StageTargets::get(mStreakEntry);
     }
 
     const char *title() const override { return "Stage Loader"; }
@@ -3412,6 +3711,7 @@ public:
         if ((rapid & TMarioGamePad::X) && mSel == OPTION_TARGET &&
             mStreaking) {
             mTargetQf = -1;
+            StageTargets::set(mStreakEntry, mTargetQf);
             menu->toast("Any finish counts");
             return;
         }
@@ -3434,6 +3734,7 @@ public:
         const int entry = catalogueEntry();
         if (mStreaking) {
             mStreakEntry = entry;
+            mTargetQf = StageTargets::get(mStreakEntry);
             menu->toast("Streak level selected");
         } else {
             if (StageLoader::appendQueue(entry)) {
@@ -3657,6 +3958,8 @@ private:
     void activateOption(Menu *menu) {
         if (mSel == OPTION_MODE) {
             mStreaking = !mStreaking;
+            if (mStreaking)
+                mTargetQf = StageTargets::get(mStreakEntry);
             mSel = OPTION_MODE;
             return;
         }
@@ -3804,6 +4107,7 @@ private:
                     return;
                 }
                 mTargetQf = parsed;
+                StageTargets::set(mStreakEntry, mTargetQf);
                 mEditor = EDIT_NONE;
                 menu->toast(parsed < 0 ? "Any finish counts"
                                        : "Target time set");
@@ -3974,24 +4278,19 @@ private:
     RawPromptInput mTextInput;
 };
 
-class ILSegmentsTab final : public MenuTab {
-public:
-    const char *title() const override { return "IL Segments"; }
-    void update(Menu *, TMarioGamePad *) override {}
-    void draw(Menu *menu, int x, int y, int w, int) override {
-        const char *line = "Coming in a later V2.1 pre-release";
-        menu->drawText(line, x + (w - Menu::textWidth(line, ROW_SZ)) / 2,
-                       y + 72, ROW_SZ, ROW_SZ, cRowDim());
-    }
-};
-
 // The top level stays small while existing stateful pages remain persistent.
 class NestedMenuTab final : public MenuTab {
 public:
+    enum SectionStyle {
+        SECTIONS_NONE,
+        SECTIONS_SETTINGS,
+        SECTIONS_ILS,
+    };
+
     NestedMenuTab(const char *name, MenuTab *const *children, int count,
-                  bool settingsSections = false)
+                  SectionStyle sectionStyle = SECTIONS_NONE)
         : mName(name), mCount((u8)count), mSel(0), mPage(-1),
-          mSettingsSections(settingsSections) {
+          mSectionStyle((u8)sectionStyle) {
         for (int i = 0; i < MAX_CHILDREN; i++) {
             mChildren[i] = i < count ? children[i] : nullptr;
         }
@@ -4066,7 +4365,7 @@ public:
         if (!child) {
             int ry = y;
             for (int i = 0; i < mCount; i++) {
-                const char *section = settingsSection(i);
+                const char *section = sectionName(i);
                 if (section) {
                     drawSectionHeader(menu, x, ry, w, section);
                     ry += ROW_H;
@@ -4097,11 +4396,15 @@ private:
         return mPage >= 0 && mPage < mCount ? mChildren[mPage] : nullptr;
     }
 
-    const char *settingsSection(int child) const {
-        if (!mSettingsSections) return nullptr;
-        if (child == 0) return "PRACTICE & GAMEPLAY";
-        if (child == 4) return "PRESENTATION";
-        if (child == 6) return "TOOLS & CONTROLS";
+    const char *sectionName(int child) const {
+        if (mSectionStyle == SECTIONS_SETTINGS) {
+            if (child == 0) return "PRACTICE & GAMEPLAY";
+            if (child == 4) return "PRESENTATION";
+            if (child == 6) return "TOOLS & CONTROLS";
+        } else if (mSectionStyle == SECTIONS_ILS) {
+            if (child == 0) return "PRACTICE";
+            if (child == 2) return "SESSIONS";
+        }
         return nullptr;
     }
 
@@ -4110,7 +4413,7 @@ private:
     u8 mCount;
     u8 mSel;
     s8 mPage;
-    bool mSettingsSections;
+    u8 mSectionStyle;
     RawPromptInput mNavInput;
 };
 
@@ -4249,7 +4552,6 @@ struct __attribute__((aligned(8))) MenuRuntime {
     u8 records[sizeof(RecordsTab)] __attribute__((aligned(8)));
     u8 binds[sizeof(BindsTab)] __attribute__((aligned(8)));
     u8 stageLoader[sizeof(StageLoaderTab)] __attribute__((aligned(8)));
-    u8 ilSegments[sizeof(ILSegmentsTab)] __attribute__((aligned(8)));
     u8 settingsHub[sizeof(NestedMenuTab)] __attribute__((aligned(8)));
     u8 ilsHub[sizeof(NestedMenuTab)] __attribute__((aligned(8)));
     u8 menu[sizeof(Menu)] __attribute__((aligned(8)));
@@ -4277,7 +4579,6 @@ static_assert(sizeof(MenuRuntime) <= SUSAMUNE_MENU_RUNTIME_SIZE,
 #define sRecordsBuf sMenuRuntime.records
 #define sBindsBuf sMenuRuntime.binds
 #define sStageLoaderBuf sMenuRuntime.stageLoader
-#define sILSegmentsBuf sMenuRuntime.ilSegments
 #define sSettingsHubBuf sMenuRuntime.settingsHub
 #define sILsHubBuf sMenuRuntime.ilsHub
 #define sMenuBuf sMenuRuntime.menu
@@ -4350,7 +4651,6 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     MenuTab *iling = new (sILingBuf) ILingTab();
     MenuTab *ghosts = new (sGhostsBuf) GhostsTab();
     MenuTab *stageLoader = new (sStageLoaderBuf) StageLoaderTab();
-    MenuTab *segments = new (sILSegmentsBuf) ILSegmentsTab();
     MenuTab *records = new (sRecordsBuf) RecordsTab();
 
     MenuTab *settingsChildren[] = {
@@ -4358,7 +4658,7 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
         display, cosmetics, creation, binds,
     };
     MenuTab *ilChildren[] = {
-        iling, ghosts, stageLoader, segments,
+        iling, ghosts, stageLoader,
     };
     static_assert(sizeof(settingsChildren) / sizeof(settingsChildren[0]) <= 8,
                   "Settings hub exceeds nested menu capacity");
@@ -4369,10 +4669,12 @@ Menu::Menu() : mText(gpSystemFont->mFont, " ") {
     mTabs[mNumTabs++] =
         new (sSettingsHubBuf) NestedMenuTab(
             "Settings", settingsChildren,
-            sizeof(settingsChildren) / sizeof(settingsChildren[0]), true);
+            sizeof(settingsChildren) / sizeof(settingsChildren[0]),
+            NestedMenuTab::SECTIONS_SETTINGS);
     mTabs[mNumTabs++] =
         new (sILsHubBuf) NestedMenuTab(
-            "ILs", ilChildren, sizeof(ilChildren) / sizeof(ilChildren[0]));
+            "ILs", ilChildren, sizeof(ilChildren) / sizeof(ilChildren[0]),
+            NestedMenuTab::SECTIONS_ILS);
     mTabs[mNumTabs++] = records;
 }
 
@@ -4410,6 +4712,9 @@ int Menu::textWidth(const char *s, int sizeX) {
         } else {
             p += 1;
         }
+#if defined(SUSAMUNE_VERSION_JP)
+        if (code == '/') code = 0x815e;
+#endif
         if (sFontFixed) {
             units += sFontFixedW;
         } else {
@@ -4435,6 +4740,9 @@ void Menu::drawText(const char *s, int x, int y, int sizeX, int sizeY, Color col
     mText.mCharSizeY      = sizeY;
     mText.mGradientTop    = color;
     mText.mGradientBottom = color;
+#if defined(SUSAMUNE_VERSION_JP)
+    s = fontSafeText(s);
+#endif
     mText.mStrPtr         = const_cast<char *>(s);
     // `y` is the cell top; convert to the baseline J2DTextBox::draw expects.
     int baseline = y + mFontAscent * sizeY / mFontHeight;
@@ -4706,6 +5014,7 @@ void Menu::update(TMarioGamePad *pad) {
         mToastFrames--;
     }
     pollSettingsSave();
+    StageTargets::service(this);
 
     if (WarpWheel::promptShown()) {
         mCRepeatFrames = 0;
@@ -4755,7 +5064,9 @@ void Menu::draw(J2DOrthoGraph *ortho) {
         Ghost::draw(this);
         gInputDisplay.draw(this);
         gMetadataDisplay.draw(this);
+        gQftDisplay.beginOverlayFrame();
         gQFTTimer.draw(this);
+        SplitStats::draw(this);
         gAttemptCounter.draw(this);
         gCreationExtras.draw(this);
         WallkickDisplay::draw(this);

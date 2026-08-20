@@ -11,6 +11,7 @@ import struct
 import zlib
 from pathlib import Path
 
+from patches import mod_blob_max_size as MOD_BLOB_MAX_SIZE
 from patches import mod_region_size as MOD_REGION_SIZE
 
 
@@ -141,6 +142,10 @@ def build_operations(layout, mod_manifest):
     if len(code) != mod_manifest["size"] or len(code) % 4:
         raise ValueError("mod code size is inconsistent or not word-aligned")
     region_size = layout["mod_region_size"]
+    if len(code) > MOD_BLOB_MAX_SIZE:
+        raise ValueError(
+            f"mod code is {len(code):#x} bytes, over the "
+            f"{MOD_BLOB_MAX_SIZE:#x} MEM1 working cap")
     if len(code) > region_size:
         raise ValueError(f"mod code is {len(code):#x} bytes, over the {region_size:#x} DOL region")
 

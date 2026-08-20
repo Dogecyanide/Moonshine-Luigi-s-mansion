@@ -161,6 +161,11 @@ typedef char SusamuneGhostModelAssetsFitStageTails[
                     SUSAMUNE_GHOST_PIANTA_ASSET_BUFFER_SIZE <=
                 SUSAMUNE_GHOST_SEGMENT_TABLE_OFFSET
         ? 1 : -1];
+typedef char SusamuneGhostCatalogFollowsShadowStaging[
+    SUSAMUNE_GHOST_MAX_SAMPLE_DATA_SIZE +
+                    SUSAMUNE_GHOST_SHADOW_ASSET_BUFFER_SIZE ==
+                SUSAMUNE_GHOST_CATALOG_CACHE_OFFSET
+        ? 1 : -1];
 typedef char SusamuneGhostModelAssetsFitVault[
     sizeof(struct SusamuneGhostShadowAsset) ==
                 SUSAMUNE_GHOST_SHADOW_MASTER_SIZE &&

@@ -31,6 +31,8 @@
 #include "susamune/qft_display.hxx"
 #include "susamune/records.hxx"
 #include "susamune/records_persistence.hxx"
+#include "susamune/split_events.hxx"
+#include "susamune/split_stats.hxx"
 #include "susamune/stage_loader.hxx"
 #include "susamune/pattern_selector.hxx"
 #include "susamune/warp_wheel.hxx"
@@ -80,6 +82,8 @@ extern "C" void onAppInit(TApplication* app) {
     RecordsPersistence::init();
     ILing::init();
     StageLoader::init();
+    SplitStats::init();
+    SplitEvents::init();
     GhostStorage::init();
 #if ENABLE_MEM_DIAGNOSTICS
     memDiagnosticsInit();
@@ -171,6 +175,7 @@ extern "C" void onSetup(TMarDirector* director) {
     // would otherwise inherit a pointer into the previous stage's freed heap.
     gpPollution = nullptr;
     GhostModel::beforeStageSetup();
+    SplitEvents::beforeStageSetup();
     if (Ghost::observerCleanupPending())
         ILing::resetAfterObserver();
     ILing::beforeStageSetup();
@@ -194,6 +199,8 @@ extern "C" void onSetup(TMarDirector* director) {
     actionsOnStageLoad();
     visibleGoopOnStageSetup();
     gQFTTimer.onStageSetup(director);
+    SplitEvents::onStageSetup(director);
+    SplitStats::onStageSetup();
     Ghost::onStageSetup(director);
     GhostModel::onStageSetup(director);
     const bool observerStage = Ghost::observerActive();
@@ -286,6 +293,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
         gpApplication.mGamePads[0]->mButtons.mRapidInput = 0;
     }
     gQFTTimer.beginFrame();
+    SplitStats::beginFrame();
     gQFTTimer.update();
     GhostModel::beginFrame();
     // Before direct(): while the wheel is open it takes the pad away from
@@ -316,6 +324,7 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
         gpMarDirector->mCurState = TMarDirector::STATE_STAGE_EXIT_2;
     }
     Ghost::beforeDirect();
+    SplitEvents::beginFrame();
     int state = director->direct();
     if (freeze) {
         gpMarDirector->mCurState = TMarDirector::STATE_NORMAL;
@@ -342,11 +351,13 @@ extern "C" s32 onUpdate(JDrama::TDirector* director) {
 #endif
 
     gQFTTimer.update();
+    SplitEvents::update();
     const bool observerFrame = Ghost::observerStatsSuppressed();
     Ghost::update();
     Records::update(creationEditing, observerFrame);
     ILing::update();
     StageLoader::update();
+    SplitStats::update();
     WarpWheel::resolveDeferredRestart();
     const bool sessionOwnsInput = sessionResultBeforeDirect ||
                                   sessionResultAfterDirect ||

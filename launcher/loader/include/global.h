@@ -157,7 +157,8 @@ static inline bool IsWiiUFastCPU(void)
 // FIXME: This return type isn't quite correct...
 const char* const GetRootDevice();
 void RAMInit(void);
-void Initialise(bool autoboot);
+void Initialise(void);
+void RevealBackground(bool autoboot);
 void unzip_data(const void *input, const unsigned int input_size, 
 	void **output, unsigned int *output_size);
 

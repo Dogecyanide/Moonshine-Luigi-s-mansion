@@ -17,6 +17,7 @@
 #include "SMS/Strategic/LiveActor.hxx"
 #include "SMS/Strategic/Strategy.hxx"
 #include "SMS/System/MarDirector.hxx"
+#include "susamune/addresses.hxx"
 #include "susamune/ghost.hxx"
 #include "susamune/ghost_model_asset.h"
 #include "susamune/ghost_storage.h"
@@ -154,16 +155,16 @@ static_assert(SUSAMUNE_GHOST_MODEL_HEAP_SIZE >=
 static_assert(SUSAMUNE_GHOST_SECONDARY_HEAP_SIZE >=
                   kModelAllocationPreflight + kFixedExpHeapOverhead,
               "secondary model heap cannot satisfy its preflight");
-static_assert(SUSAMUNE_GHOST_ATTACHMENT_HEAP_SIZE >=
+static_assert(SUSAMUNE_MOD_ATTACHMENT_HEAP_SIZE >=
                   kAttachmentInstanceMax * 2u + kFixedExpHeapOverhead,
               "attachment heap cannot hold two worst-case instances");
-static_assert(SUSAMUNE_GHOST_ATTACHMENT_HEAP_OFFSET ==
-                  SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE,
-              "attachment heap must follow the reset-safe mod file");
-static_assert(SUSAMUNE_GHOST_ATTACHMENT_HEAP_OFFSET +
-                      SUSAMUNE_GHOST_ATTACHMENT_HEAP_SIZE ==
-                  SUSAMUNE_GHOST_ASSET_VAULT_OFFSET,
-              "attachment heap must end at the immutable asset vault");
+static_assert(SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET ==
+                  SUSAMUNE_MOD_BLOB_MAX_SIZE,
+              "attachment heap must follow the mod working cap");
+static_assert(SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET +
+                      SUSAMUNE_MOD_ATTACHMENT_HEAP_SIZE <=
+                  SUSAMUNE_MOD_SCRATCH_OFFSET,
+              "attachment heap overlaps mod scratch");
 static_assert(SUSAMUNE_GHOST_MAX_SAMPLE_DATA_SIZE +
                       SUSAMUNE_GHOST_SHADOW_MASTER_SIZE <=
                   SUSAMUNE_GHOST_SEGMENT_TABLE_OFFSET,
@@ -927,8 +928,8 @@ void init() {
         reinterpret_cast<void *>(SUSAMUNE_GHOST_SECONDARY_HEAP_PPC_BASE),
         SUSAMUNE_GHOST_SECONDARY_HEAP_SIZE, JKRHeap::sRootHeap, false);
     sAttachmentHeap = JKRExpHeap::create(
-        reinterpret_cast<void *>(SUSAMUNE_GHOST_ATTACHMENT_HEAP_PPC_BASE),
-        SUSAMUNE_GHOST_ATTACHMENT_HEAP_SIZE, JKRHeap::sRootHeap, false);
+        reinterpret_cast<void *>(SUSAMUNE_ADDR_MOD_ATTACHMENT_HEAP),
+        SUSAMUNE_MOD_ATTACHMENT_HEAP_SIZE, JKRHeap::sRootHeap, false);
     restoreHeap(oldHeap);
 }
 

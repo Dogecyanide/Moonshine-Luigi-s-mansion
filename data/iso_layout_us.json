@@ -83,6 +83,22 @@
       "iso_offset": 1928640
     },
     {
+      "address": 2149311528,
+      "iso_offset": 1938280
+    },
+    {
+      "address": 2149463296,
+      "iso_offset": 2090048
+    },
+    {
+      "address": 2149660044,
+      "iso_offset": 2286796
+    },
+    {
+      "address": 2149669644,
+      "iso_offset": 2296396
+    },
+    {
       "address": 2150265840,
       "iso_offset": 2892592
     },
@@ -142,8 +158,28 @@
     },
     {
       "offset": 1928644,
-      "size": 546172,
-      "crc32": "3FB5DAED"
+      "size": 9636,
+      "crc32": "BB0CA818"
+    },
+    {
+      "offset": 1938284,
+      "size": 151764,
+      "crc32": "15EE1AD8"
+    },
+    {
+      "offset": 2090052,
+      "size": 196744,
+      "crc32": "2C181C56"
+    },
+    {
+      "offset": 2286800,
+      "size": 9596,
+      "crc32": "208AB770"
+    },
+    {
+      "offset": 2296400,
+      "size": 178416,
+      "crc32": "E1C4C96A"
     },
     {
       "offset": 2474820,

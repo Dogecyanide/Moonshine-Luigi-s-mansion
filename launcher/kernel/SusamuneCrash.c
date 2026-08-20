@@ -96,11 +96,13 @@ static bool ValidStagedMod(const struct SusamuneModHeader *header)
 		header->arenaReserve != SUSAMUNE_ARENA_RESERVE_SIZE ||
 		header->codeSize > SUSAMUNE_MOD_BLOB_MAX_SIZE ||
 		header->codeSize >
-			SUSAMUNE_MEM2_MODBIN_SIZE - SUSAMUNE_MOD_HEADER_SIZE ||
+			SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE -
+			SUSAMUNE_MOD_HEADER_SIZE ||
 		(header->codeSize & 3))
 		return false;
 	codeEnd = SUSAMUNE_MOD_HEADER_SIZE + header->codeSize;
-	if (header->writeCount > (SUSAMUNE_MEM2_MODBIN_SIZE - codeEnd) / 8)
+	if (header->writeCount >
+		(SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE - codeEnd) / 8)
 		return false;
 	return header->fileSize == codeEnd + header->writeCount * 8 &&
 		header->fileSize <= SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE;

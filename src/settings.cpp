@@ -61,7 +61,7 @@ const char kChoiceLabels[] =
     "Always\0Shine only\0Hidden\0On freeze\0"
     "0.5 s\0" "1 s\0" "2 s\0" "3 s\0" "5 s\0" "1\0" "2\0"
     "Slowest\0Fastest\0"
-    "25%\0" "50%\0" "75%\0" "100%\0Default\0Never\0"
+    "25 pct\0" "50 pct\0" "75 pct\0" "100 pct\0Default\0Never\0"
     "Shadow Mario\0Piantissimo\0Full notification\0Counter\0"
     "Ask\0Auto-Save\0Don't ask";
 

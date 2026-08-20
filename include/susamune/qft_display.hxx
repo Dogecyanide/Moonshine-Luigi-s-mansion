@@ -13,7 +13,11 @@ public:
     void adopt(const volatile SusamuneQftDisplayCfg *src);
     void stageInto(volatile SusamuneQftDisplayCfg *dst) const;
 
+    void beginOverlayFrame();
     void draw(Menu *menu, const char *text) const;
+    bool hasAnchor(const char *text) const;
+    bool adjacentStyle(const char *anchorText, const char *text,
+                       CreationStyle *out) const;
 
     void beginEditor();
     void updateEditor(TMarioGamePad *pad);

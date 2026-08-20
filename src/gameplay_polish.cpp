@@ -9,6 +9,7 @@
 #include "susamune/menu.hxx"
 #include "susamune/records.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/split_events.hxx"
 
 namespace {
 
@@ -71,6 +72,7 @@ void requestSavePrompt(TMarDirector *director) {
 extern "C" void susamuneFireRideYoshi(TMarDirector *director, TYoshi *yoshi) {
     director->fireRideYoshi(yoshi);
     Records::onYoshiMounted();
+    SplitEvents::onYoshiMounted();
     if (gSettings.getBool(SETTING_YOSHI_NOZZLE_SAVE_PROMPT))
         requestSavePrompt(director);
 }
@@ -78,6 +80,7 @@ extern "C" void susamuneFireRideYoshi(TMarDirector *director, TYoshi *yoshi) {
 extern "C" void susamuneFireGetNozzle(TMarDirector *director,
                                       TItemNozzle *nozzle) {
     director->fireGetNozzle(nozzle);
+    SplitEvents::onNozzleCollected();
     if (gSettings.getBool(SETTING_YOSHI_NOZZLE_SAVE_PROMPT))
         requestSavePrompt(director);
 }

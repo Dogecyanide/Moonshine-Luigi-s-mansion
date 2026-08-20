@@ -24,6 +24,7 @@
 #include "susamune/qft_timer.hxx"
 #include "susamune/raw_prompt_input.hxx"
 #include "susamune/settings.hxx"
+#include "susamune/split_events.hxx"
 #include "susamune/stage_loader.hxx"
 
 namespace {
@@ -85,6 +86,8 @@ bool             sClassicInstantSuppressed;
 u8               sDeferredRestart;
 bool             sDeferredRestartAfterResult;
 bool             sDeathSequence;
+bool             sWaitForRetailDeathTail;
+bool             sQueuedSessionDeathRestart;
 bool             sWaitForSave;
 u8               sSaveIdleFrames;
 bool             sCourseGuard;
@@ -118,11 +121,15 @@ enum DeferredRestart : u8 {
 
 enum HeldSessionDeparture : u8 {
     HELD_SESSION_DEPARTURE_NONE,
+    HELD_SESSION_DEPARTURE_WARP,
+    HELD_SESSION_DEPARTURE_IL,
     HELD_SESSION_DEPARTURE_EXIT_AREA,
     HELD_SESSION_DEPARTURE_TITLE,
 };
 
 HeldSessionDeparture sHeldSessionDeparture;
+LevelWarp::Dest       sHeldSessionDest = {0, 0, 0};
+s32                   sHeldSessionDetail = -1;
 
 enum PBSavePolicy : u8 {
     PB_SAVE_ASK,
@@ -660,9 +667,28 @@ void cancelExplicitPractice() {
     sDeferredRestart = DEFERRED_RESTART_NONE;
     sDeferredRestartAfterResult = false;
     sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+    sHeldSessionDetail = -1;
+}
+
+bool restartPromptPending() {
+    switch (sPrompt.action) {
+    case PROMPT_RESTART_KEEP:
+    case PROMPT_RESTART_FULL:
+    case PROMPT_RESTART_SAVE_KEEP:
+    case PROMPT_RESTART_SAVE_FULL:
+        return true;
+    default:
+        return false;
+    }
 }
 
 bool requestCourseWarp(const LevelWarp::Dest &dest) {
+    if (StageLoader::departureResultPending()) {
+        sHeldSessionDeparture = HELD_SESSION_DEPARTURE_WARP;
+        sHeldSessionDest = dest;
+        sHeldSessionDetail = -1;
+        return true;
+    }
     // A new explicit destination replaces any still-card-delayed command now,
     // even if this request itself opens the PB guard.
     cancelExplicitPractice();
@@ -802,6 +828,8 @@ void prepareArmedDeparture() {
     }
     sArmed       = false;
     sTailPending = true;
+    sWaitForRetailDeathTail = false;
+    sQueuedSessionDeathRestart = false;
     if (sArmStartedIL) ILing::commitWarpStart();
     sCourseGuard = false;
     sArmStartedIL = false;
@@ -827,6 +855,7 @@ __attribute__((noinline)) void armWarp(const LevelWarp::Dest &dest,
                                        bool keepSpawn, bool overrideSource) {
     sDest = dest;
     sArmed = true;
+    sWaitForRetailDeathTail = false;
     sKeepSpawn = keepSpawn;
     sOverrideSource = overrideSource;
     sWaitForSave = false;
@@ -852,6 +881,7 @@ void armGuardedWarp(const LevelWarp::Dest &dest, bool overrideSource,
 void cancelArmedCourseWarp() {
     const bool cancelIL = sArmStartedIL;
     sArmed = false;
+    sWaitForRetailDeathTail = false;
     sKeepSpawn = false;
     sOverrideSource = false;
     sWaitForSave = false;
@@ -962,6 +992,8 @@ void cancelPending(bool keepExitApproval) {
         if (!keepExitTail) {
             if (sArmed) cancelArmedCourseWarp();
             sTailPending = false;
+            sWaitForRetailDeathTail = false;
+            sQueuedSessionDeathRestart = false;
             sKeepSpawn = false;
             sOverrideSource = false;
             sWaitForSave = false;
@@ -984,6 +1016,11 @@ void cancelPending(bool keepExitApproval) {
         default:
             break;
         }
+        if (sHeldSessionDeparture == HELD_SESSION_DEPARTURE_WARP ||
+            sHeldSessionDeparture == HELD_SESSION_DEPARTURE_IL) {
+            sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+            sHeldSessionDetail = -1;
+        }
         return;
     }
 
@@ -992,6 +1029,8 @@ void cancelPending(bool keepExitApproval) {
     // arm but before its fade reaches onDirected(). That tail lives in mod BSS,
     // outside the snapshot, and must not fire on some later retail departure.
     sTailPending = false;
+    sWaitForRetailDeathTail = false;
+    sQueuedSessionDeathRestart = false;
     sKeepSpawn = false;
     sOverrideSource = false;
     sWaitForSave = false;
@@ -1009,6 +1048,7 @@ void cancelPending(bool keepExitApproval) {
     sDeferredRestart = DEFERRED_RESTART_NONE;
     sDeferredRestartAfterResult = false;
     sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+    sHeldSessionDetail = -1;
 }
 
 void restart(bool keepSpawn) {
@@ -1046,6 +1086,7 @@ u8 kick(TMarDirector *director, u8 state) {
     if (!sArmed) {
         return state;
     }
+    if (sQueuedSessionDeathRestart || sWaitForRetailDeathTail) return state;
     // A requested warp remains armed, but the authoritative session report
     // gets the first departure. This also covers Shine-demo frames where the
     // result cannot safely own input yet.
@@ -1069,15 +1110,36 @@ u8 kick(TMarDirector *director, u8 state) {
 }
 
 s32 onDirected(s32 appState) {
-    // Non-zero means the director has finished leaving the stage and is
-    // handing the app its next state; anything else is an ordinary frame.
     if (appState == 0) {
         return appState;
     }
-    // If the director reaches an app-state handoff before another game-mode
-    // tick, the card becoming idle is sufficient to release the queued exit.
+    // The app's two direct-loop values are ordinary director returns. An
+    // automatic death retry must wait for retail's real post-animation exit.
+    if (sDeathSequence &&
+        appState <= TApplication::CONTEXT_DIRECT_MAIN_LOOP &&
+        ((sQueuedSessionDeathRestart || sWaitForRetailDeathTail) ||
+         (!sArmed && !sTailPending))) {
+        return appState;
+    }
+    // Result publication runs after direct(). Hold a terminal death handoff
+    // until that frame's deferred session restart has been resolved.
+    if (sDeathSequence && sQueuedSessionDeathRestart && !sArmed) return 0;
+    // A protected-PB decision may outlive the fade. Keep the completed retail
+    // death director until the exact restart action is ready to arm.
+    if (sDeathSequence && restartPromptPending()) return 0;
+    sWaitForRetailDeathTail = false;
+    sQueuedSessionDeathRestart = false;
+    // Ordinary returns still respect the save UI. At a true app handoff that
+    // state is stale; only the card worker can still own the queued restart.
     if (sArmed && sWaitForSave) {
-        if (saveFlowActive()) return 0;
+        if (appState <= TApplication::CONTEXT_DIRECT_MAIN_LOOP &&
+            saveFlowActive()) {
+            return appState;
+        }
+        if (gpCardManager &&
+            gpCardManager->getLastStatus() == CARD_ERROR_BUSY) {
+            return 0;
+        }
         sWaitForSave = false;
     }
     if (sArmed) {
@@ -1573,6 +1635,24 @@ bool requestILStart(int entry) {
     return true;
 }
 
+bool requestExplicitILStart(int entry) {
+    if (entry < 0 || entry >= ILing::count() ||
+        gSettings.getBool(SETTING_DISABLE_WARPS)) {
+        return false;
+    }
+    if (StageLoader::departureResultPending()) {
+        sHeldSessionDeparture = HELD_SESSION_DEPARTURE_IL;
+        sHeldSessionDest.area = 0;
+        sHeldSessionDest.episode = 0;
+        sHeldSessionDest.gameInt3 = 0;
+        sHeldSessionDetail = entry;
+        return true;
+    }
+
+    cancelExplicitPractice();
+    return requestILStart(entry);
+}
+
 bool requestSavestateLoad() {
     const LevelWarp::Dest key = {0, 0, 0};
     return !beginPrompt(PROMPT_SAVESTATE_LOAD, key);
@@ -1640,26 +1720,58 @@ void resolveDeferredRestart() {
         if (StageLoader::departureResultPending()) return;
 
         const HeldSessionDeparture held = sHeldSessionDeparture;
+        const LevelWarp::Dest heldDest = sHeldSessionDest;
+        const s32 heldDetail = sHeldSessionDetail;
         sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+        sHeldSessionDetail = -1;
         cancelExplicitPractice();
 
-        LevelWarp::Dest dest = {0, 0, 0};
-        const PromptAction action =
-            held == HELD_SESSION_DEPARTURE_EXIT_AREA
-                ? PROMPT_EXIT_AREA : PROMPT_TITLE;
+        LevelWarp::Dest dest = heldDest;
+        PromptAction action = PROMPT_NONE;
+        if (held == HELD_SESSION_DEPARTURE_WARP) {
+            action = PROMPT_WARP;
+        } else if (held == HELD_SESSION_DEPARTURE_IL) {
+            action = PROMPT_IL;
+        } else if (held == HELD_SESSION_DEPARTURE_EXIT_AREA) {
+            action = PROMPT_EXIT_AREA;
+        } else if (held == HELD_SESSION_DEPARTURE_TITLE) {
+            action = PROMPT_TITLE;
+        }
         if (held == HELD_SESSION_DEPARTURE_EXIT_AREA) {
             dest.area = TGameSequence::AREA_DOLPIC;
             dest.episode = 2;
             dest.gameInt3 = LevelWarp::Dest::POST_CORONA;
         }
-        if (beginPrompt(action, dest)) return;
-        if (action == PROMPT_EXIT_AREA) armExitAreaWarp(dest);
-        else sPendingTitleExit = true;
+        if (action == PROMPT_NONE || beginPrompt(action, dest, heldDetail)) return;
+        if (action == PROMPT_WARP) {
+            LevelWarp::warpToGuarded(dest, 0, false);
+        } else if (action == PROMPT_IL) {
+            if (ILing::start(heldDetail, 0)) {
+                sArmedILIndex = heldDetail;
+            } else if (gMenu) {
+                gMenu->toast("Warps disabled");
+            }
+        } else if (action == PROMPT_EXIT_AREA) {
+            armExitAreaWarp(dest);
+        } else {
+            sPendingTitleExit = true;
+        }
         return;
     }
 
     const DeferredRestart deferred = (DeferredRestart)sDeferredRestart;
     if (deferred == DEFERRED_RESTART_NONE) return;
+
+    // A same-frame Shine result replaces the completed attempt with its own
+    // retry. JP can carry the early Shine latch through that stage load; do not
+    // let the old input become valid again when the new attempt starts.
+    // Death inputs are different: their requested restart must wait for the
+    // retail death animation and then own the one departure at its tail.
+    if (!sQueuedSessionDeathRestart && StageLoader::retryOwnsDeparture()) {
+        sDeferredRestart = DEFERRED_RESTART_NONE;
+        sDeferredRestartAfterResult = false;
+        return;
+    }
 
     if (StageLoader::departureResultPending()) {
         if (StageLoader::resultPending()) {
@@ -1673,7 +1785,10 @@ void resolveDeferredRestart() {
     sDeferredRestartAfterResult = false;
     // A non-final result owns the next route. A completed session preserves
     // the requested restart until its report has been dismissed.
-    if (!afterResult && !StageLoader::acceptDeferredRestart()) return;
+    if (!afterResult && !StageLoader::acceptDeferredRestart()) {
+        sQueuedSessionDeathRestart = false;
+        return;
+    }
 
     switch (deferred) {
     case DEFERRED_RESTART_KEEP:      requestRestart(false, false); break;
@@ -1707,7 +1822,19 @@ u8 guardExitArea(u8 nextState) {
         sHeldSessionDeparture = nextState == kPauseExitArea
             ? HELD_SESSION_DEPARTURE_EXIT_AREA
             : HELD_SESSION_DEPARTURE_TITLE;
+        sHeldSessionDest.area = 0;
+        sHeldSessionDest.episode = 0;
+        sHeldSessionDest.gameInt3 = 0;
+        sHeldSessionDetail = -1;
         return kPauseResume;
+    }
+
+    if (nextState == kPauseExitArea && ILing::preserveRetailExitArea()) {
+        // Pinna 1 uses retail Exit Area to skip both of its movies. The
+        // movie's own setNextStage remains responsible for the destination.
+        SplitEvents::armPinnaOneRetailExit();
+        sExplicitRetailExit = true;
+        return nextState;
     }
 
     // Restore every temporary IL flag before approving the explicit exit.
@@ -1740,7 +1867,9 @@ void update(TMarioGamePad *pad) {
         sExplicitRetailExit = false;
         sDeferredRestart = DEFERRED_RESTART_NONE;
         sDeferredRestartAfterResult = false;
+        sQueuedSessionDeathRestart = false;
         sHeldSessionDeparture = HELD_SESSION_DEPARTURE_NONE;
+        sHeldSessionDetail = -1;
         close();
         return;
     }
@@ -1756,13 +1885,24 @@ void update(TMarioGamePad *pad) {
     }
 
     const u8 state = gpMarDirector->mCurState;
+    const bool enteringDeath = state == TMarDirector::STATE_DEATH &&
+                               !sDeathSequence;
     if (state == TMarDirector::STATE_DEATH) {
         sDeathSequence = true;
     }
     if (state != TMarDirector::STATE_NORMAL) {
         close();
-        sClassicInstantHeld = false;
-        sClassicInstantPending = false;
+        const u16 rawButtons = JUTGamePad::mPadStatus[0].mButton;
+        if (sDeathSequence &&
+            (rawButtons & kInstantBase) == kInstantBase) {
+            // The configured restart below consumes this press. Latch the raw
+            // chart path so holding the chord through the load cannot repeat it.
+            sClassicInstantHeld = true;
+            sClassicInstantPending = false;
+        } else {
+            sClassicInstantHeld = false;
+            sClassicInstantPending = false;
+        }
         const bool deathExit = sDeathSequence &&
             (state == TMarDirector::STATE_DEATH ||
              state == TMarDirector::STATE_STAGE_EXIT ||
@@ -1776,9 +1916,28 @@ void update(TMarioGamePad *pad) {
         const bool instantRestart = gBinds.wasPressed(BIND_INSTANT_RESTART);
         if ((deathExit || saveDialog) &&
             (fullRestart || instantRestart)) {
+            const bool queueDeathRestart =
+                deathExit && StageLoader::deferRestartInput();
+            if (queueDeathRestart && sArmed) cancelArmedCourseWarp();
             requestOrDeferRestart(fullRestart, saveDialog);
-            if (gMenu && gSettings.getBool(SETTING_RESTART_QUEUED_FEEDBACK))
+            sQueuedSessionDeathRestart = queueDeathRestart;
+            if ((queueDeathRestart || saveDialog) && gMenu &&
+                gSettings.getBool(SETTING_RESTART_QUEUED_FEEDBACK)) {
                 gMenu->toast("Restart queued");
+            }
+        } else if (enteringDeath && !sArmed && !sTailPending &&
+                   sDeferredRestart == DEFERRED_RESTART_NONE &&
+                   sHeldSessionDeparture == HELD_SESSION_DEPARTURE_NONE &&
+                   !sPendingTitleExit && !Ghost::hasUnsavedPB() &&
+                   !gSettings.getBool(SETTING_DISABLE_WARPS)) {
+            LevelWarp::Dest retry;
+            if (StageLoader::copyDeathRetryDest(&retry)) {
+                // Preserve the live IL until the next attempt serial proves
+                // the reset, but let retail finish the death animation first.
+                armWarp(retry, false, true);
+                sSource = retry;
+                sWaitForRetailDeathTail = true;
+            }
         }
         return;
     }
