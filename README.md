@@ -1,6 +1,6 @@
 # A romhack for Super Mario Sunshine practice
 
-It implements most of the [GCT generator](https://gct.zint.ch/) practice codes, adds emulator-like savestates to console (Wii through Nintendont), and more. It supports JP 1.0, US, and PAL versions.
+It implements most of the [GCT generator](https://gct.zint.ch/) practice codes, adds emulator-like savestates to console (Wii through Nintendont), and more. It supports JP 1.0, US, and PAL versions. Vibe coded software, use at your own risk.
 
 <p align="center">
   <a href="doc/showcase.webp">
