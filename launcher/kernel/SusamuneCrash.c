@@ -235,7 +235,7 @@ static int WriteText(u32 target)
 	if (TextStatus != FR_OK)
 		return TextStatus;
 
-	Emit(Line, _sprintf(Line, "Susamune crash report v%u\r\n",
+	Emit(Line, _sprintf(Line, "Moonshine crash report v%u\r\n",
 		Snapshot.version));
 	Emit(Line, _sprintf(Line,
 		"generation=%u region=%s game_id=%08X mod_crc32=%08X\r\n",

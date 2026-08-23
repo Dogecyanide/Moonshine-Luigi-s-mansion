@@ -837,7 +837,7 @@ void entryAttachment(AttachmentModel &attachment) {
 
 class GhostView : public JDrama::TViewObj {
 public:
-    GhostView() : JDrama::TViewObj("Susamune Ghost Models") {}
+    GhostView() : JDrama::TViewObj("Moonshine Ghost Models") {}
 
     virtual void perform(u32 cue, JDrama::TGraphics *) override {
         if ((cue & (kCueCalcView | kCueEntry)) == 0) return;

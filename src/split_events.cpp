@@ -473,16 +473,12 @@ const CarryDesc *carryForRoute(u16 route) {
 }
 
 bool publishTransition(u16 route, u8 event, u8 target) {
-    const volatile u16 *capturedTarget =
-        reinterpret_cast<volatile u16 *>(SUSAMUNE_ADDR_QFT_TRANSITION_TARGET);
-    if (*capturedTarget == 0xffff ||
+    s32 qf;
+    u16 capturedTarget;
+    if (!gQFTTimer.transitionEntryQf(&qf, &capturedTarget) ||
+        capturedTarget != target ||
         gpApplication.mNextScene.mAreaID != target ||
         gpApplication.mNextScene.mEpisodeID != 0) return false;
-    s32 qf;
-    if (!gQFTTimer.currentQf(&qf)) return false;
-    const volatile s32 *capturedQf =
-        reinterpret_cast<volatile s32 *>(SUSAMUNE_ADDR_QFT_TRANSITION_QF);
-    qf += *capturedQf - sStageDirector->unk5C;
     if (!publishEventAt(route, event, qf)) return false;
     if (carryForRoute(route)) sArmedCarryRoute = route;
     return true;
@@ -748,7 +744,6 @@ bool routeUsesSpine(u16 route) {
     case SplitStats::ROUTE_AIRSTRIP_1:
     case SplitStats::ROUTE_BIANCO_PLANT:
     case SplitStats::ROUTE_DELFINO_SHADOW_MARIO:
-    case SplitStats::ROUTE_BIANCO_2:
     case SplitStats::ROUTE_TRAVEL_SKIP:
     case SplitStats::ROUTE_BIANCO_5:
     case SplitStats::ROUTE_BIANCO_7:
@@ -783,7 +778,6 @@ bool spineActorRelevant(u16 route, u32 vtable) {
     case SplitStats::ROUTE_TRAVEL_SKIP:
     case SplitStats::ROUTE_GELATO_PLANT:
         return vtable == kGatekeeperVtable;
-    case SplitStats::ROUTE_BIANCO_2:
     case SplitStats::ROUTE_BIANCO_5:
         return vtable == kPeteyVtable;
     case SplitStats::ROUTE_PIANTA_1:
@@ -975,8 +969,7 @@ bool captureDemoEvent(TMarDirector *director, u16 *route, u8 *event, s32 *qf) {
         !SplitStats::routeActive(SplitStats::ROUTE_BIANCO_2) ||
         Ghost::observerStatsSuppressed())
         return false;
-    if (director->mAreaID != 2 ||
-        (director->mEpisodeID != 0 && director->mEpisodeID != 1) ||
+    if (director->mAreaID != 2 || director->mEpisodeID != 0 ||
         !gQFTTimer.currentQf(qf))
         return false;
     *route = SplitStats::ROUTE_BIANCO_2;
@@ -1481,7 +1474,7 @@ extern "C" void susamuneSplitStartDemo(
     if (gSettings.getBool(SETTING_TIMER_FREEZE_DEMO))
         gQFTTimer.freezeEvent();
     if (hasCandidate)
-        publishEventAt(candidateRoute, candidateEvent, candidateQf);
+        SplitStats::onRouteEvent(candidateRoute, candidateEvent, candidateQf);
 }
 
 extern "C" void susamuneSplitOpenTalk(void *talk, TBaseNPC *npc) {
@@ -1534,8 +1527,7 @@ extern "C" void susamuneSplitPeteyHipDrop(void *petey) {
     const u8 before = enemy->mHealth;
     reinterpret_cast<PeteyHipDropFn>(sPeteyHipDropTrampoline)(petey);
     if (!sRetailDirectOpen || !stageIdentityValid()) return;
-    const bool b2 = sActiveRoute == SplitStats::ROUTE_BIANCO_2 &&
-        (routeScene(sActiveRoute, 2, 0) || routeScene(sActiveRoute, 2, 1));
+    const bool b2 = routeScene(SplitStats::ROUTE_BIANCO_2, 2, 0);
     const bool b5 = routeScene(SplitStats::ROUTE_BIANCO_5, 2, 4);
     if (b2 || b5) notePeteyDamage(before, enemy->mHealth);
 }
