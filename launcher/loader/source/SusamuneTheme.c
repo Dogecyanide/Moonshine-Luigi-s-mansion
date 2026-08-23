@@ -73,7 +73,7 @@ static bool BuildThemeDirectory(char *out, size_t outSize, const char *device,
 		return false;
 
 	if (dir == NULL || dir[0] == '\0')
-		dir = "/apps/susamune_launcher/";
+		dir = "/apps/moonshine_launcher/";
 	colon = strchr(dir, ':');
 	if (colon != NULL)
 		dir = colon + 1;

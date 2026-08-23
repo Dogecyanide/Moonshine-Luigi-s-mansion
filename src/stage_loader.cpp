@@ -31,6 +31,8 @@ enum SessionState {
     STATE_RUNNING,
     STATE_RETRY_DELAY,
     STATE_RETRY_PENDING,
+    STATE_RETRY_SAVEBOX,
+    STATE_WAITING_POST_SAVE,
     STATE_COMPLETE,
     STATE_BLOCKED,
 };
@@ -65,7 +67,7 @@ enum {
 };
 
 constexpr u8 kFastAny[] = {
-    0, 2, 5, 6, 121, 34, 78, 79, 80, 81, 82, 85, 86, 38, 39, 42, 43,
+    1, 2, 5, 6, 121, 34, 78, 79, 80, 81, 82, 85, 86, 38, 39, 42, 43,
     46, 49, 13, 14, 16, 17, 20, 21, 22, 7, 10, 52, 53, 56, 57, 60, 61,
     62, 65, 66, 67, 68, 70, 71, 74, 92,
 };
@@ -75,7 +77,6 @@ constexpr u8 kRedsWorldTour[] = {
     55, 59, 63, 67, 73, 75, 84, 87, 91, 98, 95, 97,
 };
 enum {
-    kFastAnyBiancoPosition = 0,
     kFastAnyPv5Position = 10,
     kInvalidPlaylistId = 0xff,
 };
@@ -223,9 +224,7 @@ bool builtinDefinition(int preset, const u8 **entries, u8 *count) {
 }
 
 bool builtinActionAt(int preset, int position) {
-    return preset == 0 &&
-           (position == kFastAnyBiancoPosition ||
-            position == kFastAnyPv5Position);
+    return preset == 0 && position == kFastAnyPv5Position;
 }
 
 u32 builtinContentHash(int preset) {
@@ -584,6 +583,27 @@ bool requestCurrent() {
     return true;
 }
 
+bool requestCurrentPostSave() {
+    const int entry = expectedStartEntry();
+    if (entry < 0 || entry >= ILing::count()) return false;
+
+    sRuntime.state = STATE_REQUESTING;
+    if (!WarpWheel::requestILStart(entry)) {
+        sRuntime.state = STATE_BLOCKED;
+        sRuntime.outcome = OUTCOME_WARPS_DISABLED;
+        sRuntime.lastEntry = (u8)entry;
+        sRuntime.lastQf = -1;
+        sRuntime.displayFrames = kResultDisplayFrames;
+        sRuntime.holdingDeparture = 0;
+        return false;
+    }
+    if (sRuntime.state == STATE_REQUESTING) {
+        sRuntime.state = STATE_WAITING_POST_SAVE;
+    }
+    sRuntime.holdingDeparture = 0;
+    return true;
+}
+
 void beginAttempt(u32 serial) {
     sRuntime.attemptSerial = serial;
     clearShinePublishLatch();
@@ -596,6 +616,11 @@ void beginAttempt(u32 serial) {
 }
 
 void queueFailure(Outcome outcome, s32 qf) {
+    const bool waitForSavebox =
+        outcome == OUTCOME_TARGET_MISS &&
+        sRuntime.mode == StageLoader::MODE_STREAKING && gpMarioOriginal &&
+        gpMarioOriginal->mState == kMarioWinDemoState &&
+        !gSettings.getBool(SETTING_STREAK_AUTO_RESET);
     clearShinePublishLatch();
     sRuntime.modalWaitForShineDemo = 0;
     const int entry = expectedStartEntry();
@@ -607,10 +632,10 @@ void queueFailure(Outcome outcome, s32 qf) {
     if (sRuntime.mode == StageLoader::MODE_STREAKING) {
         sRuntime.progress = 0;
     }
-    sRuntime.retryFrames = kRetryDelayFrames;
+    sRuntime.retryFrames = waitForSavebox ? 0 : kRetryDelayFrames;
     sRuntime.displayFrames = kResultDisplayFrames;
     sRuntime.holdingDeparture = 0;
-    sRuntime.state = STATE_RETRY_DELAY;
+    sRuntime.state = waitForSavebox ? STATE_RETRY_SAVEBOX : STATE_RETRY_DELAY;
 }
 
 void finishPlaylistBest() {
@@ -669,8 +694,14 @@ void queueSuccess(int resultEntry, s32 qf) {
             sRuntime.modalWaitForShineDemo = normalShine;
             sRuntime.modalState = MODAL_PENDING;
         } else {
-            sRuntime.retryFrames = kRetryDelayFrames;
-            sRuntime.state = STATE_RETRY_DELAY;
+            if (normalShine &&
+                !gSettings.getBool(SETTING_STREAK_AUTO_RESET)) {
+                sRuntime.retryFrames = 0;
+                sRuntime.state = STATE_RETRY_SAVEBOX;
+            } else {
+                sRuntime.retryFrames = kRetryDelayFrames;
+                sRuntime.state = STATE_RETRY_DELAY;
+            }
         }
         return;
     }
@@ -1115,7 +1146,6 @@ bool loadBuiltinPlaylist(int preset) {
     memcpy(sQueues.draft, entries, count);
     sRuntime.draftCount = (u8)count;
     if (preset == 0) {
-        setAction(sQueues.draftActions, kFastAnyBiancoPosition, true);
         setAction(sQueues.draftActions, kFastAnyPv5Position, true);
     }
     sRuntime.draftPlaylistId = (u8)preset;
@@ -1348,7 +1378,9 @@ bool retryOwnsDeparture() {
     return sRuntime.state == STATE_REQUESTING ||
            sRuntime.state == STATE_WAITING ||
            sRuntime.state == STATE_RETRY_DELAY ||
-           sRuntime.state == STATE_RETRY_PENDING;
+           sRuntime.state == STATE_RETRY_PENDING ||
+           sRuntime.state == STATE_RETRY_SAVEBOX ||
+           sRuntime.state == STATE_WAITING_POST_SAVE;
 }
 
 bool holdGameModeBeforeUpdate(TMarDirector *director) {
@@ -1378,6 +1410,13 @@ bool holdGameModeBeforeUpdate(TMarDirector *director) {
     return false;
 }
 
+bool holdPostSaveDeparture() {
+    if (sRuntime.state == STATE_RETRY_SAVEBOX) {
+        return requestCurrentPostSave();
+    }
+    return sRuntime.state == STATE_WAITING_POST_SAVE;
+}
+
 bool copyDeathRetryDest(LevelWarp::Dest *out) {
     if (!out || sRuntime.state != STATE_RUNNING ||
         sRuntime.activeIndex >= sRuntime.activeCount ||
@@ -1391,6 +1430,18 @@ bool copyDeathRetryDest(LevelWarp::Dest *out) {
 
 void update() {
     pollPlaylistSave();
+    if (gSettings.getBool(SETTING_DISABLE_WARPS) &&
+        (sRuntime.state == STATE_RETRY_SAVEBOX ||
+         sRuntime.state == STATE_WAITING_POST_SAVE)) {
+        const int entry = expectedStartEntry();
+        sRuntime.state = STATE_BLOCKED;
+        sRuntime.outcome = OUTCOME_WARPS_DISABLED;
+        if (entry >= 0) sRuntime.lastEntry = (u8)entry;
+        sRuntime.lastQf = -1;
+        sRuntime.displayFrames = kResultDisplayFrames;
+        sRuntime.holdingDeparture = 0;
+        return;
+    }
     const bool shinePending = shinePublishPending();
     if (sRuntime.modalState == MODAL_VISIBLE) {
         updateModal();
@@ -1440,7 +1491,8 @@ void onILAttemptStarted(int entry) {
     if (entry != expectedStartEntry()) {
         if (sRuntime.state == STATE_RUNNING) {
             queueFailure(OUTCOME_WRONG_ROUTE, -1);
-        } else if (sRuntime.state == STATE_WAITING) {
+        } else if (sRuntime.state == STATE_WAITING ||
+                   sRuntime.state == STATE_WAITING_POST_SAVE) {
             sRuntime.state = STATE_RETRY_PENDING;
         }
         return;
@@ -1456,7 +1508,8 @@ void onILAttemptStarted(int entry) {
 void onILAttemptEnded() {
     if (sRuntime.state == STATE_RUNNING) {
         queueFailure(OUTCOME_ENDED, liveQf());
-    } else if (sRuntime.state == STATE_WAITING) {
+    } else if (sRuntime.state == STATE_WAITING ||
+               sRuntime.state == STATE_WAITING_POST_SAVE) {
         sRuntime.state = STATE_RETRY_PENDING;
     }
 }
@@ -1484,7 +1537,8 @@ void onILResult(int entry, s32 qf, bool eligible) {
 }
 
 void onILWarpCancelled() {
-    if (sRuntime.state == STATE_WAITING) {
+    if (sRuntime.state == STATE_WAITING ||
+        sRuntime.state == STATE_WAITING_POST_SAVE) {
         sRuntime.retryFrames = 0;
         sRuntime.state = STATE_RETRY_PENDING;
     }

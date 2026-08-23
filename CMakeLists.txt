@@ -87,7 +87,7 @@ if(LAUNCHER_VERSION STREQUAL "V1.2.0" OR
    LAUNCHER_VERSION MATCHES "^V2\\.1\\.0 Release Candidate [0-9]+")
     unset(LAUNCHER_VERSION CACHE)
 endif()
-set(LAUNCHER_VERSION "V2.1.0 Release Candidate 2 \"Hot Streak\"" CACHE STRING
+set(LAUNCHER_VERSION "V2.1.1" CACHE STRING
     "Version shown in the packaged launcher meta.xml")
 
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
@@ -192,10 +192,10 @@ set(OUT_ISO_DIR "${CMAKE_BINARY_DIR}/out_iso")
 set(IN_ISO_STAMP "${CMAKE_BINARY_DIR}/in_iso.stamp")
 set(OUT_ISO_STAMP "${CMAKE_BINARY_DIR}/out_iso.stamp")
 set(PATCHED_DOL "${CMAKE_BINARY_DIR}/main.dol")
-set(GECKO_TXT "${CMAKE_BINARY_DIR}/susamune.txt")
-set(FINAL_ISO "${CMAKE_BINARY_DIR}/susamune_${VERS_PRIMARY}.iso")
+set(GECKO_TXT "${CMAKE_BINARY_DIR}/moonshine.txt")
+set(FINAL_ISO "${CMAKE_BINARY_DIR}/moonshine_${VERS_PRIMARY}.iso")
 # One launcher for every disc revision -- the mod is no longer compiled into it.
-set(LAUNCHER_ZIP "${CMAKE_BINARY_DIR}/susamune_launcher.zip")
+set(LAUNCHER_ZIP "${CMAKE_BINARY_DIR}/moonshine_launcher.zip")
 
 add_custom_command(
     OUTPUT "${IN_ISO_STAMP}"
@@ -261,7 +261,7 @@ elseif(IS_EMULATOR)
     set(EMULATOR_BPS_FILES "")
     foreach(_v IN LISTS VERS)
         set(_layout "${CMAKE_SOURCE_DIR}/data/iso_layout_${_v}.json")
-        set(_bps "${CMAKE_BINARY_DIR}/susamune_${_v}.bps")
+        set(_bps "${CMAKE_BINARY_DIR}/moonshine_${_v}.bps")
         if(EXISTS "${_layout}")
             add_custom_command(
                 OUTPUT "${_bps}"
@@ -373,8 +373,8 @@ ExternalProject_Add(nintendont_launcher
         "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
         "-DLAUNCHER_VERSION=${LAUNCHER_VERSION}"
-        "-DLAUNCHER_TEST_LOG=${CMAKE_SOURCE_DIR}/doc/v2.1.0-rc2-testing.md"
-        "-DLAUNCHER_CHANGELOG=${CMAKE_SOURCE_DIR}/doc/v2.1.0-rc2-changelog.md"
+        "-DLAUNCHER_TEST_LOG=${CMAKE_SOURCE_DIR}/doc/v2.1.1-testing.md"
+        "-DLAUNCHER_CHANGELOG=${CMAKE_SOURCE_DIR}/doc/v2.1.1-changelog.md"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
     DEPENDS mod_bins launcher_build_id
     BUILD_ALWAYS ON

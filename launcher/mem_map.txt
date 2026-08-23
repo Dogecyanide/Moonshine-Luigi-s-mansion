@@ -22,7 +22,7 @@ MEM2
 
 0x92F00000-0x93000000=Nintendont kernel
 
-Memory-card emulation is disabled in the Susamune launcher. Its stock buffer
+Memory-card emulation is disabled in the Moonshine Launcher. Its stock buffer
 starts at 0x91000000 and is incompatible with the dedicated layout above.
 
 0x93000000-0x93003000=padread gc bin

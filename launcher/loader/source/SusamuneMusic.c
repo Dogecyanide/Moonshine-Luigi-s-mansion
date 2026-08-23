@@ -34,7 +34,7 @@ static bool BuildMusicPath(char *out, size_t outSize, const char *device,
 	if (strcmp(device, "sd") != 0 && strcmp(device, "usb") != 0)
 		return false;
 	if (dir == NULL || dir[0] == '\0')
-		dir = "/apps/susamune_launcher/";
+		dir = "/apps/moonshine_launcher/";
 	colon = strchr(dir, ':');
 	if (colon != NULL)
 		dir = colon + 1;

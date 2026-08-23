@@ -1,13 +1,14 @@
 # Launcher background themes
 
-The Susamune launcher creates a `theme` directory beside its `boot.dol`. Put an
+The Moonshine launcher creates a `theme` directory beside its `boot.dol`. Put an
 optional background there using this exact name:
 
 - `theme/background.png` — PNG, exactly 1024x480 pixels, at most 2 MiB.
 - `theme/bgm.mp3` — MP3, at most 4 MiB. It loops while the launcher is open.
 
 The path follows the launcher itself. For example, a launcher at
-`sd:/apps/susamune/boot.dol` reads `sd:/apps/susamune/theme/background.png`
+`sd:/apps/moonshine_launcher/boot.dol` reads
+`sd:/apps/moonshine_launcher/theme/background.png`
 even if the game is on USB or is a real disc. A launcher started from USB reads
 its theme from USB. Failure to create the directory is nonfatal.
 

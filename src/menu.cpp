@@ -2638,7 +2638,7 @@ private:
         drawValueRow(menu, x, ry, w, "Unlock popup & chime",
                      gSettings.valueLabel(SETTING_ACHIEVEMENT_NOTIFICATIONS),
                      mSel == 4, false, true);
-        menu->drawText("V2.1.0 Release Candidate 2 \"Hot Streak\"",
+        menu->drawText("Moonshine V2.1.1",
                        x + 4, y + h - 44, FOOT_SZ, FOOT_SZ, cRowDim());
         menu->drawText(storageStatus(), x + 4, y + h - 24,
                        FOOT_SZ, FOOT_SZ,
@@ -3708,7 +3708,8 @@ public:
             moveHorizontal(+1);
         }
 
-        if ((rapid & TMarioGamePad::X) && mSel == OPTION_TARGET &&
+        if ((rapid & TMarioGamePad::X) &&
+            selectedOption() == OPTION_TARGET &&
             mStreaking) {
             mTargetQf = -1;
             StageTargets::set(mStreakEntry, mTargetQf);
@@ -3785,8 +3786,10 @@ public:
 
         int ry = y;
         int row = 0;
-        for (int option = 0; option < optionCount(); option++, row++) {
+        for (int optionRow = 0; optionRow < optionCount();
+             optionRow++, row++) {
             if (row < start || row >= end) continue;
+            const Option option = optionAt(optionRow);
             const char *name;
             const char *value;
             if (option == OPTION_MODE) {
@@ -3804,6 +3807,9 @@ public:
             } else if (option == OPTION_DISPLAY) {
                 name = "Session display";
                 value = gSettings.valueLabel(SETTING_STAGE_SESSION_DISPLAY);
+            } else if (option == OPTION_AUTO_RESET) {
+                name = "Streak auto-reset";
+                value = gSettings.valueLabel(SETTING_STREAK_AUTO_RESET);
             } else if (option == OPTION_BUILTIN) {
                 name = "Built-in preset";
                 value = StageLoader::builtinPlaylistName(mBuiltinPlaylist);
@@ -3823,7 +3829,7 @@ public:
                                              : "Save playlist";
                 value = custom;
             }
-            drawValueRow(menu, x, ry, w, name, value, mSel == option,
+            drawValueRow(menu, x, ry, w, name, value, mSel == optionRow,
                          false, true);
             ry += ROW_H;
         }
@@ -3889,11 +3895,13 @@ public:
         }
 
         drawScrollHints(menu, x, y, w, listH, start, end, rows);
+        const Option selected = selectedOption();
         const bool customOption = !mStreaking && isOption() &&
-            (mSel == OPTION_LOAD || mSel == OPTION_SAVE);
+            (selected == OPTION_LOAD || selected == OPTION_SAVE);
         const bool builtinOption = !mStreaking && isOption() &&
-            mSel == OPTION_BUILTIN;
-        const bool displayOption = isOption() && mSel == OPTION_DISPLAY;
+            selected == OPTION_BUILTIN;
+        const bool displayOption = isOption() &&
+            (selected == OPTION_DISPLAY || selected == OPTION_AUTO_RESET);
         const char *hint = customOption
             ? SUSAMUNE_GLYPH_A " Select   " SUSAMUNE_GLYPH_C
               " L" SUSAMUNE_GLYPH_SLASH "R Slot"
@@ -3928,6 +3936,7 @@ private:
         OPTION_BUILTIN,
         OPTION_LOAD,
         OPTION_SAVE,
+        OPTION_AUTO_RESET,
         OPTION_COUNT_MAX,
     };
 
@@ -3938,7 +3947,15 @@ private:
     };
 
     int optionCount() const {
-        return mStreaking ? OPTION_BUILTIN : OPTION_COUNT_MAX;
+        return mStreaking ? OPTION_BUILTIN + 1 : OPTION_AUTO_RESET;
+    }
+    Option optionAt(int row) const {
+        return mStreaking && row == OPTION_BUILTIN
+                   ? OPTION_AUTO_RESET
+                   : (Option)row;
+    }
+    Option selectedOption() const {
+        return isOption() ? optionAt(mSel) : OPTION_COUNT_MAX;
     }
     bool isOption() const { return mSel < optionCount(); }
     int catalogueFirst() const {
@@ -3956,14 +3973,15 @@ private:
     }
 
     void activateOption(Menu *menu) {
-        if (mSel == OPTION_MODE) {
+        const Option option = selectedOption();
+        if (option == OPTION_MODE) {
             mStreaking = !mStreaking;
             if (mStreaking)
                 mTargetQf = StageTargets::get(mStreakEntry);
             mSel = OPTION_MODE;
             return;
         }
-        if (mSel == OPTION_RUN) {
+        if (option == OPTION_RUN) {
             if (!mStreaking && StageLoader::queueCount() == 0) {
                 menu->toast("Playlist is empty");
                 return;
@@ -3979,11 +3997,11 @@ private:
             }
             return;
         }
-        if (mSel == OPTION_FINISHES) {
+        if (option == OPTION_FINISHES) {
             if (mStreaking) beginTextEditor(EDIT_FINISHES);
             return;
         }
-        if (mSel == OPTION_TARGET) {
+        if (option == OPTION_TARGET) {
             if (mStreaking) {
                 beginTextEditor(EDIT_TARGET);
             } else if (StageLoader::queueCount()) {
@@ -3994,25 +4012,29 @@ private:
             }
             return;
         }
-        if (mSel == OPTION_DISPLAY) {
+        if (option == OPTION_DISPLAY) {
             gSettings.cycle(SETTING_STAGE_SESSION_DISPLAY, 1);
             return;
         }
-        if (mSel == OPTION_BUILTIN) {
+        if (option == OPTION_AUTO_RESET) {
+            gSettings.cycle(SETTING_STREAK_AUTO_RESET, 1);
+            return;
+        }
+        if (option == OPTION_BUILTIN) {
             if (StageLoader::loadBuiltinPlaylist(mBuiltinPlaylist)) {
                 mSel = OPTION_FINISHES;
                 menu->toast("Preset loaded");
             } else {
                 menu->toast("Preset could not load");
             }
-        } else if (mSel == OPTION_LOAD) {
+        } else if (option == OPTION_LOAD) {
             if (StageLoader::loadCustomPlaylist(mCustomSlot)) {
                 mSel = OPTION_FINISHES;
                 menu->toast("Playlist loaded");
             } else {
                 menu->toast("Playlist storage unavailable");
             }
-        } else if (mSel == OPTION_SAVE) {
+        } else if (option == OPTION_SAVE) {
             if (StageLoader::customPlaylistSavePending()) {
                 menu->toast("Playlist save already pending");
             } else if (!StageLoader::queueCount()) {
@@ -4027,14 +4049,18 @@ private:
 
     void moveHorizontal(int direction) {
         if (isOption()) {
-            if (mSel == OPTION_DISPLAY) {
-                gSettings.cycle(SETTING_STAGE_SESSION_DISPLAY, direction);
-            } else if (!mStreaking && mSel == OPTION_BUILTIN) {
+            const Option option = selectedOption();
+            if (option == OPTION_DISPLAY || option == OPTION_AUTO_RESET) {
+                gSettings.cycle(option == OPTION_DISPLAY
+                                    ? SETTING_STAGE_SESSION_DISPLAY
+                                    : SETTING_STREAK_AUTO_RESET,
+                                direction);
+            } else if (!mStreaking && option == OPTION_BUILTIN) {
                 mBuiltinPlaylist = (u8)wrap(
                     mBuiltinPlaylist + (direction < 0 ? -1 : 1),
                     StageLoader::BUILTIN_PLAYLIST_COUNT);
             } else if (!mStreaking &&
-                (mSel == OPTION_LOAD || mSel == OPTION_SAVE)) {
+                (option == OPTION_LOAD || option == OPTION_SAVE)) {
                 mCustomSlot = (u8)wrap(
                     mCustomSlot + (direction < 0 ? -1 : 1),
                     StageLoader::CUSTOM_PLAYLIST_COUNT);
@@ -5090,7 +5116,7 @@ void Menu::draw(J2DOrthoGraph *ortho) {
     fillBox(PANEL_X, PANEL_Y, PANEL_W, 3, cAccent());
 
     // Title + accent underline.
-    drawText("susamune", PANEL_X + PAD - 2, PANEL_Y + 12,
+    drawText("Moonshine", PANEL_X + PAD - 2, PANEL_Y + 12,
              TITLE_SZ, TITLE_SZ, cTitle());
     fillBox(PANEL_X + PAD, PANEL_Y + 12 + TITLE_SZ + 1, 150, 2, cAccent());
 

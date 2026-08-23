@@ -34,6 +34,7 @@ typedef JUtility::TColor Color;
 const u8 kAreaHotel  = 7;
 const u8 kAreaCasino = 14;
 const u32 kPostCoronaFlag = 0x103AE;
+const u32 kPinnaEightCompleteFlag = 0x30005;
 
 constexpr u8 kParentAreas[] = {
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 6,  // 0x00
@@ -799,6 +800,12 @@ void applyDest(const LevelWarp::Dest &dest) {
     flags->setBool(dest.area != TGameSequence::AREA_DOLPIC ||
                        (dest.gameInt3 & LevelWarp::Dest::POST_CORONA) != 0,
                    kPostCoronaFlag);
+    if (dest.area == TGameSequence::AREA_PINNAPARCO && dest.episode == 5 &&
+        (dest.gameInt3 & ~LevelWarp::Dest::POST_CORONA) == 7) {
+        // Retail leaves this set after the coaster return; keeping it on a
+        // practice warp resumes at the automatic Shine-spawn conversation.
+        flags->setBool(false, kPinnaEightCompleteFlag);
+    }
 
     gpApplication.mNextScene.mAreaID    = dest.area;
     gpApplication.mNextScene.mEpisodeID = dest.episode;
@@ -1055,7 +1062,11 @@ void restart(bool keepSpawn) {
     if (sArmed && sArmStartedIL) ILing::cancelWarpStart();
     const TGameSequence &cur = gpApplication.mCurrentScene;
     const Dest dest = { cur.mAreaID, cur.mEpisodeID, currentGameInt3() };
-    armWarp(dest, keepSpawn, false);
+    const bool pinnaEight =
+        cur.mAreaID == TGameSequence::AREA_PINNAPARCO &&
+        cur.mEpisodeID == 5;
+    armWarp(dest, keepSpawn && !pinnaEight, pinnaEight);
+    if (pinnaEight) sSource = dest;
     sArmedAction = PROMPT_RESTART_KEEP;
 }
 
@@ -1127,6 +1138,9 @@ s32 onDirected(s32 appState) {
     // A protected-PB decision may outlive the fade. Keep the completed retail
     // death director until the exact restart action is ready to arm.
     if (sDeathSequence && restartPromptPending()) return 0;
+    const bool holdPostSave =
+        appState > TApplication::CONTEXT_DIRECT_MAIN_LOOP &&
+        StageLoader::holdPostSaveDeparture();
     sWaitForRetailDeathTail = false;
     sQueuedSessionDeathRestart = false;
     // Ordinary returns still respect the save UI. At a true app handoff that
@@ -1145,10 +1159,15 @@ s32 onDirected(s32 appState) {
     if (sArmed) {
         sWaitForSave = false;
         if (sCourseGuard) {
-            // A retail departure won the race with the queued course warp.
-            // It is too late to open a confirmation at this handoff.
-            cancelArmedCourseWarp();
-            if (gMenu) gMenu->toast("Course warp cancelled");
+            if (holdPostSave) {
+                // This departure is the requested post-save retry itself.
+                prepareArmedDeparture();
+            } else {
+                // A retail departure won the race with the queued course warp.
+                // It is too late to open a confirmation at this handoff.
+                cancelArmedCourseWarp();
+                if (gMenu) gMenu->toast("Course warp cancelled");
+            }
         } else {
             prepareArmedDeparture();
         }
@@ -1176,6 +1195,7 @@ s32 onDirected(s32 appState) {
         ILing::onWarpTail();
         return TApplication::CONTEXT_DIRECT_STAGE;
     }
+    if (holdPostSave) return 0;
 
     // Original Level Select: while an ordinary file/stage departure finishes,
     // a held chart combination redirects the next scene. Instant Level Select
