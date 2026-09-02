@@ -61,6 +61,7 @@ constexpr u32 kSnapshotVersion = 2u;
 constexpr u32 kHeaderSize = 0x100u;
 constexpr u32 kHeapMetadataStart = 0x3Cu;
 constexpr u32 kHeapMetadataEnd = 0x84u;
+constexpr u32 kExpHeapAlignment = 16u;
 constexpr u32 kHeapModeOffset = 0x68u;
 constexpr u32 kHeapGroupOffset = 0x69u;
 constexpr u32 kHeapMetadataSize = kHeapMetadataEnd - kHeapMetadataStart;
@@ -204,14 +205,56 @@ struct FreezeState {
     bool dmaWasEnabled;
 };
 
+enum class Gate : u32 {
+    Ready,
+    Boot,
+    GameHeap,
+    RootHeap,
+    SystemHeap,
+    Size,
+    Distinct,
+    SystemNest,
+    GameNest,
+    Overlap,
+    CurrentHeap,
+    MissionNull,
+    MissionRange,
+    ModeMismatch,
+    ModeCount,
+    Scene,
+    DvdPredicate,
+    DvdCount,
+    Aram0,
+    Aram1,
+    Card0,
+    Card1,
+};
+
 LMState::Status sStatus = LMState::Status::Empty;
 LiveIdentity sLastIdentity = {};
+Gate sGate = Gate::Boot;
 bool sHaveIdentity;
 bool sSlotInitialized;
 u32 sStableFrames;
 u32 sSnapshotSize;
 u32 sGeneration;
 u16 sPreviousButtons;
+u32 sGateValue;
+
+bool gateFailure(Gate gate, u32 value, bool report) {
+    if (report) {
+        sGate = gate;
+        sGateValue = value;
+    }
+    return false;
+}
+
+void gateReady(bool report) {
+    if (report) {
+        sGate = Gate::Ready;
+        sGateValue = 0u;
+    }
+}
 
 inline u32 readWord(u32 address) {
     return *reinterpret_cast<volatile u32 *>(address);
@@ -243,7 +286,8 @@ bool isExpHeap(u32 heap) {
     const u32 end = readWord(heap + 0x34u);
     const u32 size = readWord(heap + 0x38u);
     return start >= kMem1Start && start <= end && end <= kMem1End &&
-           (start & 31u) == 0 && (end & 31u) == 0 && size == end - start;
+           ((start | end) & (kExpHeapAlignment - 1u)) == 0u &&
+           size == end - start;
 }
 
 bool rangeInside(u32 childStart, u32 childEnd, u32 parentStart,
@@ -278,16 +322,21 @@ bool sameIdentity(const LiveIdentity &a, const LiveIdentity &b) {
     return true;
 }
 
-bool buildIdentity(LiveIdentity *identity) {
+bool buildIdentity(LiveIdentity *identity, bool report = false) {
     identity->heap = readWord(kGameHeapGlobal);
     identity->rootHeap = readWord(kRootHeapGlobal);
     identity->systemHeap = readWord(kSystemHeapGlobal);
-    if (!isExpHeap(identity->heap) || !isExpHeap(identity->rootHeap) ||
-        !isExpHeap(identity->systemHeap)) {
+    if (!isExpHeap(identity->heap)) {
         identity->heapStart = 0;
         identity->heapEnd = 0;
         identity->heapSize = 0;
-        return false;
+        return gateFailure(Gate::GameHeap, identity->heap, report);
+    }
+    if (!isExpHeap(identity->rootHeap)) {
+        return gateFailure(Gate::RootHeap, identity->rootHeap, report);
+    }
+    if (!isExpHeap(identity->systemHeap)) {
+        return gateFailure(Gate::SystemHeap, identity->systemHeap, report);
     }
     identity->heapStart = readWord(identity->heap + 0x30u);
     identity->heapEnd = readWord(identity->heap + 0x34u);
@@ -337,35 +386,77 @@ bool buildIdentity(LiveIdentity *identity) {
     const bool distinctHeaps = identity->rootHeap != identity->systemHeap &&
         identity->rootHeap != identity->heap &&
         identity->systemHeap != identity->heap;
-    const bool childrenInsideRoot =
-        rangeInside(identity->systemHeapStart, identity->systemHeapEnd,
-                    identity->rootHeapStart, identity->rootHeapEnd) &&
-        rangeInside(identity->heapStart, identity->heapEnd,
-                    identity->rootHeapStart, identity->rootHeapEnd);
-    const bool childRangesDisjoint =
-        identity->systemHeapEnd <= identity->heapStart ||
-        identity->heapEnd <= identity->systemHeapStart;
-    const bool activeMission = identity->missionMode != 0u &&
-        identity->gameMode == identity->missionMode &&
-        identity->gameModeCount == 1u &&
-        identity->missionMode >= identity->heapStart &&
-        identity->missionMode <= identity->heapEnd - 0x1Cu;
-    return identity->heapSize <= kSnapshotCapacity - kHeapDataOffset &&
-           distinctHeaps && childrenInsideRoot && childRangesDisjoint &&
-           validCurrentHeap(identity->currentHeap, *identity) &&
-           activeMission && isMem1Range(identity->currentScene, sizeof(u32));
+    if (identity->heapSize > kSnapshotCapacity - kHeapDataOffset) {
+        return gateFailure(Gate::Size, identity->heapSize, report);
+    }
+    if (!distinctHeaps) {
+        return gateFailure(Gate::Distinct, identity->heap, report);
+    }
+    if (!rangeInside(identity->systemHeapStart, identity->systemHeapEnd,
+                     identity->rootHeapStart, identity->rootHeapEnd)) {
+        return gateFailure(Gate::SystemNest, identity->systemHeapStart,
+                           report);
+    }
+    if (!rangeInside(identity->heapStart, identity->heapEnd,
+                     identity->rootHeapStart, identity->rootHeapEnd)) {
+        return gateFailure(Gate::GameNest, identity->heapStart, report);
+    }
+    if (identity->systemHeapEnd > identity->heapStart &&
+        identity->heapEnd > identity->systemHeapStart) {
+        return gateFailure(Gate::Overlap, identity->systemHeapEnd, report);
+    }
+    if (!validCurrentHeap(identity->currentHeap, *identity)) {
+        return gateFailure(Gate::CurrentHeap, identity->currentHeap, report);
+    }
+    if (identity->missionMode == 0u) {
+        return gateFailure(Gate::MissionNull, 0u, report);
+    }
+    if (identity->missionMode < identity->heapStart ||
+        identity->missionMode > identity->heapEnd - 0x1Cu) {
+        return gateFailure(Gate::MissionRange, identity->missionMode, report);
+    }
+    if (identity->gameMode != identity->missionMode) {
+        return gateFailure(Gate::ModeMismatch, identity->gameMode, report);
+    }
+    if (identity->gameModeCount != 1u) {
+        return gateFailure(Gate::ModeCount, identity->gameModeCount, report);
+    }
+    if (!isMem1Range(identity->currentScene, sizeof(u32))) {
+        return gateFailure(Gate::Scene, identity->currentScene, report);
+    }
+    gateReady(report);
+    return true;
 }
 
-bool ioIdle() {
+bool ioIdle(bool report = false) {
     const bool predicateBusy =
         reinterpret_cast<BoolFn>(kDvdBusyPredicateAddr)();
-    return !predicateBusy && readWord(kDvdOutstandingGlobal) == 0u &&
-           readWord(kAramList0Global + 8u) == 0u &&
-           readWord(kAramList1Global + 8u) == 0u &&
-           readWord(kCardBlockGlobal + kCardResultOffset) !=
-               kCardResultBusy &&
-           readWord(kCardBlockGlobal + kCardControlStride +
-                    kCardResultOffset) != kCardResultBusy;
+    const u32 dvdOutstanding = readWord(kDvdOutstandingGlobal);
+    const u32 aram0 = readWord(kAramList0Global + 8u);
+    const u32 aram1 = readWord(kAramList1Global + 8u);
+    const u32 card0 = readWord(kCardBlockGlobal + kCardResultOffset);
+    const u32 card1 = readWord(kCardBlockGlobal + kCardControlStride +
+                               kCardResultOffset);
+    if (predicateBusy) {
+        return gateFailure(Gate::DvdPredicate, dvdOutstanding, report);
+    }
+    if (dvdOutstanding != 0u) {
+        return gateFailure(Gate::DvdCount, dvdOutstanding, report);
+    }
+    if (aram0 != 0u) {
+        return gateFailure(Gate::Aram0, aram0, report);
+    }
+    if (aram1 != 0u) {
+        return gateFailure(Gate::Aram1, aram1, report);
+    }
+    if (card0 == kCardResultBusy) {
+        return gateFailure(Gate::Card0, card0, report);
+    }
+    if (card1 == kCardResultBusy) {
+        return gateFailure(Gate::Card1, card1, report);
+    }
+    gateReady(report);
+    return true;
 }
 
 bool heapsHealthy(const LiveIdentity &identity) {
@@ -481,17 +572,20 @@ bool basicHeaderValid(const SnapshotHeader *header) {
          header->heapEnd <= header->systemHeapStart);
     return header->heapStart < header->heapEnd &&
            header->heapSize == header->heapEnd - header->heapStart &&
-           ((header->heapStart | header->heapEnd) & 31u) == 0u &&
+           ((header->heapStart | header->heapEnd) &
+            (kExpHeapAlignment - 1u)) == 0u &&
            isMem1Range(header->heapStart, header->heapSize) &&
            header->rootHeapStart < header->rootHeapEnd &&
            header->rootHeapSize ==
                header->rootHeapEnd - header->rootHeapStart &&
-           ((header->rootHeapStart | header->rootHeapEnd) & 31u) == 0u &&
+           ((header->rootHeapStart | header->rootHeapEnd) &
+            (kExpHeapAlignment - 1u)) == 0u &&
            isMem1Range(header->rootHeapStart, header->rootHeapSize) &&
            header->systemHeapStart < header->systemHeapEnd &&
            header->systemHeapSize ==
                header->systemHeapEnd - header->systemHeapStart &&
-           ((header->systemHeapStart | header->systemHeapEnd) & 31u) == 0u &&
+           ((header->systemHeapStart | header->systemHeapEnd) &
+            (kExpHeapAlignment - 1u)) == 0u &&
            isMem1Range(header->systemHeapStart, header->systemHeapSize) &&
            isMem1Range(header->heap, kHeapMetadataEnd) &&
            isMem1Range(header->rootHeap, kHeapMetadataEnd) &&
@@ -817,7 +911,7 @@ void loadState() {
 
 void updateStability() {
     LiveIdentity live;
-    if (!buildIdentity(&live) || !ioIdle()) {
+    if (!buildIdentity(&live, true) || !ioIdle(true)) {
         sHaveIdentity = false;
         sStableFrames = 0u;
         return;
@@ -885,6 +979,60 @@ u32 snapshotKiB() {
 
 u32 stableFrames() {
     return sStableFrames;
+}
+
+const char *gateText() {
+    switch (sGate) {
+    case Gate::Ready:
+        return "OK";
+    case Gate::Boot:
+        return "BOOT";
+    case Gate::GameHeap:
+        return "GAME";
+    case Gate::RootHeap:
+        return "ROOT";
+    case Gate::SystemHeap:
+        return "SYS";
+    case Gate::Size:
+        return "SIZE";
+    case Gate::Distinct:
+        return "DIST";
+    case Gate::SystemNest:
+        return "SNEST";
+    case Gate::GameNest:
+        return "GNEST";
+    case Gate::Overlap:
+        return "OVER";
+    case Gate::CurrentHeap:
+        return "CUR";
+    case Gate::MissionNull:
+        return "MNUL";
+    case Gate::MissionRange:
+        return "MRNG";
+    case Gate::ModeMismatch:
+        return "MODE";
+    case Gate::ModeCount:
+        return "MCNT";
+    case Gate::Scene:
+        return "SCENE";
+    case Gate::DvdPredicate:
+        return "DVDP";
+    case Gate::DvdCount:
+        return "DVDC";
+    case Gate::Aram0:
+        return "AR0";
+    case Gate::Aram1:
+        return "AR1";
+    case Gate::Card0:
+        return "CARD0";
+    case Gate::Card1:
+        return "CARD1";
+    }
+    return "?";
+}
+
+u32 gateValue() {
+    return sGateValue;
 }
 
 }  // namespace LMState

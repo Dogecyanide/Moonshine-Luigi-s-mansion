@@ -6,7 +6,7 @@ Mansion (`GLMJ01`).
 
 ## Current status
 
-`Full-State Experimental 0.3.0` is the first hardware-testable state build.
+`Full-State Experimental 0.3.2` is the first hardware-testable state build.
 
 - The custom Nintendont launcher accepts only the verified Japanese `GLMJ01`
   revision-0 executable for injection.
@@ -63,7 +63,7 @@ The build emits a version-labelled tester package plus a stable compatibility
 name:
 
 ```text
-build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.0.zip
+build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.2.zip
 build-lm-diag/moonshine_luigis_mansion_launcher.zip
 ```
 
@@ -87,8 +87,10 @@ disc or ISO.
 
 Back up any real memory-card data, install the four packaged files under
 `apps/moonshine_luigis_mansion/`, and launch a clean revision-0 GLMJ01 image.
-The overlay must say `LM STATE X0.3.0`; wait until `F`, `C`, and `H` are `OK`
-and `ST` is at least 3.
+The overlay must say `LM STATE X0.3.2`; wait until `F`, `C`, `H`, and `G` are
+`OK` and `ST` is at least 3. If `ST` remains zero, photograph the short gate
+name and eight-digit value shown after `G:`; they identify the rejected live
+condition without weakening it.
 
 Press D-pad Left once. `S:SAVED` and a nonzero `SZ` confirm a committed slot.
 Change a visible state in the same room, then press D-pad Right once. A good

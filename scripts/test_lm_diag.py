@@ -79,6 +79,7 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         )
         self.assertIn("kHeapMetadataStart = 0x3Cu", STATE_SOURCE)
         self.assertIn("kHeapMetadataEnd = 0x84u", STATE_SOURCE)
+        self.assertIn("kExpHeapAlignment = 16u", STATE_SOURCE)
         self.assertIn("kSnapshotVersion = 2u", STATE_SOURCE)
         self.assertIn("kInGameFlagsBase = 0x803C7CA0u", STATE_SOURCE)
         self.assertIn("kInGameFlagsOffset = 0x659u", STATE_SOURCE)
@@ -103,6 +104,10 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kCardResultBusy = 0xFFFFFFFFu", STATE_SOURCE)
         self.assertIn("kCurrentHeapGroupGlobal = 0x80498AE8u", STATE_SOURCE)
         self.assertIn("headerMatchesLive", STATE_SOURCE)
+        self.assertIn("buildIdentity(&live, true)", STATE_SOURCE)
+        self.assertIn("ioIdle(true)", STATE_SOURCE)
+        self.assertIn('return "CARD0";', STATE_SOURCE)
+        self.assertIn('return "MODE";', STATE_SOURCE)
 
     def test_state_gates_uncaptured_allocator_epochs(self) -> None:
         self.assertIn("header->rootFreeHead == live.rootFreeHead", STATE_SOURCE)

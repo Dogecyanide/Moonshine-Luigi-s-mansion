@@ -35,7 +35,7 @@
             "cacheVariables": {
                 "LM_BOOTSTRAP": "ON",
                 "LM_DIAGNOSTIC": "ON",
-                "LAUNCHER_VERSION": "Full-State Experimental 0.3.0"
+                "LAUNCHER_VERSION": "Full-State Experimental 0.3.2"
             },
             "hidden": false
         }

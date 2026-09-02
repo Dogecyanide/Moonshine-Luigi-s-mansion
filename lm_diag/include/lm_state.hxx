@@ -24,6 +24,8 @@ Status status();
 const char *statusText();
 u32 snapshotKiB();
 u32 stableFrames();
+const char *gateText();
+u32 gateValue();
 
 }  // namespace LMState
 
