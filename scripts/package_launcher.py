@@ -1,5 +1,5 @@
 """Package the built Nintendont loader into the HBC app zip:
-moonshine_launcher/{boot.dol, icon.png, meta.xml, mod_<region>.bin...}.
+moonshine_luigis_mansion/{boot.dol, icon.png, meta.xml, mod_<region>.bin...}.
 
 One app serves every supported disc revision. The mod is no longer compiled into
 the launcher: each mod_<region>.bin sits next to boot.dol and the loader reads
@@ -21,7 +21,7 @@ from pathlib import Path
 
 LAUNCHER_DIR = Path(__file__).resolve().parent.parent / "launcher"
 META_TEMPLATE = LAUNCHER_DIR / "meta.xml.j2"
-APP_NAME = "moonshine_launcher"
+APP_NAME = "moonshine_luigis_mansion"
 APP_ICON = LAUNCHER_DIR / "icon.png"
 
 

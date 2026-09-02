@@ -8,44 +8,22 @@
     "configurePresets": [
         {
             "name": "release_console",
-            "displayName": "Release build (Console)",
+            "displayName": "GLMJ01 bootstrap launcher",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
-                "VERS": "jp;us;pal"
-            },
-            "hidden": false
-        },
-        {
-            "name": "release_emu",
-            "displayName": "Release build (Dolphin)",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build",
-            "cacheVariables": {
-                "IS_EMULATOR": "ON"
+                "LM_BOOTSTRAP": "ON"
             },
             "hidden": false
         },
         {
             "name": "dev_console",
-            "displayName": "Dev build (Console)",
+            "displayName": "GLMJ01 bootstrap launcher (development)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
-                "ENABLE_DEBUG_WARPS": "ON",
-                "ENABLE_SAVESTATE_DBG": "ON",
+                "LM_BOOTSTRAP": "ON",
                 "LAUNCHER_DEFAULT_SOURCE": "sd"
-            },
-            "hidden": false
-        },
-        {
-            "name": "dev_emu",
-            "displayName": "Dev build (Emulator)",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build",
-            "cacheVariables": {
-                "IS_EMULATOR": "ON",
-                "ENABLE_SAVESTATE_DBG": "ON"
             },
             "hidden": false
         }
@@ -57,22 +35,6 @@
             "configurePreset": "release_console",
             "targets": [
                 "launcher"
-            ]
-        },
-        {
-            "name": "emu_iso",
-            "hidden": false,
-            "configurePreset": "release_emu",
-            "targets": [
-                "iso"
-            ]
-        },
-        {
-            "name": "emu_patches",
-            "hidden": false,
-            "configurePreset": "release_emu",
-            "targets": [
-                "emulator_patches"
             ]
         }
     ]

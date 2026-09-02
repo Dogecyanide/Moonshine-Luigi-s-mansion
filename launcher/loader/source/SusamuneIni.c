@@ -41,7 +41,7 @@ static bool SawSection = false;
 static const SusamuneIni kIniDefaults =
 {
 	.version          = SUSA_VER_JP,
-	.path             = { "", "", "" },
+	.path             = { "" },
 	.autoboot         = 0,
 	.nativeControls   = 0,
 	.unlockReadSpeed  = 1,
@@ -51,13 +51,11 @@ static const SusamuneIni kIniDefaults =
 	.language         = NIN_LAN_AUTO,
 };
 
-static const char *const kVersionTags[SUSA_VER_COUNT]  = { "jp", "us", "pal" };
-static const char *const kVersionNames[SUSA_VER_COUNT] = { "JP", "US", "PAL" };
+static const char *const kVersionTags[SUSA_VER_COUNT]  = { "jp" };
+static const char *const kVersionNames[SUSA_VER_COUNT] = { "Japanese (GLMJ01)" };
 static const u32 kVersionGameIDs[SUSA_VER_COUNT] =
 {
-	0x474D534A,	// GMSJ
-	0x474D5345,	// GMSE
-	0x474D5350,	// GMSP
+	0x474C4D4A,	// GLMJ
 };
 
 // language = <token>. Index is the NIN_LAN_* value; auto is handled separately
@@ -306,20 +304,19 @@ static void EmitNintendontSection(FIL *f, int *err)
 }
 
 static const char kIniBanner[] =
-	"; Moonshine settings\r\n"
-	"; [nintendont] is written by the Moonshine Launcher and is regenerated\r\n"
+	"; Moonshine Luigi's Mansion settings\r\n"
+	"; [nintendont] is written by Moonshine Luigi's Mansion and is regenerated\r\n"
 	"; whenever you leave one of its menus with changes pending, so comments\r\n"
 	"; added inside it are lost. Everything else in this file is preserved.\r\n"
 	";\r\n"
-	"; path_<region> is where that version's disc image lives, including the\r\n"
+	"; path_jp is where the GLMJ01 disc image lives, including the\r\n"
 	"; device (sd:/games/game.iso). Leave it blank to be prompted in the\r\n"
 	"; launcher, or set it to `di` to boot from the disc drive.\r\n"
 	";\r\n"
 	"; With autoboot = 1 the launcher skips its menu and boots the version\r\n"
 	"; named by `version` straight away. Hold B at startup for the menu.\r\n"
 	";\r\n"
-	"; In-game settings, binds and overlay sections are written by the mod.\r\n"
-	"; Their suffix is jp = GMSJ, us = GMSE, or pal = GMSP.\r\n"
+	"; Game-side settings will be added when the GLMJ01 payload exists.\r\n"
 	"\r\n";
 
 // ---------------------------------------------------------------------

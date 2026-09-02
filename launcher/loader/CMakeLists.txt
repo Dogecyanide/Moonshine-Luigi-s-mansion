@@ -13,7 +13,8 @@ target_compile_options(loader PRIVATE
     -DGEKKO -mrvl -mcpu=750 -meabi -mhard-float
     -O3 -g -std=gnu89 -Wall)
 target_compile_definitions(loader PRIVATE
-    DEBUG DEBUG_MODULE_PATCH ARCH_IS_BIG_ENDIAN)
+    DEBUG DEBUG_MODULE_PATCH ARCH_IS_BIG_ENDIAN
+    $<$<BOOL:${LAUNCHER_DISABLE_SUSAMUNE_PATCH}>:LAUNCHER_DISABLE_SUSAMUNE_PATCH>)
 
 target_include_directories(loader PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"

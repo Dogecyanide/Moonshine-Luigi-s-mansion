@@ -13,7 +13,7 @@
 # standalone for launcher dev, in which case the app is packaged without them.
 
 cmake_minimum_required(VERSION 3.21)
-project(susamune_launcher NONE)
+project(moonshine_luigis_mansion_launcher NONE)
 
 include(ExternalProject)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BundledToolchain.cmake")
@@ -32,7 +32,7 @@ set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "meta.xml default load source (di/
 set(LAUNCHER_VERSION "" CACHE STRING "meta.xml version override")
 set(LAUNCHER_TEST_LOG "" CACHE FILEPATH "tester log included in the HBC app")
 set(LAUNCHER_CHANGELOG "" CACHE FILEPATH "changelog included in the HBC app")
-option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
+option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable game injection and loader-side asset staging" ON)
 
 # mod_<region>.bin files to ship inside the HBC app dir. Empty for a standalone
 # launcher build: the kernel then finds no staged blob at boot and runs the game
@@ -97,6 +97,7 @@ ExternalProject_Add(wii
     CMAKE_ARGS
         "-DCMAKE_TOOLCHAIN_FILE=${_cmake_dir}/toolchain-wii.cmake"
         "-DLAUNCHER_BOOT_DOL=${_boot_dol}"
+        "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
         ${_common_args}
     DEPENDS ppc arm
     BUILD_ALWAYS ON

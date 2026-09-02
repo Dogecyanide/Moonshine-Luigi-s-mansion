@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <app version="1">
-	<name>Moonshine Launcher</name>
+	<name>Moonshine Luigi's Mansion</name>
 	<author>Dogecyanide, panther03, Nintendont authors</author>
 	<version>{{ version }}</version>
 	<release_date>2026</release_date>
-	<short_description>Ghost racing, watching, records, and practice</short_description>
-	<long_description>Moonshine V2.1.1.
-{% if regions %}    Bundled mods: {{ regions | join(", ") | upper }}. The one matching the disc is loaded.{% else %}    No mod binaries bundled -- this launcher runs the game unmodified.{% endif %}</long_description>
+	<short_description>GLMJ01 savestate research launcher</short_description>
+	<long_description>Moonshine Luigi's Mansion bootstrap for the Japanese GLMJ01 disc.
+{% if regions %}    Bundled payloads: {{ regions | join(", ") | upper }}.{% else %}    No game-side payload is bundled yet; GLMJ01 boots unmodified through the reserved-MEM2 Nintendont base.{% endif %}</long_description>
 <ahb_access/>
 </app>

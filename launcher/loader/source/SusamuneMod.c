@@ -53,7 +53,7 @@ void SusamuneLoadMod(u32 gameID)
 	/* launch_dir is empty when loaded over the network; fall back to the
 	 * conventional install path, same as titles.txt / meta.xml do. */
 	snprintf(path, sizeof(path), "%s%s",
-		 launch_dir[0] != 0 ? launch_dir : "/apps/moonshine_launcher/", name);
+		 launch_dir[0] != 0 ? launch_dir : "/apps/moonshine_luigis_mansion/", name);
 
 	if (f_open_char(&fd, path, FA_READ | FA_OPEN_EXISTING) != FR_OK)
 	{

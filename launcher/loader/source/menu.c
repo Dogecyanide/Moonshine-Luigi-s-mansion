@@ -195,8 +195,12 @@ void PrintInfo(void)
 
 void PrintSusamuneBuild(void)
 {
-	static const char BuildTitle[] = "Moonshine V2.1.1 \"Hot Streak\".";
+	static const char BuildTitle[] = "Moonshine Luigi's Mansion.";
+#ifdef LAUNCHER_DISABLE_SUSAMUNE_PATCH
+	static const char BuildChecksum[] = "[bootstrap: no payload].";
+#else
 	static const char BuildChecksum[] = "[" SUSAMUNE_BUILD_CHECKSUM "].";
+#endif
 	PrintFormat(DEFAULT_SIZE, BLACK,
 	            640 - MENU_POS_X - ((int)sizeof(BuildTitle) - 1) * 10,
 	            426, "%s", BuildTitle);

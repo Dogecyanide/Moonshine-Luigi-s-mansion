@@ -23,12 +23,10 @@ does to this section in SusamuneCfg.c.
 
 #include <gctypes.h>
 
-// Game versions, in the order the GUI cycles them.
+// This fork intentionally accepts only the Japanese Luigi's Mansion disc.
 typedef enum
 {
 	SUSA_VER_JP = 0,
-	SUSA_VER_US,
-	SUSA_VER_PAL,
 
 	SUSA_VER_COUNT
 } SusaVersion;
@@ -58,11 +56,11 @@ typedef struct
 
 extern SusamuneIni gIni;
 
-// Region tag as it appears in the key name ("jp"/"us"/"pal").
+// Region tag as it appears in the key name ("jp").
 const char *SusaVersionTag(u8 version);
-// Display name for the GUI ("JP"/"US"/"PAL").
+// Display name for the GUI.
 const char *SusaVersionName(u8 version);
-// GameID the disc header must report for this version, e.g. 'GMSE'.
+// GameID the disc header must report ('GLMJ').
 u32 SusaVersionGameID(u8 version);
 
 /**

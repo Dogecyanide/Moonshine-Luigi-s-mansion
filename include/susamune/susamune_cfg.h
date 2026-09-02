@@ -1076,7 +1076,7 @@ struct SusamuneCfg {
 // Path of the ini, at the root of whichever device holds it. That is the device
 // the launcher was run from, which the kernel may have had to mount as a second
 // volume -- see SusamuneCfgIniPath().
-#define SUSAMUNE_INI_PATH "/susamune.ini"
+#define SUSAMUNE_INI_PATH "/moonshine_lm.ini"
 
 // Section headers. [nintendont] holds the launcher's own options (game version,
 // per-version disc image paths, and the Nintendont settings that used to live in

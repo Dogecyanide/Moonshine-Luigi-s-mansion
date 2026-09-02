@@ -6,7 +6,7 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
-    parser.add_argument("inputs", nargs="+")
+    parser.add_argument("inputs", nargs="*")
     args = parser.parse_args()
 
     checksum = 0

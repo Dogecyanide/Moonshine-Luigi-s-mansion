@@ -57,6 +57,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "SusamuneShadowAsset.h"
 #include "SusamuneTheme.h"
 #include "susamune/mem2_map.h"
+#include "susamune/susamune_cfg.h"
 
 #include "ff_utf8.h"
 #include "diskio.h"
@@ -1825,8 +1826,10 @@ int main(int argc, char **argv)
 	// Can the ini be written back? Probe once so the menu can say so up front
 	// rather than only failing when the user changes something.
 	bool LauncherCanSave = SusamuneIniWritable(GetRootDevice());
+#ifndef LAUNCHER_DISABLE_SUSAMUNE_PATCH
 	if (!SusamuneGhostEnsureDirectories(GetRootDevice()))
 		gprintf("Susamune: ghost directories are unavailable\n");
+#endif
 	if (LauncherCanSave && SusamuneIniNeedsWrite())
 	{
 		// First run on this card: author [nintendont] so the keys are there to
@@ -1838,8 +1841,8 @@ int main(int argc, char **argv)
 	{
 		char warning[128];
 		snprintf(warning, sizeof(warning),
-			 "Warning: %s:/susamune.ini is not writable.\nSettings cannot be saved.",
-			 GetRootDevice());
+			 "Warning: %s:%s is not writable.\nSettings cannot be saved.",
+			 GetRootDevice(), SUSAMUNE_INI_PATH);
 		ShowMessageScreen(warning);
 		usleep(2500000);
 	}
@@ -2282,12 +2285,15 @@ int main(int argc, char **argv)
 	srand (time (0));
 	SetFilePatches();
 
-	// Last disc/FAT read into the loader-only buffer. The payload is flushed
-	// before its ready header and survives the handoff as the ghost record slot.
+	// Sunshine-specific disc scanning stays disabled until a GLMJ01 asset
+	// pipeline has been designed and verified.
+#ifndef LAUNCHER_DISABLE_SUSAMUNE_PATCH
 	SusamuneStageShadowAsset(GetRootDevice(), ncfg->GamePath, CurDICMD,
 		ISOShift, wiiVCInternal);
+#endif
 
-	//stage mod_<region>.bin for this disc; the kernel copies it into MEM1
+	// This still clears the staging header. GLMJ is deliberately absent from
+	// the old GMS payload table, so no file can be loaded in bootstrap builds.
 	SusamuneLoadMod(ncfg->GameID);
 	
 	// More SMC stuff

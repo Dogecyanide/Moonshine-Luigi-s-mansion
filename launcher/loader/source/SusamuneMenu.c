@@ -36,6 +36,7 @@ anyway, and at 60 Hz over a handful of text rows the cost is invisible.
 #include "SusamuneMenu.h"
 #include "ff_utf8.h"
 #include "diskio.h"
+#include "susamune/susamune_cfg.h"
 
 // Grey, for options and devices that exist but cannot be used here.
 #define DARK_GRAY 0x666666FF
@@ -48,7 +49,6 @@ static const char kPathUnset[] = "<not set - press A>";
 enum
 {
 	ROW_LAUNCH = 0,
-	ROW_VERSION,
 	ROW_PATH,
 	ROW_SETTINGS,
 
@@ -57,7 +57,7 @@ enum
 
 // Vertical layout. The header occupies rows 0-2 at MENU_POS_Y.
 #define MAIN_Y_LAUNCH   (MENU_POS_Y + 20*6)
-#define MAIN_Y_VERSION  (MENU_POS_Y + 20*8)
+#define MAIN_Y_TARGET   (MENU_POS_Y + 20*8)
 #define MAIN_Y_PATH     (MENU_POS_Y + 20*9)
 #define MAIN_Y_SETTINGS (MENU_POS_Y + 20*10)
 #define MAIN_Y_ERROR    (MENU_POS_Y + 20*12)
@@ -216,15 +216,15 @@ static bool SaveIfDirty(void)
 	{
 		// Non-fatal: the user's choices still apply to this boot.
 		snprintf(ErrorLine, sizeof(ErrorLine),
-			 "Settings were not saved: %s:/susamune.ini is not writable",
-			 LauncherDev);
+			 "Settings were not saved: %s:%s is not writable",
+			 LauncherDev, SUSAMUNE_INI_PATH);
 		return false;
 	}
 	if (SusamuneIniSave(LauncherDev) != FR_OK)
 	{
 		// Non-fatal: the user's choices still apply to this boot.
 		snprintf(ErrorLine, sizeof(ErrorLine),
-			 "Could not write %s:/susamune.ini", LauncherDev);
+			 "Could not write %s:%s", LauncherDev, SUSAMUNE_INI_PATH);
 		CanSave = false;
 		return false;
 	}
@@ -790,16 +790,13 @@ static const char *const kHelpForceProgressive[] =
 {
 	"Force games to render in 480p.",
 	"",
-	"For PAL Super Mario Sunshine this also patches the game's",
-	"progressive-mode check using the method from Swiss.",
-	"",
 	"Requires component video or a compatible digital adapter.",
 	NULL
 };
 static const char *const kHelpDisableRumble[] =
 {
-	"Keep Super Mario Sunshine's controller rumble disabled",
-	"automatically on every launch.",
+	"Keep controller rumble disabled automatically on every",
+	"launch.",
 	"",
 	"This changes only the motor output. Controller input and",
 	"Native Control support are unaffected.",
@@ -1207,9 +1204,8 @@ static void DrawMainMenu(int pos)
 	PrintCenter(BLACK, MAIN_Y_LAUNCH, "Launch Game%s",
 		    pos == ROW_LAUNCH ? " " ARROW_LEFT : "");
 
-	PrintCenter(BLACK, MAIN_Y_VERSION, "Version: %s%s",
-		    SusaVersionName(gIni.version),
-		    pos == ROW_VERSION ? " " ARROW_LEFT : "");
+	PrintCenter(BLACK, MAIN_Y_TARGET, "Target: %s",
+		    SusaVersionName(gIni.version));
 
 	if (pathSet)
 	{
@@ -1296,13 +1292,6 @@ void SusamuneMenuRun(const char *launcherDev, bool canSave)
 						ApplyToNinCFG();
 						return;
 					}
-					break;
-
-				case ROW_VERSION:
-					gIni.version = (u8)((gIni.version + 1) % SUSA_VER_COUNT);
-					IniDirty = true;
-					ErrorLine[0] = '\0';
-					BlinkFrames = 0;
 					break;
 
 				case ROW_PATH:
