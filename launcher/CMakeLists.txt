@@ -30,6 +30,9 @@ get_filename_component(_repo_root "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(LAUNCHER_SCRIPTS_DIR "${_repo_root}/scripts" CACHE PATH "repo scripts/ dir")
 set(LAUNCHER_DEFAULT_SOURCE "di" CACHE STRING "meta.xml default load source (di/sd/usb)")
 set(LAUNCHER_VERSION "" CACHE STRING "meta.xml version override")
+set(LAUNCHER_OUTPUT_ZIP "" CACHE FILEPATH "canonical HBC app package")
+set(LAUNCHER_VERSIONED_OUTPUT_ZIP "" CACHE FILEPATH
+    "optional version-labelled copy of the HBC app package")
 set(LAUNCHER_TEST_LOG "" CACHE FILEPATH "tester log included in the HBC app")
 set(LAUNCHER_CHANGELOG "" CACHE FILEPATH "changelog included in the HBC app")
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable game injection" ON)
@@ -135,6 +138,14 @@ if(LAUNCHER_OUTPUT_ZIP)
     if(LAUNCHER_CHANGELOG)
         set(_changelog_args --changelog "${LAUNCHER_CHANGELOG}")
     endif()
+    set(_package_byproducts "${LAUNCHER_OUTPUT_ZIP}")
+    set(_versioned_copy_command "")
+    if(LAUNCHER_VERSIONED_OUTPUT_ZIP)
+        list(APPEND _package_byproducts "${LAUNCHER_VERSIONED_OUTPUT_ZIP}")
+        set(_versioned_copy_command
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${LAUNCHER_OUTPUT_ZIP}" "${LAUNCHER_VERSIONED_OUTPUT_ZIP}")
+    endif()
     add_custom_target(package ALL
         COMMAND "${LAUNCHER_PYTHON}" "${LAUNCHER_SCRIPTS_DIR}/package_launcher.py"
             --boot-dol "${_boot_dol}"
@@ -144,7 +155,9 @@ if(LAUNCHER_OUTPUT_ZIP)
             ${_test_log_args}
             ${_changelog_args}
             ${_mod_bin_args}
-        COMMENT "Packaging launcher HBC app zip"
+        ${_versioned_copy_command}
+        BYPRODUCTS ${_package_byproducts}
+        COMMENT "Packaging launcher HBC app zips"
         VERBATIM)
     add_dependencies(package wii)
 endif()

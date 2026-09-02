@@ -127,6 +127,20 @@ set(MAP_FILE "${CMAKE_SOURCE_DIR}/maps/${VERS_PRIMARY}.map")
 endif()
 
 set(LAUNCHER_ZIP "${CMAKE_BINARY_DIR}/moonshine_luigis_mansion_launcher.zip")
+
+# Keep the stable filename for scripts and release automation, and also emit a
+# version-labelled copy for hardware testers.  Deriving the name here makes a
+# LAUNCHER_VERSION bump automatically produce a new, unambiguous package.
+string(STRIP "${LAUNCHER_VERSION}" _launcher_version_slug)
+string(REGEX REPLACE "[^A-Za-z0-9._-]+" "-"
+    _launcher_version_slug "${_launcher_version_slug}")
+string(REGEX REPLACE "^[._-]+" "" _launcher_version_slug "${_launcher_version_slug}")
+string(REGEX REPLACE "[._-]+$" "" _launcher_version_slug "${_launcher_version_slug}")
+if(NOT _launcher_version_slug)
+    set(_launcher_version_slug "unknown")
+endif()
+set(LAUNCHER_VERSIONED_ZIP
+    "${CMAKE_BINARY_DIR}/Moonshine-Luigis-Mansion-${_launcher_version_slug}.zip")
 set(MOD_BINS "")
 
 # The first Luigi's Mansion payload is deliberately separate from the inherited
@@ -489,6 +503,7 @@ ExternalProject_Add(nintendont_launcher
         "-DLAUNCHER_SCRIPTS_DIR=${CMAKE_SOURCE_DIR}/scripts"
         "-DSUSAMUNE_MOD_BINS=${_mod_bins_arg}"
         "-DLAUNCHER_OUTPUT_ZIP=${LAUNCHER_ZIP}"
+        "-DLAUNCHER_VERSIONED_OUTPUT_ZIP=${LAUNCHER_VERSIONED_ZIP}"
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
         "-DLAUNCHER_VERSION=${LAUNCHER_VERSION}"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${_launcher_disable_patch}"

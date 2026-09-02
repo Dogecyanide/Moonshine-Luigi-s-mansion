@@ -5,15 +5,16 @@ revision (`GLMJ01`, revision 0). It reserves the Moonshine 512 KiB MEM1 window
 at `0x804B8400-0x80538400` and renders a heap report directly into LM's copied
 640x480 YUYV framebuffer with the retail `JUTDirectPrint` bitmap renderer. It
 does not depend on a resource font, heap allocation, projection, or scene GX
-state. A raw checkerboard at the upper-right remains visible even if the text
-renderer is unavailable. The launcher authenticates the clean DOL layout and
+state. The panel and raw checkerboard are inset from the top to survive normal
+capture overscan; the checkerboard remains visible even if the text renderer is
+unavailable. The launcher authenticates the clean DOL layout and
 every hook word before it copies or patches anything; another revision runs
 unmodified.
 
 The five overlay rows are:
 
 ```text
-LM MEM DIAG 0.2.1 INJECTED F:<floor> C:<canary> H:<heap check>
+LM MEM DIAG 0.2.2 INJECTED F:<floor> C:<canary> H:<heap check>
 ROOT <root> <start>-<end> <size KiB>
 SYS  <system> L/T/M <largest>/<total>/<minimum total KiB>
 GAME <game>   L/T/M <largest>/<total>/<minimum total KiB>

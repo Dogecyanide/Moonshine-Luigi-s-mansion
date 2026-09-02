@@ -36,6 +36,8 @@ const u32 kXfbWidth = 640u;
 const u32 kXfbHeight = 480u;
 const u32 kXfbRowBytes = kXfbWidth * 2u;
 const u32 kXfbSize = kXfbRowBytes * kXfbHeight;
+const u16 kPanelTop = 8u;      // JUT logical rows: 16 physical XFB rows.
+const u32 kHeartbeatTop = 16u; // Raw YUYV path uses physical XFB rows.
 const u32 kCanary[4] = {
     0x474C4D4Au,  // GLMJ
     0x4D454D31u,  // MEM1
@@ -52,6 +54,8 @@ static_assert(kCanaryAddr >=
               "diagnostic canary must stay in the reserved scratch tail");
 static_assert(kCanaryAddr + sizeof(kCanary) <= kModEnd,
               "diagnostic canary exceeds the reserved mod window");
+static_assert(kHeartbeatTop + 16u <= kXfbHeight,
+              "diagnostic heartbeat exceeds the framebuffer");
 
 typedef void (*VoidFn)();
 typedef void (*GXCopyDispFn)(void *, bool);
@@ -239,10 +243,10 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         kDirectPrintChangeFrameBufferAddr)(directPrint, xfb, kXfbWidth,
                                             kXfbHeight);
     reinterpret_cast<DirectPrintEraseFn>(kDirectPrintEraseAddr)(
-        directPrint, 0, 0, 320, 58);
+        directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
-        directPrint, 2, 2,
-        "LM MEM DIAG 0.2.1 INJECTED F:%s C:%s H:%s\n"
+        directPrint, 2, kPanelTop + 2u,
+        "LM MEM DIAG 0.2.2 INJECTED F:%s C:%s H:%s\n"
         "ROOT %08lX %08lX-%08lX %luK\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
         "GAME %08lX L/T/M %lu/%lu/%luK\n"
@@ -269,11 +273,13 @@ void drawRawHeartbeat(void *xfb, bool directPrintReady) {
     for (u32 y = 0; y < 16u; ++y) {
         for (u32 x = 0; x < 16u; ++x) {
             const bool checker = ((x >> 2) ^ (y >> 2)) & 1u;
-            words[y * stride + xPair + x] =
+            words[(kHeartbeatTop + y) * stride + xPair + x] =
                 (checker == directPrintReady) ? white : black;
         }
     }
-    reinterpret_cast<CacheRangeFn>(kDCFlushRangeAddr)(xfb,
+    void *const heartbeatStart = reinterpret_cast<u8 *>(xfb) +
+                                 kHeartbeatTop * kXfbRowBytes;
+    reinterpret_cast<CacheRangeFn>(kDCFlushRangeAddr)(heartbeatStart,
                                                        16u * kXfbRowBytes);
 }
 

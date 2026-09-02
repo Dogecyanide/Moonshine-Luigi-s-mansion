@@ -35,7 +35,7 @@
             "cacheVariables": {
                 "LM_BOOTSTRAP": "ON",
                 "LM_DIAGNOSTIC": "ON",
-                "LAUNCHER_VERSION": "MEM1 Diagnostic 0.2.1"
+                "LAUNCHER_VERSION": "MEM1 Diagnostic 0.2.2"
             },
             "hidden": false
         }

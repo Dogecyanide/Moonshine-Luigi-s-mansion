@@ -49,11 +49,16 @@ cmake --preset release_console
 cmake --build --preset console
 ```
 
-The result is:
+The build emits a version-labelled tester package plus a stable compatibility
+name:
 
 ```text
+build/Moonshine-Luigis-Mansion-Bootstrap-0.1.0.zip
 build/moonshine_luigis_mansion_launcher.zip
 ```
+
+Both ZIPs are byte-identical. Use the version-labelled file when sharing a
+build; every future `LAUNCHER_VERSION` automatically gets its own filename.
 
 Extract it so the SD card contains:
 
