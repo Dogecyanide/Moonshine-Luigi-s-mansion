@@ -1899,6 +1899,12 @@ int main(int argc, char **argv)
 		ClearScreen();
 	}
 
+#ifdef LAUNCHER_ENABLE_DIAGNOSTIC_LOG
+	// This build is meant for one capture-card/SD round trip.  Keep a kernel
+	// trace as an independent proof of staging and authenticated hook install.
+	ncfg->Config |= NIN_CFG_LOG;
+#endif
+
 //Init DI and set correct ID if needed
 	u32 CurDICMD = 0;
 	if( memcmp(ncfg->GamePath, "di", 3) == 0 )

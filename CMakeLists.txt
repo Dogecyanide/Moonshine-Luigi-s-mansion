@@ -493,6 +493,7 @@ ExternalProject_Add(nintendont_launcher
         "-DLAUNCHER_VERSION=${LAUNCHER_VERSION}"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${_launcher_disable_patch}"
         "-DLAUNCHER_ENABLE_SUNSHINE_ASSETS=${_launcher_enable_sunshine_assets}"
+        "-DLAUNCHER_ENABLE_DIAGNOSTIC_LOG=${LM_DIAGNOSTIC}"
     DEPENDS ${_launcher_dependencies} launcher_build_id
     BUILD_ALWAYS ON
     INSTALL_COMMAND ""

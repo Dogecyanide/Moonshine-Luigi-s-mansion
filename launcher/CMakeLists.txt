@@ -41,6 +41,8 @@ endif()
 option(LAUNCHER_ENABLE_SUNSHINE_ASSETS
     "Enable Sunshine-only ghost directory and model staging"
     ${_sunshine_assets_default})
+option(LAUNCHER_ENABLE_DIAGNOSTIC_LOG
+    "Force Nintendont's SD debug log for a hardware diagnostic build" OFF)
 
 # mod_<tag>.bin files to ship inside the HBC app dir. Empty for a standalone
 # launcher build: the kernel then finds no staged blob at boot and runs the game
@@ -107,6 +109,7 @@ ExternalProject_Add(wii
         "-DLAUNCHER_BOOT_DOL=${_boot_dol}"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${LAUNCHER_DISABLE_SUSAMUNE_PATCH}"
         "-DLAUNCHER_ENABLE_SUNSHINE_ASSETS=${LAUNCHER_ENABLE_SUNSHINE_ASSETS}"
+        "-DLAUNCHER_ENABLE_DIAGNOSTIC_LOG=${LAUNCHER_ENABLE_DIAGNOSTIC_LOG}"
         ${_common_args}
     DEPENDS ppc arm
     BUILD_ALWAYS ON

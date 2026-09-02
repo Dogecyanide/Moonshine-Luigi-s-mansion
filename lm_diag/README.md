@@ -2,24 +2,34 @@
 
 This payload is the first game-side test for the Japanese Luigi's Mansion
 revision (`GLMJ01`, revision 0). It reserves the Moonshine 512 KiB MEM1 window
-at `0x804B8400-0x80538400` and renders a heap report with LM's retail font.
-The launcher authenticates the clean DOL layout and every hook word before it
-copies or patches anything; another revision runs unmodified.
+at `0x804B8400-0x80538400` and renders a heap report directly into LM's copied
+640x480 YUYV framebuffer with the retail `JUTDirectPrint` bitmap renderer. It
+does not depend on a resource font, heap allocation, projection, or scene GX
+state. A raw checkerboard at the upper-right remains visible even if the text
+renderer is unavailable. The launcher authenticates the clean DOL layout and
+every hook word before it copies or patches anything; another revision runs
+unmodified.
 
 The five overlay rows are:
 
 ```text
-LM MEM F:<floor> C:<canary> H:<heap check>
-R <root> <start>-<end> <size KiB>
-S <system> L/T/m <largest>/<total>/<minimum total KiB>
-G <game>   L/T/m <largest>/<total>/<minimum total KiB>
-C <current> g<group> A <raw low>><raised low>-<initial high>
+LM MEM DIAG 0.2 INJECTED F:<floor> C:<canary> H:<heap check>
+ROOT <root> <start>-<end> <size KiB>
+SYS  <system> L/T/M <largest>/<total>/<minimum total KiB>
+GAME <game>   L/T/M <largest>/<total>/<minimum total KiB>
+CUR <current> G<group> A <raw low>><raised low> H<initial high>
 ```
 
 `WAIT` means that the relevant heap has not existed long enough to test.
 `OK` means the condition has been observed and remains valid. `BAD` is latched
 after a real floor, canary, or `JKRExpHeap::check` failure; a normal room-load
 gap does not turn the heap check bad.
+
+Diagnostic packages also force Nintendont's `/ndebug.log` on the game-source
+device (the SD card for the current `path_jp=sd:` setup). It records payload
+validation, the observed DOL tuple, every preflight word, and successful hook
+installation, giving an independent answer if the capture contains no
+checkerboard.
 
 For a useful hardware pass, capture the title screen, an active room after a
 few minutes, a room transition on the same floor, a floor transition, and the

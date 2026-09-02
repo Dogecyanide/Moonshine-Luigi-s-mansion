@@ -4109,46 +4109,87 @@ static const struct SusamuneModHeader *SusamuneModStaged(void)
 
 	if (hdr->magic != SUSAMUNE_MOD_MAGIC ||
 			hdr->version != SUSAMUNE_MOD_VERSION_FOR_GAME_ID(GAME_ID))
+	{
+		dbgprintf("Patch:Mod stage rejected: magic/version %08X/%u\r\n",
+			hdr->magic, hdr->version);
 		return NULL;
+	}
 	if (hdr->gameId != GAME_ID)
+	{
+		dbgprintf("Patch:Mod stage rejected: game %08X != %08X\r\n",
+			hdr->gameId, GAME_ID);
 		return NULL;
+	}
 	if (GAME_ID == SUSAMUNE_MOD_GAME_ID_LMJ &&
 			(GAME_ID6 != 0x3031u || read32(4) != 0x30310000u))
+	{
+		dbgprintf("Patch:Mod stage rejected: GLMJ disc suffix %04X/%08X\r\n",
+			GAME_ID6, read32(4));
 		return NULL;
+	}
 	if (hdr->baseAddr != SUSAMUNE_MOD_BASE_FOR_GAME_ID(GAME_ID)
 			|| hdr->arenaReserve != SUSAMUNE_ARENA_RESERVE_SIZE
 			|| hdr->codeSize > SUSAMUNE_MOD_BLOB_MAX_SIZE)
+	{
+		dbgprintf("Patch:Mod stage rejected: base/reserve/code %08X/%X/%X\r\n",
+			hdr->baseAddr, hdr->arenaReserve, hdr->codeSize);
 		return NULL;
+	}
 
 	// The file is untrusted input off an SD card: refuse anything whose parts
 	// do not add up, rather than memcpy'ing a bogus length into MEM1.
 	if (hdr->codeSize > SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE -
 			SUSAMUNE_MOD_HEADER_SIZE
 			|| (hdr->codeSize & 3))
+	{
+		dbgprintf("Patch:Mod stage rejected: malformed code size %X\r\n",
+			hdr->codeSize);
 		return NULL;
+	}
 	codeEnd = SUSAMUNE_MOD_HEADER_SIZE + hdr->codeSize;
 	recordSize = hdr->version == SUSAMUNE_MOD_VERSION_AUTH ? 12u : 8u;
 	footerSize = hdr->version == SUSAMUNE_MOD_VERSION_AUTH ?
 		SUSAMUNE_MOD_AUTH_FOOTER_SIZE : 0u;
 	if (codeEnd > SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE - footerSize)
+	{
+		dbgprintf("Patch:Mod stage rejected: code end %X\r\n", codeEnd);
 		return NULL;
+	}
 	if (hdr->writeCount >
 			(SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE - codeEnd - footerSize) /
 			recordSize)
+	{
+		dbgprintf("Patch:Mod stage rejected: write count %u\r\n",
+			hdr->writeCount);
 		return NULL;
+	}
 	recordsEnd = codeEnd + hdr->writeCount * recordSize;
 	if (hdr->fileSize != recordsEnd + footerSize)
+	{
+		dbgprintf("Patch:Mod stage rejected: file size %X != %X\r\n",
+			hdr->fileSize, recordsEnd + footerSize);
 		return NULL;
+	}
 	if (hdr->fileSize > SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE)
+	{
+		dbgprintf("Patch:Mod stage rejected: oversized file %X\r\n",
+			hdr->fileSize);
 		return NULL;
+	}
 
 	if (hdr->version == SUSAMUNE_MOD_VERSION_AUTH)
 	{
 		sync_before_read((void*)hdr, hdr->fileSize);
 		footer = (const u32*)((const u8*)hdr + recordsEnd);
 		if (SusamuneBytesCrc32(hdr, recordsEnd) != *footer)
+		{
+			dbgprintf("Patch:Mod stage rejected: CRC %08X != %08X\r\n",
+				SusamuneBytesCrc32(hdr, recordsEnd), *footer);
 			return NULL;
+		}
 	}
+	dbgprintf("Patch:Mod stage valid: game %08X base %08X code %X writes %u\r\n",
+		hdr->gameId, hdr->baseAddr, hdr->codeSize, hdr->writeCount);
 
 	return hdr;
 }
@@ -4374,6 +4415,8 @@ void PatchSusamune(void)
 
 	if (hdr == NULL)
 		return;
+	dbgprintf("Patch:Susamune DOL tuple %08X/%08X/%08X\r\n",
+		DOLSize, DOLMinOff, DOLMaxOff);
 	if (hdr->version == SUSAMUNE_MOD_VERSION_AUTH &&
 			GAME_ID == SUSAMUNE_MOD_GAME_ID_LMJ &&
 			(DOLSize != 0x00394940u || DOLMinOff != 0x00003100u ||
@@ -4399,6 +4442,7 @@ void PatchSusamune(void)
 			u32 target = encoded & ~3u;
 			u32 flags = encoded & 3u;
 			u32 physical;
+			u32 observed;
 			if ((flags & ~SUSAMUNE_MOD_WRITE_FLAG_CHECK_ONLY) != 0 ||
 					target < 0x80003100u || target > 0x817FFFFCu)
 			{
@@ -4408,7 +4452,10 @@ void PatchSusamune(void)
 			}
 			physical = target & 0x7FFFFFFFu;
 			sync_before_read((void*)physical, 4);
-			if (read32(physical) != writes[i * stride + 1])
+			observed = read32(physical);
+			dbgprintf("Patch:GLMJ preflight %08X got %08X expect %08X flags %u\r\n",
+				target, observed, writes[i * stride + 1], flags);
+			if (observed != writes[i * stride + 1])
 			{
 				dbgprintf("Patch:Preflight mismatch at 0x%08X; mod refused\r\n",
 					target);

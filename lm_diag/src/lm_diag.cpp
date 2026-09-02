@@ -14,15 +14,15 @@ const u32 kLMRootHeapAddr = 0x804A0B90u;
 const u32 kLMSystemHeapAddr = 0x804A0B94u;
 const u32 kLMGameHeapAddr = 0x804A0B98u;
 const u32 kJKRCurrentHeapAddr = 0x804A1FF4u;
-const u32 kPersistentPrintAddr = 0x804A0FE8u;
+const u32 kDirectPrintPtrAddr = 0x804A2088u;
 
-const u32 kLMChangeFrameBufferAddr = 0x800077E8u;
-const u32 kLMDefaultOrthoViewAddr = 0x800078FCu;
-const u32 kGlobalFontAddr = 0x803C3394u;
-const u32 kJ2DPrintCtorAddr = 0x801A97ECu;
-const u32 kJ2DPrintDtorAddr = 0x801A9940u;
-const u32 kJ2DPrintPrintAddr = 0x801A9C04u;
-const u32 kFontSetGXAddr = 0x801D11ACu;
+const u32 kGXCopyDispAddr = 0x801F045Cu;
+const u32 kGXDrawDoneAddr = 0x801EF5F0u;
+const u32 kDCInvalidateRangeAddr = 0x801D5DF4u;
+const u32 kDCFlushRangeAddr = 0x801D5E24u;
+const u32 kDirectPrintEraseAddr = 0x801D4294u;
+const u32 kDirectPrintChangeFrameBufferAddr = 0x801D4830u;
+const u32 kDirectPrintDrawStringAddr = 0x801D49F8u;
 const u32 kExpHeapLargestFreeAddr = 0x801CA4D0u;
 const u32 kExpHeapTotalFreeAddr = 0x801CA53Cu;
 const u32 kExpHeapCheckAddr = 0x801CA61Cu;
@@ -32,6 +32,10 @@ const u32 kModEnd = SUSAMUNE_MOD_BASE_LMJ + SUSAMUNE_MOD_REGION_SIZE;
 const u32 kCanaryAddr = kModEnd - 0x10u;
 const u32 kMem1Start = 0x80000000u;
 const u32 kMem1End = 0x81800000u;
+const u32 kXfbWidth = 640u;
+const u32 kXfbHeight = 480u;
+const u32 kXfbRowBytes = kXfbWidth * 2u;
+const u32 kXfbSize = kXfbRowBytes * kXfbHeight;
 const u32 kCanary[4] = {
     0x474C4D4Au,  // GLMJ
     0x4D454D31u,  // MEM1
@@ -50,10 +54,11 @@ static_assert(kCanaryAddr + sizeof(kCanary) <= kModEnd,
               "diagnostic canary exceeds the reserved mod window");
 
 typedef void (*VoidFn)();
-typedef void (*J2DPrintCtorFn)(void *, void *, s32);
-typedef void (*J2DPrintDtorFn)(void *, s16);
-typedef void (*J2DPrintPrintFn)(void *, s32, s32, const char *, ...);
-typedef void (*FontSetGXFn)(void *);
+typedef void (*GXCopyDispFn)(void *, bool);
+typedef void (*CacheRangeFn)(void *, u32);
+typedef void (*DirectPrintEraseFn)(void *, u16, u16, u16, u16);
+typedef void (*DirectPrintChangeFrameBufferFn)(void *, void *, u16, u16);
+typedef void (*DirectPrintDrawStringFn)(void *, u16, u16, const char *, ...);
 typedef u32 (*ExpHeapSizeFn)(void *);
 typedef bool (*ExpHeapCheckFn)(void *);
 
@@ -209,13 +214,16 @@ const char *status(bool ready, bool ok) {
     return !ready ? "WAIT" : ok ? "OK" : "BAD";
 }
 
-void drawPanel(void *print, s32 x, s32 y, u32 color,
-               const HeapSample &system, const HeapSample &game) {
-    // These offsets are from GLMJ01's retail J2DPrint::private_initiate at
-    // 0x801A998C, not the inherited Sunshine header's approximate layout.
-    *reinterpret_cast<u32 *>(reinterpret_cast<u8 *>(print) + 0x3Cu) = color;
-    *reinterpret_cast<u32 *>(reinterpret_cast<u8 *>(print) + 0x40u) = color;
+u32 displayKiB(u32 bytes) {
+    const u32 kib = bytes >> 10;
+    // JUTDirectPrint's retail formatter owns a 256-byte buffer.  Valid LM
+    // heaps are far below this cap; clamping also keeps a corrupted return
+    // value from lengthening the diagnostic string beyond that buffer.
+    return kib <= 99999u ? kib : 99999u;
+}
 
+void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
+               const HeapSample &game) {
     const u32 root = readWord(kLMRootHeapAddr);
     const bool rootReadable = isExpHeapPointer(root);
     const u32 rootStart = rootReadable ? readWord(root + 0x30u) : 0;
@@ -224,19 +232,62 @@ void drawPanel(void *print, s32 x, s32 y, u32 color,
     const u32 current = readWord(kJKRCurrentHeapAddr);
     const u32 group = isExpHeapPointer(current) ? readByte(current + 0x69u) : 0;
 
-    reinterpret_cast<J2DPrintPrintFn>(kJ2DPrintPrintAddr)(
-        print, x, y,
-        "LM MEM F:%s C:%s H:%s\n"
-        "R %08lX %08lX-%08lX %luK\n"
-        "S %08lX L/T/m %lu/%lu/%luK\n"
-        "G %08lX L/T/m %lu/%lu/%luK\n"
-        "C %08lX g%lu A %08lX>%08lX-%08lX",
+    // JUTDirectPrint writes its built-in 6x7 font straight into the copied
+    // YUYV framebuffer.  It has no resource-font or heap dependency.  At a
+    // 640-pixel XFB it treats these as 320x240 logical coordinates.
+    reinterpret_cast<DirectPrintChangeFrameBufferFn>(
+        kDirectPrintChangeFrameBufferAddr)(directPrint, xfb, kXfbWidth,
+                                            kXfbHeight);
+    reinterpret_cast<DirectPrintEraseFn>(kDirectPrintEraseAddr)(
+        directPrint, 0, 0, 320, 58);
+    reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
+        directPrint, 2, 2,
+        "LM MEM DIAG 0.2 INJECTED  F:%s C:%s H:%s\n"
+        "ROOT %08lX %08lX-%08lX %luK\n"
+        "SYS  %08lX L/T/M %lu/%lu/%luK\n"
+        "GAME %08lX L/T/M %lu/%lu/%luK\n"
+        "CUR %08lX G%lu A %08lX>%08lX H%08lX",
         status(sFloorObserved, sFloorOk), status(sCanaryReady, sCanaryOk),
         status(sHeapCheckReady, sHeapCheckOk), root, rootStart, rootEnd,
-        rootSize >> 10, system.pointer, system.largestFree >> 10,
-        system.totalFree >> 10, sSystemMinimum >> 10, game.pointer,
-        game.largestFree >> 10, game.totalFree >> 10, sGameMinimum >> 10,
-        current, group, sInitialArenaLo, sRaisedArenaLo, sInitialArenaHi);
+        displayKiB(rootSize), system.pointer,
+        displayKiB(system.largestFree), displayKiB(system.totalFree),
+        displayKiB(sSystemMinimum), game.pointer,
+        displayKiB(game.largestFree), displayKiB(game.totalFree),
+        displayKiB(sGameMinimum), current, group, sInitialArenaLo,
+        sRaisedArenaLo, sInitialArenaHi);
+}
+
+void drawRawHeartbeat(void *xfb, bool directPrintReady) {
+    // This block is deliberately independent of JUTDirectPrint.  If the text
+    // path ever fails, a capture still proves that the post-copy hook ran.
+    // The alternating neutral YUYV pairs are safe on every NTSC capture path.
+    volatile u32 *const words = reinterpret_cast<volatile u32 *>(xfb);
+    const u32 white = 0xEB80EB80u;
+    const u32 black = 0x10801080u;
+    const u32 xPair = (kXfbWidth / 2u) - 16u;
+    const u32 stride = kXfbWidth / 2u;
+    for (u32 y = 0; y < 16u; ++y) {
+        for (u32 x = 0; x < 16u; ++x) {
+            const bool checker = ((x >> 2) ^ (y >> 2)) & 1u;
+            words[y * stride + xPair + x] =
+                (checker == directPrintReady) ? white : black;
+        }
+    }
+    reinterpret_cast<CacheRangeFn>(kDCFlushRangeAddr)(xfb,
+                                                       16u * kXfbRowBytes);
+}
+
+void sampleDiagnostic(HeapSample *system, HeapSample *game) {
+    sampleFloorAndCanary();
+    *system = sampleHeap(kLMSystemHeapAddr);
+    *game = sampleHeap(kLMGameHeapAddr);
+    if (system->valid) {
+        updateMinimum(system->totalFree, &sSystemMinimum, &sSystemSampled);
+    }
+    if (game->valid) {
+        updateMinimum(game->totalFree, &sGameMinimum, &sGameSampled);
+    }
+    sampleHeapChecks(*system, *game);
 }
 
 }  // namespace
@@ -259,51 +310,36 @@ extern "C" void *getArenaLo() {
     return reinterpret_cast<void *>(arenaLo);
 }
 
-// Replaces the sole per-frame call to LMChangeFrameBuffer.  GLMJ01 executes
-// this after scene drawing and immediately before GXCopyDisp, so drawing here
-// reaches the EFB normally without a GPU stall or CPU access to either XFB.
-extern "C" void diagnosticFrame() {
-    sampleFloorAndCanary();
-    const HeapSample system = sampleHeap(kLMSystemHeapAddr);
-    const HeapSample game = sampleHeap(kLMGameHeapAddr);
-    if (system.valid) {
-        updateMinimum(system.totalFree, &sSystemMinimum, &sSystemSampled);
+// Wraps both GLMJ01 GXCopyDisp call sites.  The original copy is allowed to
+// complete before touching the XFB, so this path cannot depend on the EFB's
+// projection, vertex descriptors, resource fonts, or scene draw order.
+extern "C" void diagnosticCopyDisp(void *xfb, bool clear) {
+    HeapSample system;
+    HeapSample game;
+    sampleDiagnostic(&system, &game);
+
+    reinterpret_cast<GXCopyDispFn>(kGXCopyDispAddr)(xfb, clear);
+    reinterpret_cast<VoidFn>(kGXDrawDoneAddr)();
+
+    const u32 rawAddress = reinterpret_cast<u32>(xfb);
+    const u32 segment = rawAddress & 0xC0000000u;
+    const u32 physical = rawAddress & 0x3FFFFFFFu;
+    if ((segment != 0x80000000u && segment != 0xC0000000u) ||
+        (physical & 31u) != 0 || physical < 0x00003100u ||
+        physical > 0x01800000u - kXfbSize) {
+        return;
     }
-    if (game.valid) {
-        updateMinimum(game.totalFree, &sGameMinimum, &sGameSampled);
+    void *const cachedXfb = reinterpret_cast<void *>(kMem1Start | physical);
+    reinterpret_cast<CacheRangeFn>(kDCInvalidateRangeAddr)(cachedXfb,
+                                                            kXfbSize);
+
+    const u32 directPrintAddress = readWord(kDirectPrintPtrAddr);
+    const bool directPrintReady = isMem1Range(directPrintAddress, 0x18u);
+    if (directPrintReady) {
+        drawPanel(reinterpret_cast<void *>(directPrintAddress), cachedXfb,
+                  system, game);
     }
-    sampleHeapChecks(system, game);
-
-    const u32 persistentPrint = readWord(kPersistentPrintAddr);
-    const bool fontReady =
-        isMem1Range(persistentPrint, 0x5Cu) &&
-        readWord(persistentPrint + 4u) == kGlobalFontAddr &&
-        isMem1Pointer(readWord(kGlobalFontAddr + 0x4Cu));
-    if (fontReady) {
-        reinterpret_cast<VoidFn>(kLMDefaultOrthoViewAddr)();
-
-        // The actual GLMJ01 object ends at +0x5C.  Its two-argument
-        // constructor uses the game's already-created 1 KiB printf buffer, so
-        // constructing this private renderer on the stack performs no heap
-        // allocation and cannot disturb the game's persistent J2DPrint state.
-        alignas(4) u8 printStorage[0x5Cu];
-        void *const print = printStorage;
-        reinterpret_cast<J2DPrintCtorFn>(kJ2DPrintCtorAddr)(
-            print, reinterpret_cast<void *>(kGlobalFontAddr), 0);
-        *reinterpret_cast<s32 *>(printStorage + 0x48u) = 13;  // leading
-        *reinterpret_cast<s32 *>(printStorage + 0x50u) = 12;  // glyph width
-        *reinterpret_cast<s32 *>(printStorage + 0x54u) = 12;  // glyph height
-        reinterpret_cast<FontSetGXFn>(kFontSetGXAddr)(
-            reinterpret_cast<void *>(kGlobalFontAddr));
-
-        // A one-pixel black pass keeps the compact white text legible over
-        // bright rooms without requiring a J2D graphics-port object.
-        drawPanel(print, 9, 15, 0x000000FFu, system, game);
-        drawPanel(print, 8, 14, 0xFFFFFFFFu, system, game);
-        reinterpret_cast<J2DPrintDtorFn>(kJ2DPrintDtorAddr)(print, -1);
-    }
-
-    reinterpret_cast<VoidFn>(kLMChangeFrameBufferAddr)();
+    drawRawHeartbeat(cachedXfb, directPrintReady);
 }
 
 #endif  // defined(SUSAMUNE_VERSION_LMJ)

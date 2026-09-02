@@ -26,23 +26,31 @@ patches = [
         "type": PatchType.B,
         "expected": 0x806DFF38,
     },
-    # Replace the sole per-frame LMChangeFrameBuffer call.  The wrapper draws
-    # through LM's persistent retail J2D font resources at the end of the EFB
-    # render, then calls the original presentation routine.  This avoids both
-    # a GXDrawDone stall and CPU cache access to the XFBs.
+    # Wrap both GXCopyDisp calls inside LMChangeFrameBuffer.  They are the two
+    # branches of the retail presenter and both pass the completed XFB in r3.
+    # The wrapper calls the original copy, waits for it, then draws directly
+    # into the 640x480 YUYV buffer with JUTDirectPrint plus a raw heartbeat.
     {
-        "lmj": 0x8000B62C,
-        "sym": "diagnosticFrame",
+        "lmj": 0x8000776C,
+        "sym": "diagnosticCopyDisp",
         "type": PatchType.BL,
-        "expected": 0x4BFFC1BD,
+        "expected": 0x481E8CF1,
+    },
+    {
+        "lmj": 0x80007828,
+        "sym": "diagnosticCopyDisp",
+        "type": PatchType.BL,
+        "expected": 0x481E8C35,
     },
 ]
 
 # Extra clean-DOL signatures that are authenticated but left untouched.  These
-# bind the payload to the complete retail getter and to LM's final
-# JUTDirectPrint framebuffer handoff, not merely to two branch encodings.
+# bind the payload to the complete retail getter, the main-loop presenter call,
+# and LM's final JUTDirectPrint framebuffer handoff, not merely to the three
+# modified instructions.
 checks = [
     {"addr": 0x801D5B60, "expected": 0x4E800020},
+    {"addr": 0x8000B62C, "expected": 0x4BFFC1BD},
     {"addr": 0x80007870, "expected": 0x481CCFC1},
 ]
 
