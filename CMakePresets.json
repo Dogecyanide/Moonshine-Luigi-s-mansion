@@ -29,13 +29,13 @@
         },
         {
             "name": "diagnostic_console",
-            "displayName": "GLMJ01 MEM1 diagnostic launcher",
+            "displayName": "GLMJ01 experimental full-state launcher",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build-lm-diag",
             "cacheVariables": {
                 "LM_BOOTSTRAP": "ON",
                 "LM_DIAGNOSTIC": "ON",
-                "LAUNCHER_VERSION": "MEM1 Diagnostic 0.2.2"
+                "LAUNCHER_VERSION": "Full-State Experimental 0.3.0"
             },
             "hidden": false
         }

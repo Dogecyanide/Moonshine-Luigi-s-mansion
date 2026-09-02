@@ -46,12 +46,18 @@ patches = [
 
 # Extra clean-DOL signatures that are authenticated but left untouched.  These
 # bind the payload to the complete retail getter, the main-loop presenter call,
-# and LM's final JUTDirectPrint framebuffer handoff, not merely to the three
-# modified instructions.
+# LM's final JUTDirectPrint framebuffer handoff, the port-1 PADRead path, and
+# the complete four-instruction JUTException callback setter.
 checks = [
     {"addr": 0x801D5B60, "expected": 0x4E800020},
     {"addr": 0x8000B62C, "expected": 0x4BFFC1BD},
     {"addr": 0x80007870, "expected": 0x481CCFC1},
+    {"addr": 0x801D20B0, "expected": 0x387D0018},
+    {"addr": 0x801D20B4, "expected": 0x48012849},
+    {"addr": 0x801D4124, "expected": 0x800D1594},
+    {"addr": 0x801D4128, "expected": 0x906D1594},
+    {"addr": 0x801D412C, "expected": 0x7C030378},
+    {"addr": 0x801D4130, "expected": 0x4E800020},
 ]
 
 

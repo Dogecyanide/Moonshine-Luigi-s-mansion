@@ -57,7 +57,8 @@ endif()
 # --- Options ---------------------------------------------------------------
 
 option(LM_BOOTSTRAP "Keep the inherited Sunshine game-side pipeline disabled" ON)
-option(LM_DIAGNOSTIC "Build and package the fail-closed GLMJ01 diagnostic payload" OFF)
+option(LM_DIAGNOSTIC
+    "Build and package the fail-closed GLMJ01 state/diagnostic payload" OFF)
 if(LM_DIAGNOSTIC AND NOT LM_BOOTSTRAP)
     message(FATAL_ERROR "LM_DIAGNOSTIC and the inherited Sunshine pipeline are mutually exclusive")
 endif()
@@ -96,7 +97,7 @@ if(LAUNCHER_VERSION STREQUAL "V1.2.0" OR
    LAUNCHER_VERSION MATCHES "^V2\\.1\\.0 Release Candidate [0-9]+")
     unset(LAUNCHER_VERSION CACHE)
 endif()
-set(LAUNCHER_VERSION "Bootstrap 0.1.0" CACHE STRING
+set(LAUNCHER_VERSION "Full-State Experimental 0.3.0" CACHE STRING
     "Version shown in the packaged launcher meta.xml")
 
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
@@ -209,7 +210,7 @@ if(LM_DIAGNOSTIC)
         DEPENDS lm_diag_obj "${LM_DIAG_DIR}/glmj.ld"
                 "${LM_DIAG_DIR}/patches.py"
                 "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
-        COMMENT "Generating authenticated GLMJ01 diagnostic manifest"
+        COMMENT "Generating authenticated GLMJ01 state manifest"
         VERBATIM)
     add_custom_command(
         OUTPUT "${_lm_bin}"

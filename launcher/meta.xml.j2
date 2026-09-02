@@ -4,8 +4,8 @@
 	<author>Dogecyanide, panther03, Nintendont authors</author>
 	<version>{{ version }}</version>
 	<release_date>2026</release_date>
-	<short_description>GLMJ01 savestate research launcher</short_description>
-	<long_description>Moonshine Luigi's Mansion bootstrap for the Japanese GLMJ01 disc.
-{% if regions %}    Bundled payloads: {{ regions | join(", ") | upper }}.{% else %}    No game-side payload is bundled yet; GLMJ01 boots unmodified through the reserved-MEM2 Nintendont base.{% endif %}</long_description>
+	<short_description>Experimental GLMJ01 heap savestates</short_description>
+	<long_description>Clean Japanese GLMJ01 revision 0 only. D-pad Left saves; D-pad Right loads.
+{% if regions %}    Bundled payloads: {{ regions | join(", ") | upper }}. Experimental: begin with same-room tests and keep memory-card data backed up.{% else %}    No game-side payload is bundled.{% endif %}</long_description>
 <ahb_access/>
 </app>

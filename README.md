@@ -6,17 +6,27 @@ Mansion (`GLMJ01`).
 
 ## Current status
 
-This branch is a safe launcher bootstrap, not a playable savestate mod yet.
+`Full-State Experimental 0.3.0` is the first hardware-testable state build.
 
-- The custom Nintendont launcher accepts the Japanese `GLMJ` game code; the
-  sourced and verified disc is `GLMJ01`, revision 0.
-- The Homebrew Channel app is named `Moonshine Luigi's Mansion`.
-- Game-specific injection is compiled out and no `mod_jp.bin` is packaged.
-- Sunshine-only disc scanning and ghost-directory creation are disabled.
-- Luigi's Mansion therefore boots unmodified while the GLMJ01 hook map is
-  being recovered.
-- Moonshine's protected MEM2 layout is preserved for the future snapshot
-  backend.
+- The custom Nintendont launcher accepts only the verified Japanese `GLMJ01`
+  revision-0 executable for injection.
+- A measured 512 KiB MEM1 window holds the LM payload without patching the ISO.
+- One transactional slot uses Moonshine's protected 15.94 MiB MEM2 bank.
+- The slot captures the complete secondary gameplay heap, its allocator and
+  disposer metadata, the verified room/map flag slice, libc RNG state, and a
+  small set of verified scene roots.
+- Save/load is refused while DVD, ARAM, or memory-card work is active, while
+  the heap is unstable, when a slot checksum fails, or when the observed live
+  allocator/resource markers differ from the saved ones.
+- Moonshine's ARM crash writer now accepts LM exception reports and rotates
+  `susamune_crash_a/b.bin` plus readable `.txt` reports on the game-source
+  storage device.
+
+Controls are D-pad Left to save and D-pad Right to load. Start with same-room
+tests. This first build normally rejects a load with `EPOCH` after the room,
+scene, resource, or uncaptured allocator markers change. Those markers are not
+a complete resource fingerprint, and JAudio software state is not reset yet,
+so this is a crash-risk heap-state feasibility test, not cross-room support.
 
 The inherited Sunshine payload remains in the repository as porting reference.
 Its build targets are hidden unless CMake is explicitly configured with
@@ -45,16 +55,16 @@ present:
 
 ```powershell
 python setup_venv.py
-cmake --preset release_console
-cmake --build --preset console
+cmake --preset diagnostic_console
+cmake --build --preset diagnostic
 ```
 
 The build emits a version-labelled tester package plus a stable compatibility
 name:
 
 ```text
-build/Moonshine-Luigis-Mansion-Bootstrap-0.1.0.zip
-build/moonshine_luigis_mansion_launcher.zip
+build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.0.zip
+build-lm-diag/moonshine_luigis_mansion_launcher.zip
 ```
 
 Both ZIPs are byte-identical. Use the version-labelled file when sharing a
@@ -66,23 +76,31 @@ Extract it so the SD card contains:
 apps/moonshine_luigis_mansion/boot.dol
 apps/moonshine_luigis_mansion/icon.png
 apps/moonshine_luigis_mansion/meta.xml
+apps/moonshine_luigis_mansion/mod_lmj.bin
 ```
 
 The launcher stores its own settings in `/moonshine_lm.ini`. No game image is
 included or accepted into this repository; test with a legally dumped Japanese
 disc or ISO.
 
-## Wii bootstrap smoke test
+## Wii experimental-state test
 
-Back up any real memory-card data, install the three packaged files under
-`apps/moonshine_luigis_mansion/`, and launch the app from the Homebrew Channel.
-The menu must show `Japanese (GLMJ01)` as the fixed target and
-`[bootstrap: no payload]` in the build label. Select a clean revision-0 GLMJ01
-disc or image and confirm that Luigi's Mansion reaches gameplay and behaves
-normally through several door transitions and a save/load cycle.
+Back up any real memory-card data, install the four packaged files under
+`apps/moonshine_luigis_mansion/`, and launch a clean revision-0 GLMJ01 image.
+The overlay must say `LM STATE X0.3.0`; wait until `F`, `C`, and `H` are `OK`
+and `ST` is at least 3.
 
-Stop if the target label or bootstrap label differs. At this phase, seeing any
-game-side Moonshine menu or practice feature is a packaging error.
+Press D-pad Left once. `S:SAVED` and a nonzero `SZ` confirm a committed slot.
+Change a visible state in the same room, then press D-pad Right once. A good
+first restore says `S:LOADED`. `BUSY`, `BADCRC`, `BADHEAP`, `EPOCH`, or
+`TOOBIG` is a deliberate refusal and should be photographed with the rest of
+the overlay.
+
+After same-room restores repeat reliably, an adjacent-room attempt should
+normally report `EPOCH`; a load that gets past that gate is explicitly unsafe
+in this build. Photograph any different result. If the game crashes, save the
+newest `susamune_crash_a.txt` or `susamune_crash_b.txt` from the game-source
+device before the next experiment overwrites the older rotating report.
 
 ## Lineage and credits
 

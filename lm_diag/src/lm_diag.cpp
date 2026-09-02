@@ -1,6 +1,8 @@
 #if defined(SUSAMUNE_VERSION_LMJ)
 
 #include "Dolphin/types.h"
+#include "lm_crash.hxx"
+#include "lm_state.hxx"
 #include "susamune/mod_bin.h"
 
 namespace {
@@ -232,7 +234,6 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
     const bool rootReadable = isExpHeapPointer(root);
     const u32 rootStart = rootReadable ? readWord(root + 0x30u) : 0;
     const u32 rootEnd = rootReadable ? readWord(root + 0x34u) : 0;
-    const u32 rootSize = rootReadable ? readWord(root + 0x38u) : 0;
     const u32 current = readWord(kJKRCurrentHeapAddr);
     const u32 group = isExpHeapPointer(current) ? readByte(current + 0x69u) : 0;
 
@@ -246,14 +247,15 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM MEM DIAG 0.2.2 INJECTED F:%s C:%s H:%s\n"
-        "ROOT %08lX %08lX-%08lX %luK\n"
+        "LM STATE X0.3.0 F:%s C:%s H:%s\n"
+        "S:%s ST%lu SZ%luK R%08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
         "GAME %08lX L/T/M %lu/%lu/%luK\n"
         "CUR %08lX G%lu A %08lX>%08lX H%08lX",
         status(sFloorObserved, sFloorOk), status(sCanaryReady, sCanaryOk),
-        status(sHeapCheckReady, sHeapCheckOk), root, rootStart, rootEnd,
-        displayKiB(rootSize), system.pointer,
+        status(sHeapCheckReady, sHeapCheckOk), LMState::statusText(),
+        LMState::stableFrames(), displayKiB(LMState::snapshotKiB() << 10),
+        root, rootStart, rootEnd, system.pointer,
         displayKiB(system.largestFree), displayKiB(system.totalFree),
         displayKiB(sSystemMinimum), game.pointer,
         displayKiB(game.largestFree), displayKiB(game.totalFree),
@@ -326,6 +328,12 @@ extern "C" void diagnosticCopyDisp(void *xfb, bool clear) {
 
     reinterpret_cast<GXCopyDispFn>(kGXCopyDispAddr)(xfb, clear);
     reinterpret_cast<VoidFn>(kGXDrawDoneAddr)();
+
+    // JUT has finished presenting the retail frame and no game thread can
+    // observe a half-copied slot. Crash registration is lazy because LM's
+    // JUTException constructor clears the callback during early boot.
+    LMCrash::init();
+    LMState::tick();
 
     const u32 rawAddress = reinterpret_cast<u32>(xfb);
     const u32 segment = rawAddress & 0xC0000000u;

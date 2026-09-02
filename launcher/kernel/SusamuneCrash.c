@@ -286,28 +286,51 @@ static int WriteText(u32 target)
 			i, Snapshot.gpr[i], i + 1, Snapshot.gpr[i + 1],
 			i + 2, Snapshot.gpr[i + 2], i + 3, Snapshot.gpr[i + 3]));
 
-	Emit(Line, _sprintf(Line,
-		"app=%08X director=%08X heap=%08X context=%u cutscene=%08X\r\n",
-		Snapshot.appAddress, Snapshot.appDirector, Snapshot.appHeap,
-		Snapshot.appContext, Snapshot.cutSceneId));
-	Emit(Line, _sprintf(Line,
-		"scenes prev=%02X/%02X/%04X current=%02X/%02X/%04X next=%02X/%02X/%04X\r\n",
-		Snapshot.prevScene >> 24, Snapshot.prevScene >> 16 & 0xFF,
-		Snapshot.prevScene & 0xFFFF, Snapshot.currentScene >> 24,
-		Snapshot.currentScene >> 16 & 0xFF, Snapshot.currentScene & 0xFFFF,
-		Snapshot.nextScene >> 24, Snapshot.nextScene >> 16 & 0xFF,
-		Snapshot.nextScene & 0xFFFF));
-	Emit(Line, _sprintf(Line,
-		"globals mar_director=%08X mario=%08X camera=%08X ready=%u state_area_episode=%08X\r\n",
-		Snapshot.marDirector, Snapshot.mario, Snapshot.camera,
-		Snapshot.directorReady, Snapshot.directorStateAreaEpisode));
-	Emit(Line, _sprintf(Line,
-		"director game_state=%08X demo_states=%08X collected_shine=%08X\r\n",
-		Snapshot.directorGameState, Snapshot.directorDemoStates,
-		Snapshot.directorCollectedShine));
+	if (Snapshot.gameId == SUSAMUNE_MOD_GAME_ID_LMJ)
+	{
+		Emit(Line, _sprintf(Line,
+			"heaps root=%08X system=%08X game=%08X current=%08X\r\n",
+			Snapshot.appAddress, Snapshot.appDirector, Snapshot.appHeap,
+			Snapshot.appContext));
+		Emit(Line, _sprintf(Line,
+			"lm scene_ptr=%08X scene_id=%08X map=%u game_mode=%08X mission_mode=%08X count=%u\r\n",
+			Snapshot.prevScene, Snapshot.currentScene, Snapshot.nextScene,
+			Snapshot.cutSceneId, Snapshot.marDirector,
+			Snapshot.directorReady));
+		Emit(Line, _sprintf(Line,
+			"dvd outstanding=%u ring_state=%08X current_info=%08X\r\n",
+			Snapshot.mario, Snapshot.camera,
+			Snapshot.directorStateAreaEpisode));
+		Emit(Line, _sprintf(Line,
+			"aram command_count=%u piece_count=%u\r\n",
+			Snapshot.directorGameState, Snapshot.directorDemoStates));
+	}
+	else
+	{
+		Emit(Line, _sprintf(Line,
+			"app=%08X director=%08X heap=%08X context=%u cutscene=%08X\r\n",
+			Snapshot.appAddress, Snapshot.appDirector, Snapshot.appHeap,
+			Snapshot.appContext, Snapshot.cutSceneId));
+		Emit(Line, _sprintf(Line,
+			"scenes prev=%02X/%02X/%04X current=%02X/%02X/%04X next=%02X/%02X/%04X\r\n",
+			Snapshot.prevScene >> 24, Snapshot.prevScene >> 16 & 0xFF,
+			Snapshot.prevScene & 0xFFFF, Snapshot.currentScene >> 24,
+			Snapshot.currentScene >> 16 & 0xFF, Snapshot.currentScene & 0xFFFF,
+			Snapshot.nextScene >> 24, Snapshot.nextScene >> 16 & 0xFF,
+			Snapshot.nextScene & 0xFFFF));
+		Emit(Line, _sprintf(Line,
+			"globals mar_director=%08X mario=%08X camera=%08X ready=%u state_area_episode=%08X\r\n",
+			Snapshot.marDirector, Snapshot.mario, Snapshot.camera,
+			Snapshot.directorReady, Snapshot.directorStateAreaEpisode));
+		Emit(Line, _sprintf(Line,
+			"director game_state=%08X demo_states=%08X collected_shine=%08X\r\n",
+			Snapshot.directorGameState, Snapshot.directorDemoStates,
+			Snapshot.directorCollectedShine));
+	}
 
-	EmitString("\r\nBreadcrumbs (event 1=app, 2=context, 3=setup-enter, "
-		"4=setup-return, 5=stage-ready):\r\n");
+	EmitString("\r\nBreadcrumbs (1=app, 2=context, 3=setup-enter, "
+		"4=setup-return, 5=stage-ready, 256=state-save, "
+		"257=state-load, 271=state-refused):\r\n");
 	start = Snapshot.breadcrumbSeq - Snapshot.breadcrumbCount;
 	for (i = 0; i < Snapshot.breadcrumbCount &&
 		i < SUSAMUNE_CRASH_BREADCRUMB_COUNT; ++i)
@@ -336,10 +359,20 @@ static int WriteText(u32 target)
 		Snapshot.pcWindowSize);
 	EmitHex("lr", Snapshot.lrWindowBase, Snapshot.lrWindow,
 		Snapshot.lrWindowSize);
-	EmitHex("director", Snapshot.directorWindowBase, Snapshot.directorWindow,
-		Snapshot.directorWindowSize);
-	EmitHex("mario", Snapshot.marioWindowBase, Snapshot.marioWindow,
-		Snapshot.marioWindowSize);
+	if (Snapshot.gameId == SUSAMUNE_MOD_GAME_ID_LMJ)
+	{
+		EmitHex("dvd", Snapshot.directorWindowBase, Snapshot.directorWindow,
+			Snapshot.directorWindowSize);
+		EmitHex("aram", Snapshot.marioWindowBase, Snapshot.marioWindow,
+			Snapshot.marioWindowSize);
+	}
+	else
+	{
+		EmitHex("director", Snapshot.directorWindowBase,
+			Snapshot.directorWindow, Snapshot.directorWindowSize);
+		EmitHex("mario", Snapshot.marioWindowBase, Snapshot.marioWindow,
+			Snapshot.marioWindowSize);
+	}
 
 	if (TextStatus == FR_OK)
 		TextStatus = f_sync(&TextFile);
