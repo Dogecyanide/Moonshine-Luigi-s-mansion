@@ -26,6 +26,18 @@
                 "LAUNCHER_DEFAULT_SOURCE": "sd"
             },
             "hidden": false
+        },
+        {
+            "name": "diagnostic_console",
+            "displayName": "GLMJ01 MEM1 diagnostic launcher",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-lm-diag",
+            "cacheVariables": {
+                "LM_BOOTSTRAP": "ON",
+                "LM_DIAGNOSTIC": "ON",
+                "LAUNCHER_VERSION": "MEM1 Diagnostic 0.1.0"
+            },
+            "hidden": false
         }
     ],
     "buildPresets": [
@@ -33,6 +45,14 @@
             "name": "console",
             "hidden": false,
             "configurePreset": "release_console",
+            "targets": [
+                "launcher"
+            ]
+        },
+        {
+            "name": "diagnostic",
+            "hidden": false,
+            "configurePreset": "diagnostic_console",
             "targets": [
                 "launcher"
             ]

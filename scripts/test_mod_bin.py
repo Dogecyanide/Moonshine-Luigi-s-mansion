@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import struct
 import unittest
+import zlib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +27,15 @@ def manifest(code_size: int, write_count: int) -> dict:
         "region_reserve": 0x82000,
         "writes": [(0x80000000, 0)] * write_count,
     }
+
+
+def authenticated_manifest(code_size: int, write_count: int) -> dict:
+    out = manifest(code_size, 0)
+    out["game_id"] = 0x474C4D4A
+    out["base_addr"] = 0x804B8400
+    out["writes"] = [(0x80000000, 0x12345678, 0x60000000)] * write_count
+    out["checks"] = [(0x80000004, 0x4E800020)]
+    return out
 
 
 class ModBinCapacityTests(unittest.TestCase):
@@ -48,6 +59,41 @@ class ModBinCapacityTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "reset-safe ceiling"):
             gen_mod_bin.build_mod_bin(manifest(0x50000, exact_writes + 1))
+
+    def test_authenticated_records_and_footer(self) -> None:
+        packed = gen_mod_bin.build_mod_bin(authenticated_manifest(4, 1))
+        header = struct.unpack(">8I", packed[:gen_mod_bin.HEADER_SIZE])
+        self.assertEqual(header[1], gen_mod_bin.VERSION_AUTH)
+        self.assertEqual(header[5], 2)  # one write plus one check
+        body = packed[gen_mod_bin.HEADER_SIZE:-gen_mod_bin.AUTH_FOOTER_SIZE]
+        footer = struct.unpack(">I", packed[-4:])[0]
+        self.assertEqual(footer, zlib.crc32(packed[:-4]) & 0xFFFFFFFF)
+        check_addr = struct.unpack(">I", body[-12:][0:4])[0]
+        self.assertEqual(check_addr & gen_mod_bin.WRITE_FLAG_CHECK_ONLY, 1)
+
+        # A malformed header can preserve total file size by moving one
+        # 12-byte V2 record from the write list into code. The CRC must still
+        # reject that repartition instead of silently dropping the first hook.
+        repartitioned = bytearray(packed)
+        struct.pack_into(">I", repartitioned, 16, header[4] + 12)
+        struct.pack_into(">I", repartitioned, 20, header[5] - 1)
+        self.assertNotEqual(
+            footer,
+            zlib.crc32(repartitioned[:-gen_mod_bin.AUTH_FOOTER_SIZE])
+            & 0xFFFFFFFF,
+        )
+
+    def test_authenticated_write_address_must_be_aligned(self) -> None:
+        bad = authenticated_manifest(4, 1)
+        bad["writes"][0] = (0x80000001, 0x12345678, 0x60000000)
+        with self.assertRaisesRegex(ValueError, "write address is not word-aligned"):
+            gen_mod_bin.build_mod_bin(bad)
+
+    def test_authentication_check_address_must_be_aligned(self) -> None:
+        bad = authenticated_manifest(4, 1)
+        bad["checks"][0] = (0x80000005, 0x4E800020)
+        with self.assertRaisesRegex(ValueError, "check address is not word-aligned"):
+            gen_mod_bin.build_mod_bin(bad)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 # fatfs-arm, and the generated kernel/asm + codehandler blob headers. Produces
 # kernel.elf -> kernel.bin -> data/kernel.zip (the loader unzips it at boot).
 # The susamune mod is NOT built into the kernel: Patch.c injects whatever
-# mod_<region>.bin the loader staged in MEM2, so this target is version-agnostic
+# mod_<tag>.bin the loader staged in MEM2, so this target is version-agnostic
 # and does not depend on the mod build at all. Was kernel/Makefile.
 
 set(_sources

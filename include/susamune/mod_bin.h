@@ -6,12 +6,13 @@
 // =====================================================================
 // mod_bin.h
 //
-// The on-disc format of mod_<region>.bin and the MEM2 window it is staged
+// The on-disc format of mod_<game-or-region>.bin and the MEM2 window it is staged
 // in. The mod used to be a byte array compiled into the Nintendont kernel
 // (one launcher per game version, and a second copy of the blob resident in
 // MEM2 for the whole session). It is now a file next to the launcher's
 // boot.dol that the loader reads for the detected disc and the kernel copies
-// into MEM1, so one launcher serves GMSJ/GMSE/GMSP.
+// into MEM1, so one launcher can serve GMSJ/GMSE/GMSP and the separately
+// authenticated GLMJ01 diagnostic.
 //
 // The hook writes travel with the code: their addresses are per-version, so
 // a blob without its write list is not applicable to anything.
@@ -21,7 +22,7 @@
 //
 // Flow:
 //   loader (PPC) -- knows the game id before booting the kernel; reads
-//                   <launch_dir>/mod_<region>.bin into the MEM2 window below
+//                   <launch_dir>/mod_<tag>.bin into the MEM2 window below
 //                   and flushes it. Writes a zeroed header if there is none.
 //   kernel (ARM) -- PatchSusamune() validates the header against the running
 //                   GAME_ID, memcpy's the code to baseAddr, applies the
@@ -29,17 +30,20 @@
 //                   which susamune.ini sections belong to this run.
 // =====================================================================
 
-#define SUSAMUNE_MOD_MAGIC   0x534D4F44u  // 'SMOD'
-#define SUSAMUNE_MOD_VERSION 1u
+#define SUSAMUNE_MOD_MAGIC          0x534D4F44u  // 'SMOD'
+#define SUSAMUNE_MOD_VERSION_LEGACY 1u
+#define SUSAMUNE_MOD_VERSION_AUTH   2u
 
 // Disc header bytes 0..3 of each supported revision.
 #define SUSAMUNE_MOD_GAME_ID_JP  0x474D534Au  // "GMSJ"
 #define SUSAMUNE_MOD_GAME_ID_US  0x474D5345u  // "GMSE"
 #define SUSAMUNE_MOD_GAME_ID_PAL 0x474D5350u  // "GMSP"
+#define SUSAMUNE_MOD_GAME_ID_LMJ 0x474C4D4Au  // "GLMJ"
 
 #define SUSAMUNE_MOD_BASE_JP  0x80426020u
 #define SUSAMUNE_MOD_BASE_US  0x80429800u
 #define SUSAMUNE_MOD_BASE_PAL 0x80420D60u
+#define SUSAMUNE_MOD_BASE_LMJ 0x804B8400u
 #define SUSAMUNE_MOD_REGION_SIZE 0x80000u
 #define SUSAMUNE_SCRATCH 0x40u
 #define SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE 0x50000u
@@ -56,14 +60,30 @@
     ((gameId) == SUSAMUNE_MOD_GAME_ID_JP    ? SUSAMUNE_MOD_BASE_JP   \
      : (gameId) == SUSAMUNE_MOD_GAME_ID_US  ? SUSAMUNE_MOD_BASE_US   \
      : (gameId) == SUSAMUNE_MOD_GAME_ID_PAL ? SUSAMUNE_MOD_BASE_PAL  \
+     : (gameId) == SUSAMUNE_MOD_GAME_ID_LMJ ? SUSAMUNE_MOD_BASE_LMJ  \
                                              : 0u)
 
-// File layout: this header, then codeSize bytes of code, then writeCount
-// pairs of (addr, val). codeSize is a multiple of 4, so the write list is
-// word-aligned relative to the header.
+#define SUSAMUNE_MOD_VERSION_FOR_GAME_ID(gameId)                         \
+    ((gameId) == SUSAMUNE_MOD_GAME_ID_LMJ ? SUSAMUNE_MOD_VERSION_AUTH   \
+                                           : SUSAMUNE_MOD_VERSION_LEGACY)
+
+// V1 write records are (address, replacement). V2 records add the expected
+// original word and end the file with a CRC32 of every preceding byte (header,
+// code, and records). Bit zero marks a V2 record as an authentication-only
+// check; game addresses are always word-aligned.
+#define SUSAMUNE_MOD_WRITE_WORDS_LEGACY 2u
+#define SUSAMUNE_MOD_WRITE_WORDS_AUTH   3u
+#define SUSAMUNE_MOD_WRITE_FLAG_CHECK_ONLY 1u
+#define SUSAMUNE_MOD_AUTH_FOOTER_SIZE 4u
+
+// File layout starts with this header and codeSize bytes of code. V1 then has
+// writeCount (address, replacement) pairs. V2 has (address, expected,
+// replacement) triples followed by a CRC32 of header + code + records.
+// codeSize is a multiple of four, so every record and the footer remain
+// word-aligned.
 struct SusamuneModHeader {
     unsigned int magic;         // SUSAMUNE_MOD_MAGIC
-    unsigned int version;       // SUSAMUNE_MOD_VERSION
+    unsigned int version;       // SUSAMUNE_MOD_VERSION_*
     unsigned int gameId;        // SUSAMUNE_MOD_GAME_ID_*
     unsigned int baseAddr;      // MEM1 address the code is linked at
     unsigned int codeSize;
@@ -74,13 +94,20 @@ struct SusamuneModHeader {
 
 #define SUSAMUNE_MOD_HEADER_SIZE 32u
 
-// The file name for a given disc id, spelled the same way by the build
-// (scripts/gen_mod_bin.py) and the loader. Null for a game we have no mod for.
+// Sunshine's region tag is also used by its settings and ghost services. Keep
+// GLMJ out of it: the first Luigi's Mansion payload is a diagnostic and must
+// not activate Sunshine's persistence schemas.
 #define SUSAMUNE_MOD_REGION_TAG(gameId)                            \
     ((gameId) == SUSAMUNE_MOD_GAME_ID_JP    ? "jp"                 \
      : (gameId) == SUSAMUNE_MOD_GAME_ID_US  ? "us"                 \
      : (gameId) == SUSAMUNE_MOD_GAME_ID_PAL ? "pal"                \
                                             : (const char *)0)
+
+// Payload filenames are game-specific even when two games share a language.
+// This prevents a Sunshine mod_jp.bin from ever being selected for GLMJ01.
+#define SUSAMUNE_MOD_FILE_TAG(gameId)                              \
+    ((gameId) == SUSAMUNE_MOD_GAME_ID_LMJ ? "lmj"                  \
+                                           : SUSAMUNE_MOD_REGION_TAG(gameId))
 
 #define SUSAMUNE_MOD_FILE_FMT "mod_%s.bin"
 
@@ -102,7 +129,8 @@ typedef char susamune_mod_attachment_bounds_check
       SUSAMUNE_MOD_ATTACHMENT_HEAP_SIZE <= SUSAMUNE_MOD_SCRATCH_OFFSET) ? 1 : -1];
 typedef char susamune_mod_attachment_alignment_check
     [(((SUSAMUNE_MOD_BASE_JP | SUSAMUNE_MOD_BASE_US |
-        SUSAMUNE_MOD_BASE_PAL | SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET |
+        SUSAMUNE_MOD_BASE_PAL | SUSAMUNE_MOD_BASE_LMJ |
+        SUSAMUNE_MOD_ATTACHMENT_HEAP_OFFSET |
         SUSAMUNE_MOD_ATTACHMENT_HEAP_SIZE) & 31u) == 0) ? 1 : -1];
 typedef char susamune_mod_staging_vault_check
     [(SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE ==

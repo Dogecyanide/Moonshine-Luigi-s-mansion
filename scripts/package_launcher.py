@@ -1,8 +1,8 @@
 """Package the built Nintendont loader into the HBC app zip:
-moonshine_luigis_mansion/{boot.dol, icon.png, meta.xml, mod_<region>.bin...}.
+moonshine_luigis_mansion/{boot.dol, icon.png, meta.xml, mod_<tag>.bin...}.
 
 One app serves every supported disc revision. The mod is no longer compiled into
-the launcher: each mod_<region>.bin sits next to boot.dol and the loader reads
+the launcher: each mod_<tag>.bin sits next to boot.dol and the loader reads
 the one matching the disc it detected (see launcher/loader/source/SusamuneMod.c),
 which is why they are packaged here rather than embedded.
 
@@ -59,7 +59,7 @@ def main(argv):
     ap.add_argument("--test-log", help="tester log to include as TESTING.md")
     ap.add_argument("--changelog", help="release notes to include as CHANGELOG.md")
     ap.add_argument("--mod-bins", nargs="*", default=[],
-                    help="mod_<region>.bin files to drop into the app dir")
+                    help="mod_<tag>.bin files to drop into the app dir")
     args = ap.parse_args(argv)
 
     mod_bins = [Path(p) for p in args.mod_bins]

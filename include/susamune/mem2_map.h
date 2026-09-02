@@ -45,7 +45,7 @@
 #define NIN_MEM2_FILE_PATCH_PPC_BASE         0x91900000u
 #define NIN_MEM2_FILE_PATCH_SIZE             0x0057F000u
 
-// mod_<region>.bin staging (struct SusamuneModHeader, mod_bin.h). The PPC
+// mod_<tag>.bin staging (struct SusamuneModHeader, mod_bin.h). The PPC
 // loader reads the file for the detected disc here before booting the kernel;
 // PatchSusamune() copies the code out into MEM1. PatchGame can consume this
 // staging prefix again after an in-session reset, so it remains immutable.

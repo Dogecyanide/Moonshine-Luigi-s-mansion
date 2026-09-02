@@ -1553,7 +1553,7 @@ int main(int argc, char **argv)
 	// Command-line configuration is gone: susamune.ini is the only place
 	// launcher settings live, and a second way to set them was a second
 	// source of truth. argv[0] is still read further down for launch_dir,
-	// which is how mod_<region>.bin is found next to boot.dol.
+	// which is how mod_<tag>.bin is found next to boot.dol.
 	memset((void*)ncfg, 0, sizeof(NIN_CFG));
 	ncfg->Magicbytes = 0x01070CF6;
 	ncfg->Version = NIN_CFG_VERSION;
@@ -1826,7 +1826,7 @@ int main(int argc, char **argv)
 	// Can the ini be written back? Probe once so the menu can say so up front
 	// rather than only failing when the user changes something.
 	bool LauncherCanSave = SusamuneIniWritable(GetRootDevice());
-#ifndef LAUNCHER_DISABLE_SUSAMUNE_PATCH
+#ifdef LAUNCHER_ENABLE_SUNSHINE_ASSETS
 	if (!SusamuneGhostEnsureDirectories(GetRootDevice()))
 		gprintf("Susamune: ghost directories are unavailable\n");
 #endif
@@ -2287,7 +2287,7 @@ int main(int argc, char **argv)
 
 	// Sunshine-specific disc scanning stays disabled until a GLMJ01 asset
 	// pipeline has been designed and verified.
-#ifndef LAUNCHER_DISABLE_SUSAMUNE_PATCH
+#ifdef LAUNCHER_ENABLE_SUNSHINE_ASSETS
 	SusamuneStageShadowAsset(GetRootDevice(), ncfg->GamePath, CurDICMD,
 		ISOShift, wiiVCInternal);
 #endif

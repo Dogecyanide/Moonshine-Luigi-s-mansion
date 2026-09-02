@@ -1,13 +1,23 @@
 import argparse
+import importlib.util
+import json
 import os
 import re
 from pathlib import Path
 
 from dol_c_kit import Project
-import patches
 
 
-def check_shared_layout():
+def load_patch_module(path):
+    spec = importlib.util.spec_from_file_location("susamune_build_patches", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load patch configuration {}".format(path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_shared_layout(patches, vers):
     """Keep the build-side layout in lockstep with the shared launcher header."""
     header = Path(__file__).parent.parent / "include" / "susamune" / "mod_bin.h"
     text = header.read_text()
@@ -20,10 +30,17 @@ def check_shared_layout():
             raise RuntimeError("{} not found as a hex constant in {}".format(name, header))
         return int(match.group(1), 16)
 
+    base_defines = {
+        "jp": "SUSAMUNE_MOD_BASE_JP",
+        "us": "SUSAMUNE_MOD_BASE_US",
+        "pal": "SUSAMUNE_MOD_BASE_PAL",
+        "lmj": "SUSAMUNE_MOD_BASE_LMJ",
+    }
+    if vers not in base_defines:
+        raise RuntimeError("no shared mod-base define for version {}".format(vers))
+    if vers not in patches.base_addr:
+        raise RuntimeError("patch configuration has no base for {}".format(vers))
     expected = {
-        "SUSAMUNE_MOD_BASE_JP": patches.base_addr["jp"],
-        "SUSAMUNE_MOD_BASE_US": patches.base_addr["us"],
-        "SUSAMUNE_MOD_BASE_PAL": patches.base_addr["pal"],
         "SUSAMUNE_MOD_REGION_SIZE": patches.mod_region_size,
         "SUSAMUNE_MOD_BLOB_MAX_SIZE": patches.mod_blob_max_size,
         "SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE": patches.mod_mem1_working_cap_size,
@@ -32,6 +49,14 @@ def check_shared_layout():
         "SUSAMUNE_SCRATCH": patches.mod_scratch_size,
         "SUSAMUNE_DEBUG_STACK_SIZE": patches.debug_stack_size,
     }
+    # The inherited table historically checked every regional base even when
+    # only one payload was selected. Keep that drift check while allowing the
+    # GLMJ-specific table to define just its own base.
+    for patch_vers, base in patches.base_addr.items():
+        if patch_vers not in base_defines:
+            raise RuntimeError(
+                "no shared mod-base define for version {}".format(patch_vers))
+        expected[base_defines[patch_vers]] = base
     for name, value in expected.items():
         header_value = hex_define(name)
         if header_value != value:
@@ -57,7 +82,7 @@ def check_shared_layout():
             "mod file ceiling, asset vault, and patches.py disagree")
 
 
-def check_arena_reserve(linker_script, base):
+def check_arena_reserve(linker_script, base, patches):
     """Verify the debug-stack gap this build's arena reserve assumes.
 
     OSInit lowers __OSArenaLo to ALIGN32(_stack_addr) when no debug monitor is
@@ -88,14 +113,20 @@ def main():
     ap.add_argument("--obj", required=True, help="Relocatable mod object (susamune_pre.o)")
     ap.add_argument("--linker-script", required=True, help="Linker script (.ld) defining SMS symbols")
     ap.add_argument("--kuribo-home", required=True, help="Kuribo toolchain directory (provides powerpc-eabi-ld)")
-    ap.add_argument("--vers", default="jp", choices=["jp", "us", "pal"])
+    ap.add_argument("--vers", default="jp")
+    ap.add_argument(
+        "--patches-file",
+        default=str(Path(__file__).with_name("patches.py")),
+        help="Patch configuration module (defaults to scripts/patches.py)")
     ap.add_argument("--out", required=True, help="Output file")
     ap.add_argument("--in-dol", help="Input main.dol (required for patch_dol)")
     ap.add_argument("--print-commands", action="store_true", help="Echo the raw compiler/linker argv")
     ap.add_argument("mode", choices=["patch_dol", "gecko", "launcher"])
     args = ap.parse_args()
 
-    check_shared_layout()
+    patch_path = Path(args.patches_file).resolve()
+    patches = load_patch_module(patch_path)
+    check_shared_layout(patches, args.vers)
 
     obj = Path(args.obj).resolve()
     linker_script = Path(args.linker_script).resolve()
@@ -111,7 +142,7 @@ def main():
     if base is None:
         raise ValueError(f"Base address unset for version {args.vers}!")
 
-    check_arena_reserve(linker_script, base)
+    check_arena_reserve(linker_script, base, patches)
 
     p = Project()
     # The intermediates (<name>.o / <name>.bin) live in obj_dir, which is the
@@ -155,6 +186,44 @@ def main():
             "disc_name": patches.disc_name[args.vers],
         }
         p.build_launcher_manifest(str(out), meta=meta, region_reserve=patches.arena_reserve)
+
+        # Authenticated payloads carry the expected retail word beside every
+        # replacement. All words are checked before the kernel copies code or
+        # writes a hook, so one mismatch leaves the game completely untouched.
+        expected_words = []
+        auth_checks = getattr(patches, "checks", [])
+        authenticated = bool(auth_checks)
+        for patch in patches.patches:
+            expected = patch.get("expected")
+            emitted = 1 + patch.get("nop_count", 0)
+            if expected is None:
+                expected_words.extend([None] * emitted)
+                continue
+            authenticated = True
+            if isinstance(expected, int):
+                expected = [expected]
+            if len(expected) != emitted:
+                raise ValueError(
+                    "patch at {:#x} has {} emitted writes but {} expected words".format(
+                        patch[args.vers], emitted, len(expected)))
+            expected_words.extend(expected)
+
+        manifest = json.loads(out.read_text())
+        if authenticated:
+            if any(value is None for value in expected_words):
+                raise ValueError("authenticated manifests require an expected word for every write")
+            if len(expected_words) != len(manifest["writes"]):
+                raise RuntimeError("emitted write count and expected-word count disagree")
+            manifest["writes"] = [
+                [addr, expected, replacement]
+                for (addr, replacement), expected in zip(
+                    manifest["writes"], expected_words)
+            ]
+            manifest["checks"] = [
+                [check["addr"], check["expected"]]
+                for check in auth_checks
+            ]
+        out.write_text(json.dumps(manifest, indent=2))
 
 
 if __name__ == "__main__":

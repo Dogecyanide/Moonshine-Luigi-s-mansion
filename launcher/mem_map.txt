@@ -13,7 +13,7 @@ MEM2
 0x91700000-0x91780000=temporary DI/DSP patch buffer
 0x91780000-0x91900000=PPC loader-only real-disc DMA buffer; three 512 KiB Susamune ghost slots after boot
 0x91900000-0x91E7F000=patch.bin / patch.txt loader-to-kernel handoff
-0x91E7F000-0x91EDE000=Susamune mod_<region>.bin immutable staging (reused by PatchGame after reset)
+0x91E7F000-0x91EDE000=Susamune mod_<tag>.bin immutable staging (reused by PatchGame after reset)
 0x91EDE000-0x91F00000=Susamune ghost model asset vault (published after the mod copy)
 0x91F00000-0x92EF0000=Susamune savestate snapshot (dedicated)
 0x92EF0000-0x92EFF800=Susamune settings block (susamune.ini/PB handoff + save doorbells)

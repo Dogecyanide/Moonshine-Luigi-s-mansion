@@ -2,9 +2,8 @@
 
 Susamune mod loading (Nintendont loader side).
 
-The mod is no longer compiled into the kernel: it ships as mod_jp.bin /
-mod_us.bin / mod_pal.bin next to this loader's boot.dol, and one launcher
-serves all three disc revisions. The loader is the right side to read it --
+The mod is no longer compiled into the kernel: it ships as a game-specific
+mod_<tag>.bin next to this loader's boot.dol. The loader is the right side to read it --
 it already knows ncfg->GameID for every boot path (game list, di:, Wii VC)
 and still has the FAT devices mounted, whereas the kernel only learns the
 disc id after it has taken the SD card over from the DI thread.
@@ -34,7 +33,7 @@ extern char launch_dir[MAXPATHLEN];
 void SusamuneLoadMod(u32 gameID)
 {
 	struct SusamuneModHeader *dst = SUSAMUNE_MOD_PPC_PTR;
-	const char *region = SUSAMUNE_MOD_REGION_TAG(gameID);
+	const char *tag = SUSAMUNE_MOD_FILE_TAG(gameID);
 	char path[MAXPATHLEN];
 	char name[32];
 	FIL fd;
@@ -46,10 +45,10 @@ void SusamuneLoadMod(u32 gameID)
 	memset(dst, 0, sizeof(*dst));
 	DCFlushRange(dst, sizeof(*dst));
 
-	if (region == NULL)
+	if (tag == NULL)
 		return;  /* not one of ours */
 
-	snprintf(name, sizeof(name), SUSAMUNE_MOD_FILE_FMT, region);
+	snprintf(name, sizeof(name), SUSAMUNE_MOD_FILE_FMT, tag);
 	/* launch_dir is empty when loaded over the network; fall back to the
 	 * conventional install path, same as titles.txt / meta.xml do. */
 	snprintf(path, sizeof(path), "%s%s",

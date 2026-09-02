@@ -2,9 +2,10 @@
 the file the launcher ships next to boot.dol and loads at runtime.
 
 Format is struct SusamuneModHeader from include/susamune/mod_bin.h: a 32-byte
-big-endian header, then the code blob, then the (addr, val) hook writes. The
-writes travel with the code because their addresses are version-specific -- a
-blob on its own is not applicable to anything.
+big-endian header followed by the code blob and hook records. Legacy V1 records
+are (address, replacement). Authenticated V2 records are (address, expected,
+replacement) and end with a CRC32 of every preceding file byte, including the
+header.
 
 Usage: gen_mod_bin.py MANIFEST.json -o mod_jp.bin
 """
@@ -13,11 +14,15 @@ import json
 import re
 import struct
 import sys
+import zlib
 from pathlib import Path
 
 MAGIC = 0x534D4F44  # 'SMOD'
-VERSION = 1
+VERSION_LEGACY = 1
+VERSION_AUTH = 2
 HEADER_SIZE = 32
+WRITE_FLAG_CHECK_ONLY = 1
+AUTH_FOOTER_SIZE = 4
 
 
 def shared_hex_define(name, header_name="mem2_map.h"):
@@ -48,29 +53,67 @@ def build_mod_bin(manifest):
             "MEM1 working cap")
 
     writes = manifest["writes"]
-    body = code + b"".join(
-        struct.pack(">II", addr & 0xFFFFFFFF, val & 0xFFFFFFFF) for addr, val in writes)
+    checks = manifest.get("checks", [])
+    widths = {len(write) for write in writes}
+    if (not writes and not checks) or (widths == {2} and not checks):
+        version = VERSION_LEGACY
+        body = code + b"".join(
+            struct.pack(">II", addr & 0xFFFFFFFF, val & 0xFFFFFFFF)
+            for addr, val in writes)
+        record_count = len(writes)
+    elif widths <= {3} and all(len(write) == 3 for write in writes):
+        version = VERSION_AUTH
+        records = []
+        for addr, expected, replacement in writes:
+            if addr & 3:
+                raise ValueError("authenticated write address is not word-aligned")
+            records.append((
+                addr & 0xFFFFFFFF,
+                expected & 0xFFFFFFFF,
+                replacement & 0xFFFFFFFF,
+            ))
+        for check in checks:
+            if len(check) != 2:
+                raise ValueError("authentication checks must be (address, expected) pairs")
+            addr, expected = check
+            if addr & 3:
+                raise ValueError("authentication check address is not word-aligned")
+            records.append((
+                (addr | WRITE_FLAG_CHECK_ONLY) & 0xFFFFFFFF,
+                expected & 0xFFFFFFFF,
+                expected & 0xFFFFFFFF,
+            ))
+        body = code + b"".join(struct.pack(">III", *record) for record in records)
+        record_count = len(records)
+    else:
+        raise ValueError("writes must be uniformly (address, value) or "
+                         "(address, expected, value) records")
 
+    footer_size = AUTH_FOOTER_SIZE if version == VERSION_AUTH else 0
+    total = HEADER_SIZE + len(body) + footer_size
     header = struct.pack(
         ">8I",
         MAGIC,
-        VERSION,
+        version,
         manifest["game_id"],
         manifest["base_addr"],
         len(code),
-        len(writes),
+        record_count,
         manifest.get("region_reserve", 0),
-        HEADER_SIZE + len(body),
+        total,
     )
     assert len(header) == HEADER_SIZE
-    total = HEADER_SIZE + len(body)
     if total > STAGED_FILE_MAX_SIZE:
         raise ValueError(
             f"mod bin is {total:#x} bytes, over the {STAGED_FILE_MAX_SIZE:#x} "
             "reset-safe ceiling (see SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE)")
     if total > STAGING_WINDOW_SIZE:
         raise ValueError("mod bin exceeds its MEM2 staging window")
-    return header + body
+    packed = header + body
+    if version == VERSION_AUTH:
+        packed += struct.pack(">I", zlib.crc32(packed) & 0xFFFFFFFF)
+    assert len(packed) == total
+    return packed
 
 
 def main(argv):

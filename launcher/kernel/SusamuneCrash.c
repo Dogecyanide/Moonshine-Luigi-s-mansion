@@ -72,12 +72,12 @@ static bool ReadReport(const char *path, struct SusamuneCrashReport *report)
 		ValidReport(report);
 }
 
-static u32 ModFileCrc(const struct SusamuneModHeader *header)
+static u32 BytesCrc(const void *data, u32 size)
 {
-	const u8 *bytes = (const u8*)header;
+	const u8 *bytes = (const u8*)data;
 	u32 crc = 0xFFFFFFFFu;
 	u32 i, bit;
-	for (i = 0; i < header->fileSize; ++i)
+	for (i = 0; i < size; ++i)
 	{
 		crc ^= bytes[i];
 		for (bit = 0; bit < 8; ++bit)
@@ -86,12 +86,19 @@ static u32 ModFileCrc(const struct SusamuneModHeader *header)
 	return crc ^ 0xFFFFFFFFu;
 }
 
+static u32 ModFileCrc(const struct SusamuneModHeader *header)
+{
+	return BytesCrc(header, header->fileSize);
+}
+
 static bool ValidStagedMod(const struct SusamuneModHeader *header)
 {
-	u32 codeEnd;
+	u32 codeEnd, recordSize, footerSize, recordsEnd;
+	const u32 *footer;
 	sync_before_read((void*)header, SUSAMUNE_MOD_HEADER_SIZE);
 	if (header->magic != SUSAMUNE_MOD_MAGIC ||
-		header->version != SUSAMUNE_MOD_VERSION || header->gameId != GAME_ID ||
+		header->version != SUSAMUNE_MOD_VERSION_FOR_GAME_ID(GAME_ID) ||
+		header->gameId != GAME_ID ||
 		header->baseAddr != SUSAMUNE_MOD_BASE_FOR_GAME_ID(GAME_ID) ||
 		header->arenaReserve != SUSAMUNE_ARENA_RESERVE_SIZE ||
 		header->codeSize > SUSAMUNE_MOD_BLOB_MAX_SIZE ||
@@ -101,11 +108,24 @@ static bool ValidStagedMod(const struct SusamuneModHeader *header)
 		(header->codeSize & 3))
 		return false;
 	codeEnd = SUSAMUNE_MOD_HEADER_SIZE + header->codeSize;
-	if (header->writeCount >
-		(SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE - codeEnd) / 8)
+	recordSize = header->version == SUSAMUNE_MOD_VERSION_AUTH ? 12u : 8u;
+	footerSize = header->version == SUSAMUNE_MOD_VERSION_AUTH ?
+		SUSAMUNE_MOD_AUTH_FOOTER_SIZE : 0u;
+	if (codeEnd > SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE - footerSize)
 		return false;
-	return header->fileSize == codeEnd + header->writeCount * 8 &&
-		header->fileSize <= SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE;
+	if (header->writeCount >
+		(SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE - codeEnd - footerSize) /
+		recordSize)
+		return false;
+	recordsEnd = codeEnd + header->writeCount * recordSize;
+	if (header->fileSize != recordsEnd + footerSize ||
+		header->fileSize > SUSAMUNE_MOD_STAGED_FILE_MAX_SIZE)
+		return false;
+	if (header->version != SUSAMUNE_MOD_VERSION_AUTH)
+		return true;
+	sync_before_read((void*)header, header->fileSize);
+	footer = (const u32*)((const u8*)header + recordsEnd);
+	return BytesCrc(header, recordsEnd) == *footer;
 }
 
 void SusamuneCrashInit(void)
@@ -193,6 +213,8 @@ static const char *RegionName(u32 gameId)
 		return "US/GMSE";
 	if (gameId == SUSAMUNE_MOD_GAME_ID_PAL)
 		return "PAL/GMSP";
+	if (gameId == SUSAMUNE_MOD_GAME_ID_LMJ)
+		return "JP/GLMJ";
 	return "unknown";
 }
 

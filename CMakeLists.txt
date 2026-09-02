@@ -56,7 +56,11 @@ endif()
 
 # --- Options ---------------------------------------------------------------
 
-option(LM_BOOTSTRAP "Package a GLMJ01-only launcher with no game-side payload" ON)
+option(LM_BOOTSTRAP "Keep the inherited Sunshine game-side pipeline disabled" ON)
+option(LM_DIAGNOSTIC "Build and package the fail-closed GLMJ01 diagnostic payload" OFF)
+if(LM_DIAGNOSTIC AND NOT LM_BOOTSTRAP)
+    message(FATAL_ERROR "LM_DIAGNOSTIC and the inherited Sunshine pipeline are mutually exclusive")
+endif()
 
 if(NOT LM_BOOTSTRAP)
 # VERS is a list: one mod_<vers>.bin is built per entry and all of them are
@@ -96,6 +100,8 @@ set(LAUNCHER_VERSION "Bootstrap 0.1.0" CACHE STRING
     "Version shown in the packaged launcher meta.xml")
 
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
+option(LAUNCHER_ENABLE_SUNSHINE_ASSETS
+    "Enable Sunshine-only ghost directory and model staging for the legacy pipeline" ON)
 
 if(NOT LM_BOOTSTRAP)
 option(IS_EMULATOR "Target Dolphin (ON) instead of Wii/Nintendont (OFF)" OFF)
@@ -122,6 +128,85 @@ endif()
 
 set(LAUNCHER_ZIP "${CMAKE_BINARY_DIR}/moonshine_luigis_mansion_launcher.zip")
 set(MOD_BINS "")
+
+# The first Luigi's Mansion payload is deliberately separate from the inherited
+# Sunshine object graph. Enabling it cannot expose the legacy DOL/ISO targets.
+if(LM_DIAGNOSTIC)
+    set(LM_DIAG_DIR "${CMAKE_SOURCE_DIR}/lm_diag")
+    file(GLOB LM_DIAG_SOURCES CONFIGURE_DEPENDS "${LM_DIAG_DIR}/src/*.cpp")
+    if(NOT LM_DIAG_SOURCES)
+        message(FATAL_ERROR "LM_DIAGNOSTIC is enabled but lm_diag/src has no sources")
+    endif()
+
+    set(LM_DIAG_FLAGS
+        --target=powerpc-gecko-ibm-kuribo-eabi
+        -Oz
+        -Xclang
+        -fmerge-functions
+        -fno-exceptions
+        -fno-rtti
+        -fsigned-char
+        -ffast-math
+        -fpermissive
+        -fno-unwind-tables
+        -nodefaultlibs
+        -nostdlib
+        -fno-use-cxa-atexit
+        -fno-c++-static-destructors
+        -ffunction-sections
+        -fdata-sections)
+
+    add_executable(lm_diag_obj ${LM_DIAG_SOURCES})
+    set_target_properties(lm_diag_obj PROPERTIES
+        OUTPUT_NAME lm_diag_pre
+        SUFFIX .o
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    target_include_directories(lm_diag_obj PRIVATE
+        "${LM_DIAG_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/include/JSystem")
+    target_compile_options(lm_diag_obj PRIVATE
+        ${LM_DIAG_FLAGS}
+        -nobuiltininc
+        -nostdinc++
+        -std=c++17
+        -Werror
+        -Wno-main
+        -Wno-incompatible-library-redeclaration)
+    target_compile_definitions(lm_diag_obj PRIVATE
+        IS_EMULATOR=0
+        LM_DIAGNOSTIC=1
+        SUSAMUNE_VERSION_LMJ=1)
+    target_link_options(lm_diag_obj PRIVATE
+        ${LM_DIAG_FLAGS} -fuse-ld=lld -Werror -r)
+
+    set(_lm_manifest "${CMAKE_BINARY_DIR}/lm_diag_manifest.json")
+    set(_lm_bin "${CMAKE_BINARY_DIR}/mod_lmj.bin")
+    add_custom_command(
+        OUTPUT "${_lm_manifest}"
+        COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
+            --obj "$<TARGET_FILE:lm_diag_obj>"
+            --linker-script "${LM_DIAG_DIR}/glmj.ld"
+            --patches-file "${LM_DIAG_DIR}/patches.py"
+            --kuribo-home "${KURIBO_COMPILER_HOME}"
+            --vers lmj
+            --out "${_lm_manifest}"
+            launcher
+        DEPENDS lm_diag_obj "${LM_DIAG_DIR}/glmj.ld"
+                "${LM_DIAG_DIR}/patches.py"
+                "${CMAKE_SOURCE_DIR}/scripts/link_mod.py"
+        COMMENT "Generating authenticated GLMJ01 diagnostic manifest"
+        VERBATIM)
+    add_custom_command(
+        OUTPUT "${_lm_bin}"
+        COMMAND "${VENV_PYTHON}" "${CMAKE_SOURCE_DIR}/scripts/gen_mod_bin.py"
+            "${_lm_manifest}" -o "${_lm_bin}"
+        DEPENDS "${_lm_manifest}" "${CMAKE_SOURCE_DIR}/scripts/gen_mod_bin.py"
+        COMMENT "Packing mod_lmj.bin"
+        VERBATIM)
+    set(MOD_BINS "${_lm_bin}")
+    add_custom_target(mod_bins ALL DEPENDS ${MOD_BINS})
+endif()
 
 # The inherited game-side pipeline still targets Super Mario Sunshine and is
 # reference material until GLMJ01 hooks, layouts, and a safe MEM1 reservation
@@ -364,13 +449,21 @@ endif()
 # files, so their final bytes must exist before the otherwise-generic launcher.
 include(ExternalProject)
 
-set(_launcher_mod_bins ${MOD_BINS})
-set(_launcher_dependencies mod_bins)
-set(_launcher_disable_patch ${LAUNCHER_DISABLE_SUSAMUNE_PATCH})
-if(LM_BOOTSTRAP)
-    set(_launcher_mod_bins "")
-    set(_launcher_dependencies "")
-    set(_launcher_disable_patch ON)
+set(_launcher_mod_bins "")
+set(_launcher_dependencies "")
+set(_launcher_disable_patch ON)
+set(_launcher_enable_sunshine_assets OFF)
+if(LM_DIAGNOSTIC)
+    set(_launcher_mod_bins ${MOD_BINS})
+    set(_launcher_dependencies mod_bins)
+    set(_launcher_disable_patch OFF)
+elseif(NOT LM_BOOTSTRAP)
+    set(_launcher_mod_bins ${MOD_BINS})
+    set(_launcher_dependencies mod_bins)
+    set(_launcher_disable_patch ${LAUNCHER_DISABLE_SUSAMUNE_PATCH})
+    if(NOT LAUNCHER_DISABLE_SUSAMUNE_PATCH)
+        set(_launcher_enable_sunshine_assets ${LAUNCHER_ENABLE_SUNSHINE_ASSETS})
+    endif()
 endif()
 string(REPLACE ";" "|" _mod_bins_arg "${_launcher_mod_bins}")
 
@@ -399,6 +492,7 @@ ExternalProject_Add(nintendont_launcher
         "-DLAUNCHER_DEFAULT_SOURCE=${LAUNCHER_DEFAULT_SOURCE}"
         "-DLAUNCHER_VERSION=${LAUNCHER_VERSION}"
         "-DLAUNCHER_DISABLE_SUSAMUNE_PATCH=${_launcher_disable_patch}"
+        "-DLAUNCHER_ENABLE_SUNSHINE_ASSETS=${_launcher_enable_sunshine_assets}"
     DEPENDS ${_launcher_dependencies} launcher_build_id
     BUILD_ALWAYS ON
     INSTALL_COMMAND ""
