@@ -44,6 +44,14 @@
 #define SUSAMUNE_MOD_BASE_US  0x80429800u
 #define SUSAMUNE_MOD_BASE_PAL 0x80420D60u
 #define SUSAMUNE_MOD_BASE_LMJ 0x804B8400u
+
+// Nintendont's executable fingerprint is not the main.dol file length.  Its
+// DOLSize calculation starts with sizeof(dolhdr) (0xE4) and then adds every
+// text/data section, whereas the on-disc file has a 0x100-byte padded header.
+#define SUSAMUNE_MOD_DOL_SIZE_LMJ 0x00394924u
+#define SUSAMUNE_MOD_DOL_MIN_LMJ  0x00003100u
+#define SUSAMUNE_MOD_DOL_MAX_LMJ  0x004A6400u
+
 #define SUSAMUNE_MOD_REGION_SIZE 0x80000u
 #define SUSAMUNE_SCRATCH 0x40u
 #define SUSAMUNE_MOD_MEM1_WORKING_CAP_SIZE 0x50000u

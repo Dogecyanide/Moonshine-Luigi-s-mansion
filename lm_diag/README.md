@@ -13,7 +13,7 @@ unmodified.
 The five overlay rows are:
 
 ```text
-LM MEM DIAG 0.2 INJECTED F:<floor> C:<canary> H:<heap check>
+LM MEM DIAG 0.2.1 INJECTED F:<floor> C:<canary> H:<heap check>
 ROOT <root> <start>-<end> <size KiB>
 SYS  <system> L/T/M <largest>/<total>/<minimum total KiB>
 GAME <game>   L/T/M <largest>/<total>/<minimum total KiB>

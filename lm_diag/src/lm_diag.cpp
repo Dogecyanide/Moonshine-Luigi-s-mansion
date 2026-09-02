@@ -242,7 +242,7 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, 0, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, 2,
-        "LM MEM DIAG 0.2 INJECTED  F:%s C:%s H:%s\n"
+        "LM MEM DIAG 0.2.1 INJECTED F:%s C:%s H:%s\n"
         "ROOT %08lX %08lX-%08lX %luK\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
         "GAME %08lX L/T/M %lu/%lu/%luK\n"

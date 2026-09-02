@@ -57,6 +57,16 @@ def check_shared_layout(patches, vers):
             raise RuntimeError(
                 "no shared mod-base define for version {}".format(patch_vers))
         expected[base_defines[patch_vers]] = base
+    # Authenticated payloads may bind themselves to Nintendont's parsed DOL
+    # tuple.  Keep those C/Python constants under the same build-time drift
+    # check as the MEM1 layout without imposing them on legacy V1 payloads.
+    dol_sizes = getattr(patches, "dol_size", {})
+    if vers in dol_sizes:
+        if vers != "lmj":
+            raise RuntimeError("no shared DOL fingerprint defines for {}".format(vers))
+        expected["SUSAMUNE_MOD_DOL_SIZE_LMJ"] = dol_sizes[vers]
+        expected["SUSAMUNE_MOD_DOL_MIN_LMJ"] = patches.dol_min[vers]
+        expected["SUSAMUNE_MOD_DOL_MAX_LMJ"] = patches.dol_max[vers]
     for name, value in expected.items():
         header_value = hex_define(name)
         if header_value != value:

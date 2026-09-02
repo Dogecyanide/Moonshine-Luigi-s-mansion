@@ -60,6 +60,12 @@ checks = [
 arena_lo = {"lmj": 0x804B8400}
 base_addr = dict(arena_lo)
 
+# Exact tuple produced by Nintendont's Patch.c DOL parser.  DOLSize uses the
+# 0xE4-byte dolhdr struct, not main.dol's 0x100-byte padded on-disc header.
+dol_size = {"lmj": 0x00394924}
+dol_min = {"lmj": 0x00003100}
+dol_max = {"lmj": 0x004A6400}
+
 mod_region_size = 0x80000
 debug_stack_size = 0x2000
 arena_reserve = mod_region_size + debug_stack_size

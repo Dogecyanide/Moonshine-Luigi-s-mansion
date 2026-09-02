@@ -48,6 +48,9 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
     def test_mem1_reservation_contract(self) -> None:
         self.assertEqual(lm_diag.game_id["lmj"], 0x474C4D4A)
         self.assertEqual(lm_diag.base_addr["lmj"], 0x804B8400)
+        self.assertEqual(lm_diag.dol_size["lmj"], 0x00394924)
+        self.assertEqual(lm_diag.dol_min["lmj"], 0x00003100)
+        self.assertEqual(lm_diag.dol_max["lmj"], 0x004A6400)
         self.assertEqual(lm_diag.mod_region_size, 0x80000)
         self.assertEqual(lm_diag.arena_reserve, 0x82000)
         self.assertLessEqual(

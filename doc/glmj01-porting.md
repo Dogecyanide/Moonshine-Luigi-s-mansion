@@ -13,6 +13,15 @@ The first target is the unmodified Japanese Luigi's Mansion executable,
 On the verified disc, `main.dol` begins at ISO offset `0x8600` and is
 `0x394940` bytes long.
 
+Nintendont's runtime `DOLSize` fingerprint for that file is `0x394924`, not
+the file length. Its parser adds `sizeof(dolhdr)` (`0xE4`) to all text/data
+section sizes; the file uses a padded `0x100`-byte header, accounting for the
+exact `0x1C` difference. The complete runtime tuple is:
+
+```text
+DOLSize=0x00394924 DOLMinOff=0x00003100 DOLMaxOff=0x004A6400
+```
+
 Every hook must also be authenticated by its surrounding instructions and
 cross-references; addresses from another region must never be translated by a
 fixed offset.

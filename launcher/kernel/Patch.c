@@ -4419,8 +4419,9 @@ void PatchSusamune(void)
 		DOLSize, DOLMinOff, DOLMaxOff);
 	if (hdr->version == SUSAMUNE_MOD_VERSION_AUTH &&
 			GAME_ID == SUSAMUNE_MOD_GAME_ID_LMJ &&
-			(DOLSize != 0x00394940u || DOLMinOff != 0x00003100u ||
-			 DOLMaxOff != 0x004A6400u))
+			(DOLSize != SUSAMUNE_MOD_DOL_SIZE_LMJ ||
+			 DOLMinOff != SUSAMUNE_MOD_DOL_MIN_LMJ ||
+			 DOLMaxOff != SUSAMUNE_MOD_DOL_MAX_LMJ))
 	{
 		dbgprintf("Patch:GLMJ01 DOL layout mismatch; diagnostic refused\r\n");
 		return;
