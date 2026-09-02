@@ -247,7 +247,7 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM STATE X0.3.3 F:%s C:%s H:%s\n"
+        "LM STATE X0.3.4 F:%s C:%s H:%s\n"
         "S:%s ST%lu SZ%luK G:%s %08lX\n"
         "ROOT %08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
@@ -331,31 +331,37 @@ extern "C" void diagnosticCopyDisp(void *xfb, bool clear) {
     reinterpret_cast<GXCopyDispFn>(kGXCopyDispAddr)(xfb, clear);
     reinterpret_cast<VoidFn>(kGXDrawDoneAddr)();
 
-    // JUT has finished presenting the retail frame and no game thread can
-    // observe a half-copied slot. Crash registration is lazy because LM's
-    // JUTException constructor clears the callback during early boot.
+    // Crash registration is lazy because LM's JUTException constructor clears
+    // the callback during early boot. Paint before tick so the diagnostic
+    // remains visible if a requested transaction never returns.
     LMCrash::init();
-    LMState::tick();
 
     const u32 rawAddress = reinterpret_cast<u32>(xfb);
     const u32 segment = rawAddress & 0xC0000000u;
     const u32 physical = rawAddress & 0x3FFFFFFFu;
-    if ((segment != 0x80000000u && segment != 0xC0000000u) ||
-        (physical & 31u) != 0 || physical < 0x00003100u ||
-        physical > 0x01800000u - kXfbSize) {
-        return;
-    }
-    void *const cachedXfb = reinterpret_cast<void *>(kMem1Start | physical);
-    reinterpret_cast<CacheRangeFn>(kDCInvalidateRangeAddr)(cachedXfb,
-                                                            kXfbSize);
+    const bool validXfb =
+        (segment == 0x80000000u || segment == 0xC0000000u) &&
+        (physical & 31u) == 0u && physical >= 0x00003100u &&
+        physical <= 0x01800000u - kXfbSize;
+    if (validXfb) {
+        void *const cachedXfb =
+            reinterpret_cast<void *>(kMem1Start | physical);
+        reinterpret_cast<CacheRangeFn>(kDCInvalidateRangeAddr)(cachedXfb,
+                                                                kXfbSize);
 
-    const u32 directPrintAddress = readWord(kDirectPrintPtrAddr);
-    const bool directPrintReady = isMem1Range(directPrintAddress, 0x18u);
-    if (directPrintReady) {
-        drawPanel(reinterpret_cast<void *>(directPrintAddress), cachedXfb,
-                  system, game);
+        const u32 directPrintAddress = readWord(kDirectPrintPtrAddr);
+        const bool directPrintReady =
+            isMem1Range(directPrintAddress, 0x18u);
+        if (directPrintReady) {
+            drawPanel(reinterpret_cast<void *>(directPrintAddress), cachedXfb,
+                      system, game);
+        }
+        drawRawHeartbeat(cachedXfb, directPrintReady);
     }
-    drawRawHeartbeat(cachedXfb, directPrintReady);
+
+    // No game thread can observe a half-copied slot after GXDrawDone. Status
+    // changes appear on the next frame; a stalled operation keeps this frame.
+    LMState::tick();
 }
 
 #endif  // defined(SUSAMUNE_VERSION_LMJ)

@@ -48,6 +48,7 @@ constexpr u32 kAudioStaticObject = 0x803E3CF8u;
 constexpr u32 kAudioVtable = 0x80383FB0u;
 constexpr u32 kAudioSceneOffset = 0x50u;
 constexpr u32 kAudioBootstrapHandleOffset = 0x64u;
+constexpr u32 kAudioBootstrapSoundId = 0x80000800u;
 
 constexpr u32 kDvdBusyPredicateAddr = 0x80006A5Cu;
 constexpr u32 kExpHeapCheckAddr = 0x801CA61Cu;
@@ -58,7 +59,6 @@ constexpr u32 kOSRestoreInterruptsAddr = 0x801D85D8u;
 constexpr u32 kOSDisableSchedulerAddr = 0x801DAE98u;
 constexpr u32 kOSEnableSchedulerAddr = 0x801DAED8u;
 constexpr u32 kGXInvalidateTexAllAddr = 0x801F1C10u;
-constexpr u32 kAudioStopSoundHandleAddr = 0x8018C9ECu;
 constexpr u32 kAudioChangeSoundSceneAddr = 0x8018D4E4u;
 
 constexpr u32 kExpHeapVtable = 0x8038886Cu;
@@ -90,6 +90,8 @@ constexpr u32 kRequiredStableFrames = 3u;
 constexpr u32 kEventStateSave = 0x100u;
 constexpr u32 kEventStateLoad = 0x101u;
 constexpr u32 kEventStateReject = 0x10Fu;
+constexpr u32 kEventStateSavePhase = 0x110u;
+constexpr u32 kEventStateLoadPhase = 0x111u;
 
 typedef bool (*BoolFn)();
 typedef bool (*HeapCheckFn)(void *);
@@ -98,7 +100,6 @@ typedef void (*RestoreInterruptsFn)(bool);
 typedef s32 (*SchedulerFn)();
 typedef void (*VoidFn)();
 typedef void (*CacheRangeFn)(void *, u32);
-typedef void (*AudioStopSoundHandleFn)(void *, void **, u32);
 typedef void (*AudioChangeSoundSceneFn)(void *, u32);
 
 struct LiveIdentity {
@@ -329,6 +330,17 @@ bool validCurrentHeap(u32 currentHeap, const LiveIdentity &identity) {
                        identity.heapEnd);
 }
 
+bool validAudioBootstrap(u32 basic) {
+    if (!isMem1Range(basic, kAudioBootstrapHandleOffset + sizeof(u32))) {
+        return false;
+    }
+    const u32 slot = basic + kAudioBootstrapHandleOffset;
+    const u32 handle = readWord(slot);
+    return isMem1Range(handle, 0x34u) &&
+           readWord(handle + 8u) == kAudioBootstrapSoundId &&
+           readWord(handle + 0x30u) == slot;
+}
+
 bool sameIdentity(const LiveIdentity &a, const LiveIdentity &b) {
     const u32 *left = reinterpret_cast<const u32 *>(&a);
     const u32 *right = reinterpret_cast<const u32 *>(&b);
@@ -447,8 +459,15 @@ bool buildIdentity(LiveIdentity *identity, bool report = false) {
     if (identity->audioBasic != kAudioStaticObject ||
         readWord(kAudioBasicGlobal) != identity->audioBasic ||
         !isMem1Range(identity->audioBasic, kAudioSceneOffset + sizeof(u32)) ||
-        readWord(identity->audioBasic + 8u) != kAudioVtable) {
-        return gateFailure(Gate::Audio, identity->audioBasic, report);
+        readWord(identity->audioBasic + 8u) != kAudioVtable ||
+        !validAudioBootstrap(identity->audioBasic)) {
+        const u32 handle =
+            isMem1Range(identity->audioBasic,
+                        kAudioBootstrapHandleOffset + sizeof(u32))
+                ? readWord(identity->audioBasic +
+                           kAudioBootstrapHandleOffset)
+                : identity->audioBasic;
+        return gateFailure(Gate::Audio, handle, report);
     }
     identity->audioScene =
         readWord(identity->audioBasic + kAudioSceneOffset);
@@ -566,24 +585,22 @@ void freezeEnd(const FreezeState &state) {
 }
 
 bool quiesceAudio(const LiveIdentity &identity) {
-    // LM's scene switch drains SE/sequence/stream handles and rebuilds the
-    // bootstrap sound. Passing the live scene avoids a resource-bank change;
-    // stop that one replacement handle too so no live JAudio object remains.
+    // LM's scene switch drains prior SE/sequence/stream handles and rebuilds
+    // its required bootstrap sequence. Passing the live scene avoids a
+    // resource-bank change; the replacement handle must remain engine-owned.
+    if (!validAudioBootstrap(identity.audioBasic)) {
+        return gateFailure(
+            Gate::Audio,
+            readWord(identity.audioBasic + kAudioBootstrapHandleOffset),
+            true);
+    }
     reinterpret_cast<AudioChangeSoundSceneFn>(kAudioChangeSoundSceneAddr)(
         reinterpret_cast<void *>(identity.audioBasic), identity.audioScene);
-    const u32 slot = identity.audioBasic + kAudioBootstrapHandleOffset;
-    const u32 bootstrap = readWord(slot);
-    if (bootstrap != 0u) {
-        if (!isMem1Range(bootstrap, sizeof(u32))) {
-            return gateFailure(Gate::Audio, bootstrap, true);
-        }
-        reinterpret_cast<AudioStopSoundHandleFn>(
-            kAudioStopSoundHandleAddr)(
-            reinterpret_cast<void *>(identity.audioBasic),
-            reinterpret_cast<void **>(slot), 0u);
-    }
-    if (readWord(slot) != 0u) {
-        return gateFailure(Gate::Audio, readWord(slot), true);
+    if (!validAudioBootstrap(identity.audioBasic)) {
+        return gateFailure(
+            Gate::Audio,
+            readWord(identity.audioBasic + kAudioBootstrapHandleOffset),
+            true);
     }
     return true;
 }
@@ -734,6 +751,7 @@ bool savedPointerCompatible(u32 saved, u32 current,
 }
 
 void saveState() {
+    LMCrash::note(kEventStateSavePhase, 0x01u, sStableFrames);
     LiveIdentity preflight;
     if (sStableFrames < kRequiredStableFrames ||
         !buildIdentity(&preflight) ||
@@ -746,12 +764,14 @@ void saveState() {
         return;
     }
 
-    // A saved slot must contain no live JAudio handles. The same reset runs
-    // immediately before load, leaving the uncaptured audio engine coherent.
+    // Drain prior live handles through LM's own scene-change path. Its new
+    // bootstrap handle remains in uncaptured system audio state.
+    LMCrash::note(kEventStateSavePhase, 0x20u, preflight.audioBasic);
     if (!quiesceAudio(preflight)) {
         setReject(LMState::Status::Busy, preflight.audioBasic);
         return;
     }
+    LMCrash::note(kEventStateSavePhase, 0x21u, preflight.audioBasic);
     LiveIdentity before;
     if (!buildIdentity(&before) || !ioIdle() || !heapsHealthy(before)) {
         setReject(LMState::Status::Busy, preflight.heap);
@@ -763,15 +783,17 @@ void saveState() {
         return;
     }
 
+    LMCrash::note(kEventStateSavePhase, 0x40u, before.heap);
     const FreezeState freeze = freezeBegin();
+    LMCrash::note(kEventStateSavePhase, 0x43u, before.heap);
     LiveIdentity live;
-    if (!buildIdentity(&live) || !sameIdentity(before, live) || !ioIdle() ||
-        !heapsHealthy(live)) {
+    if (!buildIdentity(&live) || !sameIdentity(before, live)) {
         freezeEnd(freeze);
         setReject(LMState::Status::Busy, live.heap);
         return;
     }
 
+    LMCrash::note(kEventStateSavePhase, 0x60u, live.heap);
     SnapshotHeader *header =
         reinterpret_cast<SnapshotHeader *>(kSnapshotBase);
     header->magic = 0u;
@@ -846,23 +868,29 @@ void saveState() {
               reinterpret_cast<void *>(kInGameFlagsBase +
                                        kInGameFlagsOffset),
               kStateStaticsSize);
+    LMCrash::note(kEventStateSavePhase, 0x63u, live.heapSize);
     copyWords(reinterpret_cast<void *>(kSnapshotBase + kHeapDataOffset),
               reinterpret_cast<void *>(live.heapStart), live.heapSize);
+    LMCrash::note(kEventStateSavePhase, 0x64u, totalSize);
     header->checksum = snapshotChecksum(header);
 
+    LMCrash::note(kEventStateSavePhase, 0x65u, totalSize);
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(header, totalSize);
     asm volatile("sync" ::: "memory");
     header->magic = kSnapshotMagic;
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(header, 32u);
     asm volatile("sync" ::: "memory");
+    LMCrash::note(kEventStateSavePhase, 0x70u, live.heap);
     freezeEnd(freeze);
 
     sSnapshotSize = totalSize;
     sStatus = LMState::Status::Saved;
+    LMCrash::note(kEventStateSavePhase, 0x7Fu, totalSize);
     LMCrash::note(kEventStateSave, live.heap, live.heapSize);
 }
 
 void loadState() {
+    LMCrash::note(kEventStateLoadPhase, 0x01u, sStableFrames);
     SnapshotHeader *header =
         reinterpret_cast<SnapshotHeader *>(kSnapshotBase);
     reinterpret_cast<CacheRangeFn>(kDCInvalidateRangeAddr)(header,
@@ -921,10 +949,12 @@ void loadState() {
         return;
     }
 
+    LMCrash::note(kEventStateLoadPhase, 0x20u, preflight.audioBasic);
     if (!quiesceAudio(preflight)) {
         setReject(LMState::Status::Busy, preflight.audioBasic);
         return;
     }
+    LMCrash::note(kEventStateLoadPhase, 0x21u, preflight.audioBasic);
     LiveIdentity before;
     if (!buildIdentity(&before) || !ioIdle() ||
         !headerMatchesLive(header, before) || !heapsHealthy(before)) {
@@ -932,15 +962,18 @@ void loadState() {
         return;
     }
 
+    LMCrash::note(kEventStateLoadPhase, 0x40u, before.heap);
     const FreezeState freeze = freezeBegin();
+    LMCrash::note(kEventStateLoadPhase, 0x43u, before.heap);
     LiveIdentity live;
-    if (!buildIdentity(&live) || !sameIdentity(before, live) || !ioIdle() ||
-        !headerMatchesLive(header, live) || !heapsHealthy(live)) {
+    if (!buildIdentity(&live) || !sameIdentity(before, live) ||
+        !headerMatchesLive(header, live)) {
         freezeEnd(freeze);
         setReject(LMState::Status::Busy, live.heap);
         return;
     }
 
+    LMCrash::note(kEventStateLoadPhase, 0x60u, live.heapSize);
     copyWords(reinterpret_cast<void *>(live.heap + kHeapMetadataStart),
               reinterpret_cast<void *>(kSnapshotBase + kHeapMetadataOffset),
               kHeapMetadataSize);
@@ -994,8 +1027,9 @@ void loadState() {
     reinterpret_cast<VoidFn>(kGXInvalidateTexAllAddr)();
     asm volatile("sync" ::: "memory");
 
-    const bool healthyAfter = heapsHealthy(live);
+    LMCrash::note(kEventStateLoadPhase, 0x70u, live.heap);
     freezeEnd(freeze);
+    const bool healthyAfter = heapsHealthy(live);
 
     sSnapshotSize = header->totalSize;
     sStableFrames = 0u;
@@ -1004,6 +1038,7 @@ void loadState() {
         return;
     }
     sStatus = LMState::Status::Loaded;
+    LMCrash::note(kEventStateLoadPhase, 0x7Fu, header->totalSize);
     LMCrash::note(kEventStateLoad, live.heap, live.heapSize);
 }
 

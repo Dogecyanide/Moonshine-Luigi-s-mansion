@@ -330,7 +330,8 @@ static int WriteText(u32 target)
 
 	EmitString("\r\nBreadcrumbs (1=app, 2=context, 3=setup-enter, "
 		"4=setup-return, 5=stage-ready, 256=state-save, "
-		"257=state-load, 271=state-refused):\r\n");
+		"257=state-load, 271=state-refused, 272=save-phase, "
+		"273=load-phase):\r\n");
 	start = Snapshot.breadcrumbSeq - Snapshot.breadcrumbCount;
 	for (i = 0; i < Snapshot.breadcrumbCount &&
 		i < SUSAMUNE_CRASH_BREADCRUMB_COUNT; ++i)

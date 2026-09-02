@@ -13,7 +13,13 @@ PATCHES_PATH = ROOT / "lm_diag" / "patches.py"
 STATE_SOURCE = (ROOT / "lm_diag" / "src" / "lm_state.cpp").read_text(
     encoding="utf-8"
 )
+DIAG_SOURCE = (ROOT / "lm_diag" / "src" / "lm_diag.cpp").read_text(
+    encoding="utf-8"
+)
 CRASH_SOURCE = (ROOT / "lm_diag" / "src" / "lm_crash.cpp").read_text(
+    encoding="utf-8"
+)
+KERNEL_CRASH_SOURCE = (ROOT / "launcher" / "kernel" / "SusamuneCrash.c").read_text(
     encoding="utf-8"
 )
 
@@ -57,12 +63,6 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
                 {"addr": 0x801DAED8, "expected": 0x7C0802A6},
                 {"addr": 0x801DAEDC, "expected": 0x90010004},
                 {"addr": 0x801DAEE0, "expected": 0x9421FFF0},
-                {"addr": 0x8018C9EC, "expected": 0x7C0802A6},
-                {"addr": 0x8018C9F0, "expected": 0x90010004},
-                {"addr": 0x8018C9F4, "expected": 0x9421FFD8},
-                {"addr": 0x8018CA04, "expected": 0x7C9E2379},
-                {"addr": 0x8018CA14, "expected": 0x809E0000},
-                {"addr": 0x8018CC00, "expected": 0x901E0000},
                 {"addr": 0x8018B810, "expected": 0x93ED12F0},
                 {"addr": 0x8018D4E4, "expected": 0x7C0802A6},
                 {"addr": 0x8018D510, "expected": 0x806301E8},
@@ -136,14 +136,46 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kAudioBasicGlobal = 0x804A1DD0u", STATE_SOURCE)
         self.assertIn("kAudioStaticObject = 0x803E3CF8u", STATE_SOURCE)
         self.assertIn("kAudioVtable = 0x80383FB0u", STATE_SOURCE)
-        self.assertIn("kAudioStopSoundHandleAddr = 0x8018C9ECu", STATE_SOURCE)
+        self.assertIn("kAudioBootstrapSoundId = 0x80000800u", STATE_SOURCE)
         self.assertIn("kAudioChangeSoundSceneAddr = 0x8018D4E4u", STATE_SOURCE)
         self.assertIn("!quiesceAudio(preflight)", STATE_SOURCE)
         self.assertEqual(STATE_SOURCE.count("!quiesceAudio(preflight)"), 2)
-        self.assertIn("reinterpret_cast<void **>(slot)", STATE_SOURCE)
-        self.assertIn("readWord(slot) != 0u", STATE_SOURCE)
+        self.assertIn("validAudioBootstrap(identity.audioBasic)", STATE_SOURCE)
+        self.assertNotIn("AudioStopSoundHandleFn", STATE_SOURCE)
+        self.assertNotIn("kAudioStopSoundHandleAddr", STATE_SOURCE)
         self.assertIn("kOSDisableSchedulerAddr = 0x801DAE98u", STATE_SOURCE)
         self.assertIn("kOSEnableSchedulerAddr = 0x801DAED8u", STATE_SOURCE)
+
+    def test_state_transactions_leave_phase_breadcrumbs(self) -> None:
+        self.assertIn("kEventStateSavePhase = 0x110u", STATE_SOURCE)
+        self.assertIn("kEventStateLoadPhase = 0x111u", STATE_SOURCE)
+        self.assertGreaterEqual(
+            STATE_SOURCE.count("LMCrash::note(kEventStateSavePhase"), 8
+        )
+        self.assertGreaterEqual(
+            STATE_SOURCE.count("LMCrash::note(kEventStateLoadPhase"), 6
+        )
+        self.assertIn("272=save-phase", KERNEL_CRASH_SOURCE)
+        self.assertIn("273=load-phase", KERNEL_CRASH_SOURCE)
+
+    def test_frozen_transactions_do_not_take_heap_mutexes(self) -> None:
+        save_frozen = STATE_SOURCE.split(
+            "const FreezeState freeze = freezeBegin();", 1
+        )[1].split("freezeEnd(freeze);", 1)[0]
+        load_frozen = STATE_SOURCE.rsplit(
+            "const FreezeState freeze = freezeBegin();", 1
+        )[1].split("freezeEnd(freeze);", 1)[0]
+        self.assertNotIn("heapsHealthy", save_frozen)
+        self.assertNotIn("heapsHealthy", load_frozen)
+        self.assertNotIn("ioIdle", save_frozen)
+        self.assertNotIn("ioIdle", load_frozen)
+
+    def test_overlay_is_painted_before_state_transaction(self) -> None:
+        diag = DIAG_SOURCE.split(
+            'extern "C" void diagnosticCopyDisp', 1
+        )[1]
+        self.assertLess(diag.index("drawRawHeartbeat"),
+                        diag.index("LMState::tick"))
 
     def test_state_gates_uncaptured_allocator_epochs(self) -> None:
         self.assertIn("header->rootFreeHead == live.rootFreeHead", STATE_SOURCE)

@@ -65,16 +65,8 @@ checks = [
     {"addr": 0x801DAED8, "expected": 0x7C0802A6},
     {"addr": 0x801DAEDC, "expected": 0x90010004},
     {"addr": 0x801DAEE0, "expected": 0x9421FFF0},
-    # JAIBasic::stopSoundHandle, used to clear the bootstrap handle that the
-    # scene-change routine deliberately starts after draining prior sounds.
-    {"addr": 0x8018C9EC, "expected": 0x7C0802A6},
-    {"addr": 0x8018C9F0, "expected": 0x90010004},
-    {"addr": 0x8018C9F4, "expected": 0x9421FFD8},
-    {"addr": 0x8018CA04, "expected": 0x7C9E2379},
-    {"addr": 0x8018CA14, "expected": 0x809E0000},
-    {"addr": 0x8018CC00, "expected": 0x901E0000},
     # JAIBasic::basic assignment and the LM JAAMain scene-change body used to
-    # drain audio before a snapshot transaction.
+    # drain prior audio and recreate its required bootstrap sequence.
     {"addr": 0x8018B810, "expected": 0x93ED12F0},
     {"addr": 0x8018D4E4, "expected": 0x7C0802A6},
     {"addr": 0x8018D510, "expected": 0x806301E8},

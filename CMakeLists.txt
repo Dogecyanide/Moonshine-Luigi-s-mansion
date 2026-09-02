@@ -97,7 +97,7 @@ if(LAUNCHER_VERSION STREQUAL "V1.2.0" OR
    LAUNCHER_VERSION MATCHES "^V2\\.1\\.0 Release Candidate [0-9]+")
     unset(LAUNCHER_VERSION CACHE)
 endif()
-set(LAUNCHER_VERSION "Full-State Experimental 0.3.3" CACHE STRING
+set(LAUNCHER_VERSION "Full-State Experimental 0.3.4" CACHE STRING
     "Version shown in the packaged launcher meta.xml")
 
 option(LAUNCHER_DISABLE_SUSAMUNE_PATCH "Disable the Susamune patch in the launcher kernel" OFF)
