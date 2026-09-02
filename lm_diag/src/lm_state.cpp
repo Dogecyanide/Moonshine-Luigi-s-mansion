@@ -42,6 +42,12 @@ constexpr u32 kCardBlockGlobal = 0x80495960u;
 constexpr u32 kCardControlStride = 0x108u;
 constexpr u32 kCardResultOffset = 0x04u;
 constexpr u32 kCardResultBusy = 0xFFFFFFFFu;
+constexpr u32 kAudioObjectGlobal = 0x804A03A8u;
+constexpr u32 kAudioBasicGlobal = 0x804A1DD0u;
+constexpr u32 kAudioStaticObject = 0x803E3CF8u;
+constexpr u32 kAudioVtable = 0x80383FB0u;
+constexpr u32 kAudioSceneOffset = 0x50u;
+constexpr u32 kAudioBootstrapHandleOffset = 0x64u;
 
 constexpr u32 kDvdBusyPredicateAddr = 0x80006A5Cu;
 constexpr u32 kExpHeapCheckAddr = 0x801CA61Cu;
@@ -49,7 +55,11 @@ constexpr u32 kDCInvalidateRangeAddr = 0x801D5DF4u;
 constexpr u32 kDCStoreRangeAddr = 0x801D5E58u;
 constexpr u32 kOSDisableInterruptsAddr = 0x801D85B0u;
 constexpr u32 kOSRestoreInterruptsAddr = 0x801D85D8u;
+constexpr u32 kOSDisableSchedulerAddr = 0x801DAE98u;
+constexpr u32 kOSEnableSchedulerAddr = 0x801DAED8u;
 constexpr u32 kGXInvalidateTexAllAddr = 0x801F1C10u;
+constexpr u32 kAudioStopSoundHandleAddr = 0x8018C9ECu;
+constexpr u32 kAudioChangeSoundSceneAddr = 0x8018D4E4u;
 
 constexpr u32 kExpHeapVtable = 0x8038886Cu;
 constexpr u32 kMem1Start = 0x80000000u;
@@ -57,7 +67,7 @@ constexpr u32 kMem1End = 0x81800000u;
 constexpr u32 kSnapshotBase = SUSAMUNE_MEM2_SNAPSHOT_PPC_BASE;
 constexpr u32 kSnapshotCapacity = SUSAMUNE_MEM2_SNAPSHOT_SIZE;
 constexpr u32 kSnapshotMagic = 0x4C4D5354u;  // 'LMST'
-constexpr u32 kSnapshotVersion = 2u;
+constexpr u32 kSnapshotVersion = 3u;
 constexpr u32 kHeaderSize = 0x100u;
 constexpr u32 kHeapMetadataStart = 0x3Cu;
 constexpr u32 kHeapMetadataEnd = 0x84u;
@@ -85,8 +95,11 @@ typedef bool (*BoolFn)();
 typedef bool (*HeapCheckFn)(void *);
 typedef bool (*DisableInterruptsFn)();
 typedef void (*RestoreInterruptsFn)(bool);
+typedef s32 (*SchedulerFn)();
 typedef void (*VoidFn)();
 typedef void (*CacheRangeFn)(void *, u32);
+typedef void (*AudioStopSoundHandleFn)(void *, void **, u32);
+typedef void (*AudioChangeSoundSceneFn)(void *, u32);
 
 struct LiveIdentity {
     u32 heap;
@@ -129,6 +142,8 @@ struct LiveIdentity {
     u32 gameMode;
     u32 gameModeCount;
     u32 currentHeapGroup;
+    u32 audioBasic;
+    u32 audioScene;
 };
 
 struct SnapshotHeader {
@@ -189,7 +204,9 @@ struct SnapshotHeader {
     u32 aramCount0;
     u32 aramCount1;
     u32 dvdOutstanding;
-    u32 reserved[5];
+    u32 audioBasic;
+    u32 audioScene;
+    u32 reserved[3];
 };
 
 static_assert(sizeof(SnapshotHeader) == kHeaderSize,
@@ -228,6 +245,7 @@ enum class Gate : u32 {
     Aram1,
     Card0,
     Card1,
+    Audio,
 };
 
 LMState::Status sStatus = LMState::Status::Empty;
@@ -382,6 +400,8 @@ bool buildIdentity(LiveIdentity *identity, bool report = false) {
     identity->gameMode = readWord(kGameModeGlobal);
     identity->gameModeCount = readWord(kGameModeCountGlobal);
     identity->currentHeapGroup = readByte(kCurrentHeapGroupGlobal);
+    identity->audioBasic = readWord(kAudioObjectGlobal);
+    identity->audioScene = 0u;
 
     const bool distinctHeaps = identity->rootHeap != identity->systemHeap &&
         identity->rootHeap != identity->heap &&
@@ -424,6 +444,14 @@ bool buildIdentity(LiveIdentity *identity, bool report = false) {
     if (!isMem1Range(identity->currentScene, sizeof(u32))) {
         return gateFailure(Gate::Scene, identity->currentScene, report);
     }
+    if (identity->audioBasic != kAudioStaticObject ||
+        readWord(kAudioBasicGlobal) != identity->audioBasic ||
+        !isMem1Range(identity->audioBasic, kAudioSceneOffset + sizeof(u32)) ||
+        readWord(identity->audioBasic + 8u) != kAudioVtable) {
+        return gateFailure(Gate::Audio, identity->audioBasic, report);
+    }
+    identity->audioScene =
+        readWord(identity->audioBasic + kAudioSceneOffset);
     gateReady(report);
     return true;
 }
@@ -516,6 +544,7 @@ FreezeState freezeBegin() {
     FreezeState state;
     state.interruptsWereEnabled =
         reinterpret_cast<DisableInterruptsFn>(kOSDisableInterruptsAddr)();
+    reinterpret_cast<SchedulerFn>(kOSDisableSchedulerAddr)();
     volatile u16 *dmaControl = reinterpret_cast<volatile u16 *>(0xCC005036u);
     state.dmaWasEnabled = (*dmaControl & 0x8000u) != 0u;
     *dmaControl = static_cast<u16>(*dmaControl & ~0x8000u);
@@ -531,8 +560,32 @@ void freezeEnd(const FreezeState &state) {
                       ? static_cast<u16>(liveControl | 0x8000u)
                       : static_cast<u16>(liveControl & ~0x8000u);
     asm volatile("sync" ::: "memory");
+    reinterpret_cast<SchedulerFn>(kOSEnableSchedulerAddr)();
     reinterpret_cast<RestoreInterruptsFn>(kOSRestoreInterruptsAddr)(
         state.interruptsWereEnabled);
+}
+
+bool quiesceAudio(const LiveIdentity &identity) {
+    // LM's scene switch drains SE/sequence/stream handles and rebuilds the
+    // bootstrap sound. Passing the live scene avoids a resource-bank change;
+    // stop that one replacement handle too so no live JAudio object remains.
+    reinterpret_cast<AudioChangeSoundSceneFn>(kAudioChangeSoundSceneAddr)(
+        reinterpret_cast<void *>(identity.audioBasic), identity.audioScene);
+    const u32 slot = identity.audioBasic + kAudioBootstrapHandleOffset;
+    const u32 bootstrap = readWord(slot);
+    if (bootstrap != 0u) {
+        if (!isMem1Range(bootstrap, sizeof(u32))) {
+            return gateFailure(Gate::Audio, bootstrap, true);
+        }
+        reinterpret_cast<AudioStopSoundHandleFn>(
+            kAudioStopSoundHandleAddr)(
+            reinterpret_cast<void *>(identity.audioBasic),
+            reinterpret_cast<void **>(slot), 0u);
+    }
+    if (readWord(slot) != 0u) {
+        return gateFailure(Gate::Audio, readWord(slot), true);
+    }
+    return true;
 }
 
 void setReject(LMState::Status status, u32 detail) {
@@ -599,6 +652,7 @@ bool basicHeaderValid(const SnapshotHeader *header) {
            header->gameMode == header->missionMode &&
            header->gameModeCount == 1u &&
            isMem1Range(header->currentScene, sizeof(u32)) &&
+           header->audioBasic == kAudioStaticObject &&
            header->heapMode <= 0xFFu && header->heapGroup <= 0xFFu &&
            header->rootHeapMode <= 0xFFu &&
            header->rootHeapGroup <= 0xFFu &&
@@ -659,6 +713,8 @@ bool headerMatchesLive(const SnapshotHeader *header,
            header->systemUsedHead == live.systemUsedHead &&
            header->systemUsedTail == live.systemUsedTail &&
            header->currentHeapGroup == live.currentHeapGroup &&
+           header->audioBasic == live.audioBasic &&
+           header->audioScene == live.audioScene &&
            header->volume[0] == live.volume[0] &&
            header->volume[1] == live.volume[1] &&
            header->volume[2] == live.volume[2];
@@ -678,19 +734,32 @@ bool savedPointerCompatible(u32 saved, u32 current,
 }
 
 void saveState() {
-    LiveIdentity before;
-    if (sStableFrames < kRequiredStableFrames || !buildIdentity(&before) ||
-        !sameIdentity(before, sLastIdentity) || !ioIdle()) {
+    LiveIdentity preflight;
+    if (sStableFrames < kRequiredStableFrames ||
+        !buildIdentity(&preflight) ||
+        !sameIdentity(preflight, sLastIdentity) || !ioIdle()) {
         setReject(LMState::Status::Busy, sStableFrames);
+        return;
+    }
+    if (!heapsHealthy(preflight)) {
+        setReject(LMState::Status::BadHeap, preflight.heap);
+        return;
+    }
+
+    // A saved slot must contain no live JAudio handles. The same reset runs
+    // immediately before load, leaving the uncaptured audio engine coherent.
+    if (!quiesceAudio(preflight)) {
+        setReject(LMState::Status::Busy, preflight.audioBasic);
+        return;
+    }
+    LiveIdentity before;
+    if (!buildIdentity(&before) || !ioIdle() || !heapsHealthy(before)) {
+        setReject(LMState::Status::Busy, preflight.heap);
         return;
     }
     const u32 totalSize = kHeapDataOffset + before.heapSize;
     if (totalSize > kSnapshotCapacity) {
         setReject(LMState::Status::TooLarge, totalSize);
-        return;
-    }
-    if (!heapsHealthy(before)) {
-        setReject(LMState::Status::BadHeap, before.heap);
         return;
     }
 
@@ -767,6 +836,8 @@ void saveState() {
     header->aramCount0 = readWord(kAramList0Global + 8u);
     header->aramCount1 = readWord(kAramList1Global + 8u);
     header->dvdOutstanding = readWord(kDvdOutstandingGlobal);
+    header->audioBasic = live.audioBasic;
+    header->audioScene = live.audioScene;
 
     copyWords(reinterpret_cast<void *>(kSnapshotBase + kHeapMetadataOffset),
               reinterpret_cast<void *>(live.heap + kHeapMetadataStart),
@@ -812,14 +883,30 @@ void loadState() {
         return;
     }
 
-    LiveIdentity before;
-    if (sStableFrames < kRequiredStableFrames || !buildIdentity(&before) ||
-        !sameIdentity(before, sLastIdentity) || !ioIdle()) {
+    LiveIdentity preflight;
+    if (sStableFrames < kRequiredStableFrames ||
+        !buildIdentity(&preflight) ||
+        !sameIdentity(preflight, sLastIdentity) || !ioIdle()) {
         setReject(LMState::Status::Busy, sStableFrames);
         return;
     }
-    if (!headerMatchesLive(header, before)) {
-        setReject(LMState::Status::Epoch, before.heap);
+    if (header->heap != preflight.heap ||
+        header->heapStart != preflight.heapStart ||
+        header->heapEnd != preflight.heapEnd ||
+        header->rootHeap != preflight.rootHeap ||
+        header->systemHeap != preflight.systemHeap ||
+        header->missionMode != preflight.missionMode ||
+        header->mapArchive != preflight.mapArchive ||
+        header->mapValue != preflight.mapValue ||
+        header->sceneValue != preflight.sceneValue ||
+        header->currentScene != preflight.currentScene ||
+        header->gameMode != preflight.gameMode ||
+        header->audioBasic != preflight.audioBasic ||
+        header->audioScene != preflight.audioScene ||
+        header->volume[0] != preflight.volume[0] ||
+        header->volume[1] != preflight.volume[1] ||
+        header->volume[2] != preflight.volume[2]) {
+        setReject(LMState::Status::Epoch, preflight.heap);
         return;
     }
     if (!savedPointerCompatible(header->currentScene,
@@ -829,8 +916,19 @@ void loadState() {
         setReject(LMState::Status::Epoch, header->currentScene);
         return;
     }
-    if (!heapsHealthy(before)) {
-        setReject(LMState::Status::BadHeap, before.heap);
+    if (!heapsHealthy(preflight)) {
+        setReject(LMState::Status::BadHeap, preflight.heap);
+        return;
+    }
+
+    if (!quiesceAudio(preflight)) {
+        setReject(LMState::Status::Busy, preflight.audioBasic);
+        return;
+    }
+    LiveIdentity before;
+    if (!buildIdentity(&before) || !ioIdle() ||
+        !headerMatchesLive(header, before) || !heapsHealthy(before)) {
+        setReject(LMState::Status::Epoch, preflight.heap);
         return;
     }
 
@@ -1027,6 +1125,8 @@ const char *gateText() {
         return "CARD0";
     case Gate::Card1:
         return "CARD1";
+    case Gate::Audio:
+        return "AUDIO";
     }
     return "?";
 }

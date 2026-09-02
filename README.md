@@ -6,7 +6,7 @@ Mansion (`GLMJ01`).
 
 ## Current status
 
-`Full-State Experimental 0.3.2` is the first hardware-testable state build.
+`Full-State Experimental 0.3.3` is the current hardware-testable state build.
 
 - The custom Nintendont launcher accepts only the verified Japanese `GLMJ01`
   revision-0 executable for injection.
@@ -18,6 +18,8 @@ Mansion (`GLMJ01`).
 - Save/load is refused while DVD, ARAM, or memory-card work is active, while
   the heap is unstable, when a slot checksum fails, or when the observed live
   allocator/resource markers differ from the saved ones.
+- Each transaction drains LM's JAudio scene handles, clears the replacement
+  bootstrap handle, and holds the OS scheduler while memory is copied.
 - Moonshine's ARM crash writer now accepts LM exception reports and rotates
   `susamune_crash_a/b.bin` plus readable `.txt` reports on the game-source
   storage device.
@@ -25,8 +27,9 @@ Mansion (`GLMJ01`).
 Controls are D-pad Left to save and D-pad Right to load. Start with same-room
 tests. This first build normally rejects a load with `EPOCH` after the room,
 scene, resource, or uncaptured allocator markers change. Those markers are not
-a complete resource fingerprint, and JAudio software state is not reset yet,
-so this is a crash-risk heap-state feasibility test, not cross-room support.
+a complete resource fingerprint, so this remains a crash-risk heap-state
+feasibility test, not cross-room support. Audio may remain silent after a
+save or load until game logic starts the room sequence again.
 
 The inherited Sunshine payload remains in the repository as porting reference.
 Its build targets are hidden unless CMake is explicitly configured with
@@ -63,7 +66,7 @@ The build emits a version-labelled tester package plus a stable compatibility
 name:
 
 ```text
-build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.2.zip
+build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.3.zip
 build-lm-diag/moonshine_luigis_mansion_launcher.zip
 ```
 
@@ -87,7 +90,7 @@ disc or ISO.
 
 Back up any real memory-card data, install the four packaged files under
 `apps/moonshine_luigis_mansion/`, and launch a clean revision-0 GLMJ01 image.
-The overlay must say `LM STATE X0.3.2`; wait until `F`, `C`, `H`, and `G` are
+The overlay must say `LM STATE X0.3.3`; wait until `F`, `C`, `H`, and `G` are
 `OK` and `ST` is at least 3. If `ST` remains zero, photograph the short gate
 name and eight-digit value shown after `G:`; they identify the rejected live
 condition without weakening it.

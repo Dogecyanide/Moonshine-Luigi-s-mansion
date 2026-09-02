@@ -51,6 +51,28 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
                 {"addr": 0x801D4128, "expected": 0x906D1594},
                 {"addr": 0x801D412C, "expected": 0x7C030378},
                 {"addr": 0x801D4130, "expected": 0x4E800020},
+                {"addr": 0x801DAE98, "expected": 0x7C0802A6},
+                {"addr": 0x801DAE9C, "expected": 0x90010004},
+                {"addr": 0x801DAEA0, "expected": 0x9421FFF0},
+                {"addr": 0x801DAED8, "expected": 0x7C0802A6},
+                {"addr": 0x801DAEDC, "expected": 0x90010004},
+                {"addr": 0x801DAEE0, "expected": 0x9421FFF0},
+                {"addr": 0x8018C9EC, "expected": 0x7C0802A6},
+                {"addr": 0x8018C9F0, "expected": 0x90010004},
+                {"addr": 0x8018C9F4, "expected": 0x9421FFD8},
+                {"addr": 0x8018CA04, "expected": 0x7C9E2379},
+                {"addr": 0x8018CA14, "expected": 0x809E0000},
+                {"addr": 0x8018CC00, "expected": 0x901E0000},
+                {"addr": 0x8018B810, "expected": 0x93ED12F0},
+                {"addr": 0x8018D4E4, "expected": 0x7C0802A6},
+                {"addr": 0x8018D510, "expected": 0x806301E8},
+                {"addr": 0x8018D54C, "expected": 0x800DF94C},
+                {"addr": 0x8018D5F0, "expected": 0x901E0064},
+                {"addr": 0x8018D5F8, "expected": 0x389D0800},
+                {"addr": 0x8018D61C, "expected": 0x38BE0064},
+                {"addr": 0x8018D62C, "expected": 0x4BFFF1F1},
+                {"addr": 0x8018D630, "expected": 0x801E0050},
+                {"addr": 0x804A03A8, "expected": 0x803E3CF8},
             ],
         )
         addresses = [entry["lmj"] for entry in lm_diag.patches]
@@ -80,7 +102,7 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kHeapMetadataStart = 0x3Cu", STATE_SOURCE)
         self.assertIn("kHeapMetadataEnd = 0x84u", STATE_SOURCE)
         self.assertIn("kExpHeapAlignment = 16u", STATE_SOURCE)
-        self.assertIn("kSnapshotVersion = 2u", STATE_SOURCE)
+        self.assertIn("kSnapshotVersion = 3u", STATE_SOURCE)
         self.assertIn("kInGameFlagsBase = 0x803C7CA0u", STATE_SOURCE)
         self.assertIn("kInGameFlagsOffset = 0x659u", STATE_SOURCE)
         self.assertIn("kInGameFlagsSize = 0x20u", STATE_SOURCE)
@@ -108,6 +130,20 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("ioIdle(true)", STATE_SOURCE)
         self.assertIn('return "CARD0";', STATE_SOURCE)
         self.assertIn('return "MODE";', STATE_SOURCE)
+        self.assertIn('return "AUDIO";', STATE_SOURCE)
+
+    def test_state_quiesces_audio_and_scheduler(self) -> None:
+        self.assertIn("kAudioBasicGlobal = 0x804A1DD0u", STATE_SOURCE)
+        self.assertIn("kAudioStaticObject = 0x803E3CF8u", STATE_SOURCE)
+        self.assertIn("kAudioVtable = 0x80383FB0u", STATE_SOURCE)
+        self.assertIn("kAudioStopSoundHandleAddr = 0x8018C9ECu", STATE_SOURCE)
+        self.assertIn("kAudioChangeSoundSceneAddr = 0x8018D4E4u", STATE_SOURCE)
+        self.assertIn("!quiesceAudio(preflight)", STATE_SOURCE)
+        self.assertEqual(STATE_SOURCE.count("!quiesceAudio(preflight)"), 2)
+        self.assertIn("reinterpret_cast<void **>(slot)", STATE_SOURCE)
+        self.assertIn("readWord(slot) != 0u", STATE_SOURCE)
+        self.assertIn("kOSDisableSchedulerAddr = 0x801DAE98u", STATE_SOURCE)
+        self.assertIn("kOSEnableSchedulerAddr = 0x801DAED8u", STATE_SOURCE)
 
     def test_state_gates_uncaptured_allocator_epochs(self) -> None:
         self.assertIn("header->rootFreeHead == live.rootFreeHead", STATE_SOURCE)
