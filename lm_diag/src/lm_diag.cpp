@@ -264,10 +264,10 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         kDirectPrintChangeFrameBufferAddr)(directPrint, xfb, kXfbWidth,
                                             kXfbHeight);
     reinterpret_cast<DirectPrintEraseFn>(kDirectPrintEraseAddr)(
-        directPrint, 0, kPanelTop, 320, 58);
+        directPrint, 0, kPanelTop, 320, 82);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM STATE X0.3.12 F:%s C:%s H:%s",
+        "LM STATE X0.3.13 F:%s C:%s H:%s",
         status(sFloorObserved, sFloorOk), status(sCanaryReady, sCanaryOk),
         status(sHeapCheckReady, sHeapCheckOk));
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
@@ -281,6 +281,32 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         LMState::epochMask(), LMState::epochSaved(), LMState::epochLive());
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 23u,
+        "V:%s S%lu>L%lu -%lu +%lu F%lu/%lu",
+        LMState::volumeTopologyText(),
+        LMState::volumeSavedCount(), LMState::volumeLiveCount(),
+        LMState::volumeRemovedCount(), LMState::volumeAddedCount(),
+        LMState::volumeSavedFault(), LMState::volumeLiveFault());
+    reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
+        directPrint, 2, kPanelTop + 30u,
+        "V%s%s O:%s B:%s %08lX", LMState::volumeChangeKind(0u),
+        LMState::volumeChangeName(0u),
+        LMState::volumeChangeObjectOwnerText(0u),
+        LMState::volumeChangeBackingOwnerText(0u),
+        LMState::volumeChangeObject(0u));
+    reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
+        directPrint, 2, kPanelTop + 37u,
+        "V%s%s O:%s B:%s %08lX", LMState::volumeChangeKind(1u),
+        LMState::volumeChangeName(1u),
+        LMState::volumeChangeObjectOwnerText(1u),
+        LMState::volumeChangeBackingOwnerText(1u),
+        LMState::volumeChangeObject(1u));
+    reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
+        directPrint, 2, kPanelTop + 44u,
+        "VC %08lX>%08lX D%08lX>%08lX", LMState::volumeSavedCurrent(),
+        LMState::volumeLiveCurrent(), LMState::volumeSavedDir(),
+        LMState::volumeLiveDir());
+    reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
+        directPrint, 2, kPanelTop + 51u,
         "ROOT %08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
         "GAME %08lX L/T/M %lu/%lu/%luK\n"

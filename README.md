@@ -6,7 +6,7 @@ Mansion (`GLMJ01`).
 
 ## Current status
 
-`Full-State Experimental 0.3.12` is the current hardware-testable state build.
+`Full-State Experimental 0.3.13` is the current hardware-testable state build.
 
 - The custom Nintendont launcher accepts only the verified Japanese `GLMJ01`
   revision-0 executable for injection.
@@ -38,6 +38,9 @@ Mansion (`GLMJ01`).
 - Cross-room refusals retain a complete 22-field epoch mask plus the saved and
   live values of the highest-priority mismatch on both the overlay and in
   `/ndebug.log`. This is diagnostic only; every compatibility gate remains on.
+- Volume-list refusals also walk and validate every mounted archive, preserve a
+  bounded save-time census outside the snapshot, and identify the first two
+  removed or added volumes with their object/backing heap ownership.
 
 Controls are D-pad Left to save and D-pad Right to load. Start with same-room
 tests. This first build normally rejects a load with `EPOCH` after the room,
@@ -81,7 +84,7 @@ The build emits a version-labelled tester package plus a stable compatibility
 name:
 
 ```text
-build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.12.zip
+build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.13.zip
 build-lm-diag/moonshine_luigis_mansion_launcher.zip
 ```
 
@@ -105,7 +108,7 @@ disc or ISO.
 
 Back up any real memory-card data, install the four packaged files under
 `apps/moonshine_luigis_mansion/`, and launch a clean revision-0 GLMJ01 image.
-The overlay must say `LM STATE X0.3.12`; wait until `F`, `C`, `H`, and `G` are
+The overlay must say `LM STATE X0.3.13`; wait until `F`, `C`, `H`, and `G` are
 `OK` and `ST` is at least 3. If `ST` remains zero, photograph the short gate
 name and eight-digit value shown after `G:`; they identify the rejected live
 condition without weakening it.
@@ -118,6 +121,14 @@ the overlay. For a preflight mismatch that reports `EPOCH`, the `E:` row
 identifies the first differing field, the `M` value records every differing
 preflight field, and the final pair is `saved>live`. A later generic refusal
 can still show `E:NONE M00000000`.
+
+For a volume refusal, `V:` shows saved/live member counts, total removals and
+additions, and whether the live order is an exact saved-list suffix (`HEAD1`,
+`HEAD2`, or `HEADN`). The following two rows name the first changed archives;
+`O` classifies the object owner and `B` identifies the heap range containing
+the validated RARC backing bytes; both use game, system, root, or unknown.
+`VC` and `D` compare the current-volume pointer and directory ID. These rows
+are observational only and never weaken the restore gate.
 
 After same-room restores repeat reliably, an adjacent-room attempt should
 normally report `EPOCH`; a load that gets past that gate is explicitly unsafe

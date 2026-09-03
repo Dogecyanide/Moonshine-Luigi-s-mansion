@@ -333,10 +333,39 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("u32 epochLive()", STATE_SOURCE)
         self.assertIn("Susamune: epoch mask=%08X first=%s", KERNEL_CRASH_SOURCE)
         self.assertIn("LMEpochFieldName(mask)", KERNEL_CRASH_SOURCE)
-        self.assertIn("LM STATE X0.3.12", DIAG_SOURCE)
+        self.assertIn("LM STATE X0.3.13", DIAG_SOURCE)
         self.assertIn(
             '"E:%s M%08lX %08lX>%08lX"', DIAG_SOURCE
         )
+
+    def test_volume_census_is_bounded_read_only_and_generation_keyed(self) -> None:
+        self.assertIn("kVolumeListGlobal = 0x80494754u", STATE_SOURCE)
+        self.assertIn("kCurrentVolumeGlobal = 0x804A2038u", STATE_SOURCE)
+        self.assertIn("kCurrentDirIdGlobal = 0x804A2040u", STATE_SOURCE)
+        self.assertIn("kMemArchiveVtable = 0x80388D5Cu", STATE_SOURCE)
+        self.assertIn("kMaxVolumes = 32u", STATE_SOURCE)
+        self.assertIn("sizeof(VolumeDescriptor) == 0x60u", STATE_SOURCE)
+        self.assertIn("bool captureVolumeCensus", STATE_SOURCE)
+        self.assertIn("readWord(node + 4u) != kVolumeListGlobal", STATE_SOURCE)
+        self.assertIn("entry.object + 0x18u != node", STATE_SOURCE)
+        self.assertIn("entry.previous != previous", STATE_SOURCE)
+        self.assertIn("previous != census->tail", STATE_SOURCE)
+        self.assertIn("kVolumeFaultChanged", STATE_SOURCE)
+        self.assertIn("captureVolumeName(&entry);", STATE_SOURCE)
+        self.assertIn("entry.contentSignature = content;", STATE_SOURCE)
+        self.assertIn("sSavedVolumeCensus.generation != header->generation", STATE_SOURCE)
+        self.assertIn("commitSavedVolumeCensus(header->generation);", STATE_SOURCE)
+        self.assertIn("diffVolumeCensus(sSavedVolumeCensus", STATE_SOURCE)
+        self.assertIn('return "HEAD1";', STATE_SOURCE)
+        self.assertIn('return "HEAD2";', STATE_SOURCE)
+        self.assertIn('"V:%s S%lu>L%lu -%lu +%lu F%lu/%lu"', DIAG_SOURCE)
+        self.assertIn('"V%s%s O:%s B:%s %08lX"', DIAG_SOURCE)
+        self.assertIn('"VC %08lX>%08lX D%08lX>%08lX"', DIAG_SOURCE)
+        # 0.3.13 diagnoses the mismatch; the exact restore gate remains.
+        self.assertIn("header->volume[0] == live.volume[0]", STATE_SOURCE)
+        self.assertIn("header->volume[1] == live.volume[1]", STATE_SOURCE)
+        self.assertIn("header->volume[2] == live.volume[2]", STATE_SOURCE)
+        self.assertIn("kSnapshotVersion = 6u", STATE_SOURCE)
 
     def test_state_quiesces_audio_and_scheduler(self) -> None:
         self.assertIn("kAudioBasicGlobal = 0x804A1DD0u", STATE_SOURCE)

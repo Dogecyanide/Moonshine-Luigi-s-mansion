@@ -42,6 +42,22 @@ const char *epochText();
 u32 epochMask();
 u32 epochSaved();
 u32 epochLive();
+const char *volumeTopologyText();
+u32 volumeSavedCount();
+u32 volumeLiveCount();
+u32 volumeRemovedCount();
+u32 volumeAddedCount();
+u32 volumeSavedFault();
+u32 volumeLiveFault();
+u32 volumeSavedCurrent();
+u32 volumeLiveCurrent();
+u32 volumeSavedDir();
+u32 volumeLiveDir();
+const char *volumeChangeKind(u32 index);
+const char *volumeChangeName(u32 index);
+const char *volumeChangeObjectOwnerText(u32 index);
+const char *volumeChangeBackingOwnerText(u32 index);
+u32 volumeChangeObject(u32 index);
 
 }  // namespace LMState
 

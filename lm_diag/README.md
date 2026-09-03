@@ -11,12 +11,16 @@ unavailable. The launcher authenticates the clean DOL layout and
 every hook word before it copies or patches anything; another revision runs
 unmodified.
 
-The seven overlay rows are:
+The eleven overlay rows are:
 
 ```text
-LM STATE X0.3.12 F:<floor> C:<canary> H:<heap check>
+LM STATE X0.3.13 F:<floor> C:<canary> H:<heap check>
 S:<state status> ST<stable frames> SZ<snapshot KiB> G:<gate> <gate value>
 E:<first epoch field> M<mismatch mask> <saved value>><live value>
+V:<topology> S<saved count>>L<live count> -<removed> +<added> F<save>/<live fault>
+V-/+<archive name> O:<object owner> B:<backing owner> <object address>
+V-/+<archive name> O:<object owner> B:<backing owner> <object address>
+VC <saved current volume>><live current volume> D<saved dir>><live dir>
 ROOT <root> <start>-<end>
 SYS  <system> L/T/M <largest>/<total>/<minimum total KiB>
 GAME <game>   L/T/M <largest>/<total>/<minimum total KiB>
@@ -92,6 +96,24 @@ Mask bits from low to high are:
 Matching list endpoints are only coarse sentinels: they do not prove that
 interior resource or allocator nodes are unchanged. A future relaxation needs
 a full member census rather than relying on this row alone.
+
+Version `0.3.13` adds that read-only census without relaxing the gate. It
+validates at most 32 complete `JKRFileLoader` links, rereads the list header to
+reject a concurrent change, copies each volume name into mod-owned memory, and
+records the GLMJ `JKRMemArchive` object and RARC backing metadata. `HEAD1`,
+`HEAD2`, or `HEADN` means the complete live list is exactly the saved list with
+that many leading members absent; `ORDER` means surviving members retain their
+relative order but the change is not a pure head removal; `MIX` means even the
+common order changed. `SBAD` or `LBAD` means the bounded traversal refused an
+invalid saved or live list. Owner letters are `G`ame, `S`ystem, `R`oot, or `?`.
+`O` is the archive object's recorded allocator (falling back to its address
+range); `B` is the heap range that actually contains the validated RARC bytes.
+The `Fsave/live` values are zero for valid censuses. Nonzero faults are:
+
+```text
+1 capacity  2 empty/header  3 endpoint  4 node  5 parent list  6 object
+7 embedded link  8 previous link  9 duplicate  10 tail  11 end  12 changed
+```
 
 If the inner game loop exits during that window, `96/97` identify loop
 entry/return, `98/99` bracket outer cleanup, and `9A/9B` bracket its restart.

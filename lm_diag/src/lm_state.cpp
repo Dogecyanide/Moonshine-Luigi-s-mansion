@@ -8,8 +8,8 @@
 #include "susamune/mod_bin.h"
 
 // The Kuribo build is deliberately freestanding. Clang may still lower a
-// small aggregate assignment to memcpy at -Oz, so keep the one runtime helper
-// it is allowed to request inside the injected image.
+// small aggregate operations to memcpy/memcmp at -Oz, so keep those runtime
+// helpers inside the injected image rather than depending on a retail libc.
 extern "C" void *memcpy(void *destination, const void *source, u32 size) {
     volatile u8 *out = static_cast<volatile u8 *>(destination);
     const volatile u8 *in = static_cast<const volatile u8 *>(source);
@@ -17,6 +17,17 @@ extern "C" void *memcpy(void *destination, const void *source, u32 size) {
         out[i] = in[i];
     }
     return destination;
+}
+
+extern "C" int memcmp(const void *left, const void *right, u32 size) {
+    const volatile u8 *a = static_cast<const volatile u8 *>(left);
+    const volatile u8 *b = static_cast<const volatile u8 *>(right);
+    for (u32 i = 0; i < size; ++i) {
+        if (a[i] != b[i]) {
+            return static_cast<int>(a[i]) - static_cast<int>(b[i]);
+        }
+    }
+    return 0;
 }
 
 namespace {
@@ -54,6 +65,8 @@ constexpr u32 kGameStaticRootGlobals[] = {
     kEnTypesManagerGlobal,
 };
 constexpr u32 kVolumeListGlobal = 0x80494754u;
+constexpr u32 kCurrentVolumeGlobal = 0x804A2038u;
+constexpr u32 kCurrentDirIdGlobal = 0x804A2040u;
 constexpr u32 kPadStatusGlobal = 0x80494778u;
 constexpr u32 kDvdOutstandingGlobal = 0x80391D98u;
 constexpr u32 kAramList0Global = 0x804946F4u;
@@ -82,6 +95,8 @@ constexpr u32 kGXInvalidateTexAllAddr = 0x801F1C10u;
 constexpr u32 kAudioChangeSoundSceneAddr = 0x8018D4E4u;
 
 constexpr u32 kExpHeapVtable = 0x8038886Cu;
+constexpr u32 kMemArchiveVtable = 0x80388D5Cu;
+constexpr u32 kRarcMagic = 0x52415243u;  // 'RARC'
 constexpr u32 kMem1Start = 0x80000000u;
 constexpr u32 kMem1End = 0x81800000u;
 constexpr u32 kSnapshotBase = SUSAMUNE_MEM2_SNAPSHOT_PPC_BASE;
@@ -159,6 +174,44 @@ constexpr u16 kDPadLeft = 0x0001u;
 constexpr u16 kDPadRight = 0x0002u;
 constexpr u32 kRequiredStableFrames = 3u;
 constexpr u32 kPostLoadTraceFrameLimit = 8u;
+constexpr u32 kMaxVolumes = 32u;
+constexpr u32 kVolumeNameBytes = 16u;
+constexpr u32 kVolumeNameHashBytes = 32u;
+constexpr u32 kVolumeNameValid = 1u << 0;
+constexpr u32 kVolumeArchiveValid = 1u << 1;
+constexpr u32 kVolumeRarcValid = 1u << 2;
+constexpr u32 kVolumeMounted = 1u << 8;
+constexpr u32 kVolumeModeShift = 16u;
+constexpr u32 kVolumeDirectionShift = 20u;
+constexpr u32 kVolumeOpen = 1u << 24;
+constexpr u32 kVolumeObjectOwnerShift = 0u;
+constexpr u32 kVolumeArchiveOwnerShift = 4u;
+constexpr u32 kVolumeObjectLocationShift = 8u;
+constexpr u32 kVolumeBackingLocationShift = 12u;
+constexpr u32 kVolumeOwnerMask = 0xFu;
+
+enum VolumeFault : u32 {
+    kVolumeFaultNone = 0u,
+    kVolumeFaultCapacity,
+    kVolumeFaultEmpty,
+    kVolumeFaultEndpoint,
+    kVolumeFaultNode,
+    kVolumeFaultList,
+    kVolumeFaultObject,
+    kVolumeFaultEmbeddedLink,
+    kVolumeFaultPrevious,
+    kVolumeFaultDuplicate,
+    kVolumeFaultTail,
+    kVolumeFaultEnd,
+    kVolumeFaultChanged,
+};
+
+enum VolumeOwner : u32 {
+    kVolumeOwnerOther = 0u,
+    kVolumeOwnerGame = 1u,
+    kVolumeOwnerSystem = 2u,
+    kVolumeOwnerRoot = 3u,
+};
 constexpr u32 kEventStateSave = 0x100u;
 constexpr u32 kEventStateLoad = 0x101u;
 constexpr u32 kEventStateReject = 0x10Fu;
@@ -362,10 +415,69 @@ struct EpochMismatch {
     u32 live;
 };
 
+struct VolumeDescriptor {
+    u32 node;
+    u32 object;
+    u32 previous;
+    u32 next;
+    u32 vtable;
+    u32 objectOwnerHeap;
+    u32 archiveHeap;
+    u32 namePointer;
+    u32 nameHash;
+    u32 type;
+    u32 stateFlags;
+    u32 mountCount;
+    u32 mountSource;
+    u32 archiveInfo;
+    u32 archiveHeader;
+    u32 archiveData;
+    u32 fileLength;
+    u32 dataLength;
+    u32 ownerFlags;
+    char name[kVolumeNameBytes];
+    u32 contentSignature;
+};
+
+struct VolumeCensus {
+    u32 generation;
+    u32 valid;
+    u32 fault;
+    u32 count;
+    u32 head;
+    u32 tail;
+    u32 currentVolume;
+    u32 currentDirId;
+    u32 signature;
+    u32 stableFrames;
+    VolumeDescriptor entries[kMaxVolumes];
+};
+
+struct VolumeDiff {
+    u32 ready;
+    u32 savedValid;
+    u32 liveValid;
+    u32 savedCount;
+    u32 liveCount;
+    u32 removedCount;
+    u32 addedCount;
+    u32 commonOrder;
+    u32 headOnly;
+    u32 currentChanged;
+    u32 removedIndices[2];
+    u32 addedIndices[2];
+};
+
+static_assert(sizeof(VolumeDescriptor) == 0x60u,
+              "LM volume descriptor layout drifted");
+
 LMState::Status sStatus = LMState::Status::Empty;
 LiveIdentity sLastIdentity = {};
 Gate sGate = Gate::Boot;
 EpochMismatch sEpochMismatch = {};
+VolumeCensus sSavedVolumeCensus = {};
+VolumeCensus sLiveVolumeCensus = {};
+VolumeDiff sVolumeDiff = {};
 bool sHaveIdentity;
 bool sSlotInitialized;
 u32 sStableFrames;
@@ -425,6 +537,11 @@ inline void writeWord(u32 address, u32 value) {
 inline bool isMem1Range(u32 address, u32 size) {
     return size <= kMem1End - kMem1Start && address >= kMem1Start &&
            address <= kMem1End - size && (address & 3u) == 0;
+}
+
+inline bool isMem1ByteRange(u32 address, u32 size) {
+    return size <= kMem1End - kMem1Start && address >= kMem1Start &&
+           address <= kMem1End - size;
 }
 
 bool isExpHeap(u32 heap) {
@@ -731,6 +848,363 @@ void clearWords(void *destination, u32 size) {
     }
 }
 
+u8 lowerAscii(u8 value) {
+    return value >= 'A' && value <= 'Z'
+               ? static_cast<u8>(value + ('a' - 'A'))
+               : value;
+}
+
+u32 hashVolumeWord(u32 hash, u32 value) {
+    hash ^= value;
+    return hash * 16777619u;
+}
+
+u32 classifyVolumeHeap(u32 heap, const LiveIdentity &identity) {
+    if (heap == identity.heap) return kVolumeOwnerGame;
+    if (heap == identity.systemHeap) return kVolumeOwnerSystem;
+    if (heap == identity.rootHeap) return kVolumeOwnerRoot;
+    return kVolumeOwnerOther;
+}
+
+u32 classifyVolumeRange(u32 address, u32 size,
+                        const LiveIdentity &identity) {
+    if (size == 0u || !isMem1ByteRange(address, size)) {
+        return kVolumeOwnerOther;
+    }
+    const u32 end = address + size;
+    if (address >= identity.heapStart && end <= identity.heapEnd) {
+        return kVolumeOwnerGame;
+    }
+    if (address >= identity.systemHeapStart && end <= identity.systemHeapEnd) {
+        return kVolumeOwnerSystem;
+    }
+    if (address >= identity.rootHeapStart && end <= identity.rootHeapEnd) {
+        return kVolumeOwnerRoot;
+    }
+    return kVolumeOwnerOther;
+}
+
+void captureVolumeName(VolumeDescriptor *entry) {
+    entry->name[0] = '?';
+    entry->name[1] = '\0';
+    if (!isMem1ByteRange(entry->namePointer, 1u)) {
+        return;
+    }
+
+    u32 hash = 2166136261u;
+    for (u32 i = 0; i < kVolumeNameHashBytes; ++i) {
+        if (!isMem1ByteRange(entry->namePointer + i, 1u)) {
+            return;
+        }
+        const u8 value = readByte(entry->namePointer + i);
+        if (value == 0u) {
+            entry->nameHash = hash;
+            entry->stateFlags |= kVolumeNameValid;
+            if (i == 0u) {
+                entry->name[0] = '/';
+                entry->name[1] = '\0';
+            }
+            return;
+        }
+        hash ^= lowerAscii(value);
+        hash *= 16777619u;
+        if (i + 1u < kVolumeNameBytes) {
+            entry->name[i] = value >= 0x20u && value <= 0x7Eu
+                                 ? static_cast<char>(value)
+                                 : '.';
+            entry->name[i + 1u] = '\0';
+        }
+    }
+}
+
+void failVolumeCensus(VolumeCensus *census, u32 fault) {
+    census->fault = fault;
+    census->valid = 0u;
+}
+
+bool captureVolumeCensus(VolumeCensus *census,
+                         const LiveIdentity &identity) {
+    clearWords(census, sizeof(*census));
+    census->count = identity.volume[2];
+    census->head = identity.volume[0];
+    census->tail = identity.volume[1];
+    census->currentVolume = readWord(kCurrentVolumeGlobal);
+    census->currentDirId = readWord(kCurrentDirIdGlobal);
+    census->stableFrames = sStableFrames;
+
+    if (census->count > kMaxVolumes) {
+        failVolumeCensus(census, kVolumeFaultCapacity);
+        return false;
+    }
+    if (census->count == 0u) {
+        if (census->head != 0u || census->tail != 0u) {
+            failVolumeCensus(census, kVolumeFaultEmpty);
+            return false;
+        }
+        census->signature = 2166136261u;
+        census->valid = 1u;
+        return true;
+    }
+    if (!isMem1Range(census->head, 0x10u) ||
+        !isMem1Range(census->tail, 0x10u)) {
+        failVolumeCensus(census, kVolumeFaultEndpoint);
+        return false;
+    }
+
+    u32 node = census->head;
+    u32 previous = 0u;
+    u32 signature = 2166136261u;
+    for (u32 i = 0; i < census->count; ++i) {
+        if (!isMem1Range(node, 0x10u)) {
+            failVolumeCensus(census, kVolumeFaultNode);
+            return false;
+        }
+        for (u32 prior = 0; prior < i; ++prior) {
+            if (census->entries[prior].node == node) {
+                failVolumeCensus(census, kVolumeFaultDuplicate);
+                return false;
+            }
+        }
+
+        VolumeDescriptor &entry = census->entries[i];
+        entry.node = node;
+        entry.object = readWord(node);
+        entry.previous = readWord(node + 8u);
+        entry.next = readWord(node + 0xCu);
+        if (readWord(node + 4u) != kVolumeListGlobal) {
+            failVolumeCensus(census, kVolumeFaultList);
+            return false;
+        }
+        if (!isMem1Range(entry.object, 0x68u)) {
+            failVolumeCensus(census, kVolumeFaultObject);
+            return false;
+        }
+        if (entry.object + 0x18u != node ||
+            readWord(entry.object + 0x18u) != entry.object) {
+            failVolumeCensus(census, kVolumeFaultEmbeddedLink);
+            return false;
+        }
+        if (entry.previous != previous) {
+            failVolumeCensus(census, kVolumeFaultPrevious);
+            return false;
+        }
+        for (u32 prior = 0; prior < i; ++prior) {
+            if (census->entries[prior].object == entry.object) {
+                failVolumeCensus(census, kVolumeFaultDuplicate);
+                return false;
+            }
+        }
+
+        entry.vtable = readWord(entry.object);
+        entry.objectOwnerHeap = readWord(entry.object + 4u);
+        entry.namePointer = readWord(entry.object + 0x28u);
+        entry.type = readWord(entry.object + 0x2Cu);
+        entry.mountCount = readWord(entry.object + 0x34u);
+        if (readByte(entry.object + 0x30u) != 0u) {
+            entry.stateFlags |= kVolumeMounted;
+        }
+        captureVolumeName(&entry);
+
+        if (entry.vtable == kMemArchiveVtable) {
+            entry.archiveHeap = readWord(entry.object + 0x38u);
+            entry.mountSource = readWord(entry.object + 0x40u);
+            entry.archiveInfo = readWord(entry.object + 0x44u);
+            entry.archiveHeader = readWord(entry.object + 0x5Cu);
+            entry.archiveData = readWord(entry.object + 0x60u);
+            entry.stateFlags |= kVolumeArchiveValid;
+            entry.stateFlags |=
+                (static_cast<u32>(readByte(entry.object + 0x3Cu)) & 0xFu)
+                << kVolumeModeShift;
+            entry.stateFlags |=
+                (readWord(entry.object + 0x58u) & 0xFu)
+                << kVolumeDirectionShift;
+            if (readByte(entry.object + 0x64u) != 0u) {
+                entry.stateFlags |= kVolumeOpen;
+            }
+            if (isMem1Range(entry.archiveHeader, 0x20u) &&
+                readWord(entry.archiveHeader) == kRarcMagic) {
+                const u32 fileLength = readWord(entry.archiveHeader + 4u);
+                const u32 dataLength = readWord(entry.archiveHeader + 0x10u);
+                if (fileLength >= 0x20u && dataLength <= fileLength &&
+                    isMem1ByteRange(entry.archiveHeader, fileLength)) {
+                    entry.fileLength = fileLength;
+                    entry.dataLength = dataLength;
+                    entry.stateFlags |= kVolumeRarcValid;
+                    u32 content = 2166136261u;
+                    for (u32 offset = 0u; offset < 0x20u; offset += 4u) {
+                        content = hashVolumeWord(
+                            content, readWord(entry.archiveHeader + offset));
+                    }
+                    const u32 backingEnd = entry.archiveHeader + fileLength;
+                    if (entry.archiveInfo >= entry.archiveHeader &&
+                        entry.archiveInfo <= backingEnd - 0x20u &&
+                        isMem1Range(entry.archiveInfo, 0x20u)) {
+                        for (u32 offset = 0u; offset < 0x20u; offset += 4u) {
+                            content = hashVolumeWord(
+                                content,
+                                readWord(entry.archiveInfo + offset));
+                        }
+                    }
+                    entry.contentSignature = content;
+                }
+            }
+        }
+
+        const u32 backingSize =
+            (entry.stateFlags & kVolumeRarcValid) != 0u
+                ? entry.fileLength
+                : (entry.archiveHeader != 0u ? sizeof(u32) : 0u);
+        entry.ownerFlags =
+            classifyVolumeHeap(entry.objectOwnerHeap, identity)
+                << kVolumeObjectOwnerShift;
+        entry.ownerFlags |=
+            classifyVolumeHeap(entry.archiveHeap, identity)
+            << kVolumeArchiveOwnerShift;
+        entry.ownerFlags |= classifyVolumeRange(entry.object, 0x68u, identity)
+                            << kVolumeObjectLocationShift;
+        entry.ownerFlags |=
+            classifyVolumeRange(entry.archiveHeader, backingSize, identity)
+            << kVolumeBackingLocationShift;
+
+        signature = hashVolumeWord(signature, entry.object);
+        signature = hashVolumeWord(signature, entry.nameHash);
+        signature = hashVolumeWord(signature, entry.type);
+        previous = node;
+        node = entry.next;
+    }
+
+    if (previous != census->tail) {
+        failVolumeCensus(census, kVolumeFaultTail);
+        return false;
+    }
+    if (node != 0u) {
+        failVolumeCensus(census, kVolumeFaultEnd);
+        return false;
+    }
+    if (readWord(kVolumeListGlobal) != census->head ||
+        readWord(kVolumeListGlobal + 4u) != census->tail ||
+        readWord(kVolumeListGlobal + 8u) != census->count) {
+        failVolumeCensus(census, kVolumeFaultChanged);
+        return false;
+    }
+    census->signature = signature;
+    census->valid = 1u;
+    return true;
+}
+
+bool sameVolumeDescriptor(const VolumeDescriptor &saved,
+                          const VolumeDescriptor &live) {
+    return saved.node == live.node && saved.object == live.object &&
+           saved.vtable == live.vtable && saved.nameHash == live.nameHash &&
+           saved.type == live.type &&
+           saved.archiveHeader == live.archiveHeader &&
+           saved.fileLength == live.fileLength &&
+           saved.dataLength == live.dataLength &&
+           saved.contentSignature == live.contentSignature;
+}
+
+s32 findVolume(const VolumeCensus &census,
+               const VolumeDescriptor &entry) {
+    for (u32 i = 0; i < census.count; ++i) {
+        if (sameVolumeDescriptor(entry, census.entries[i])) {
+            return static_cast<s32>(i);
+        }
+    }
+    return -1;
+}
+
+void clearVolumeDiff() {
+    clearWords(&sVolumeDiff, sizeof(sVolumeDiff));
+    sVolumeDiff.removedIndices[0] = 0xFFFFFFFFu;
+    sVolumeDiff.removedIndices[1] = 0xFFFFFFFFu;
+    sVolumeDiff.addedIndices[0] = 0xFFFFFFFFu;
+    sVolumeDiff.addedIndices[1] = 0xFFFFFFFFu;
+}
+
+void diffVolumeCensus(const VolumeCensus &saved,
+                      const VolumeCensus &live) {
+    clearVolumeDiff();
+    sVolumeDiff.ready = 1u;
+    sVolumeDiff.savedValid = saved.valid;
+    sVolumeDiff.liveValid = live.valid;
+    sVolumeDiff.savedCount = saved.count;
+    sVolumeDiff.liveCount = live.count;
+    sVolumeDiff.currentChanged =
+        saved.currentVolume != live.currentVolume ||
+                saved.currentDirId != live.currentDirId
+            ? 1u
+            : 0u;
+    if (!saved.valid || !live.valid) {
+        return;
+    }
+
+    for (u32 i = 0; i < saved.count; ++i) {
+        if (findVolume(live, saved.entries[i]) < 0) {
+            if (sVolumeDiff.removedCount < 2u) {
+                sVolumeDiff.removedIndices[sVolumeDiff.removedCount] = i;
+            }
+            ++sVolumeDiff.removedCount;
+        }
+    }
+    for (u32 i = 0; i < live.count; ++i) {
+        if (findVolume(saved, live.entries[i]) < 0) {
+            if (sVolumeDiff.addedCount < 2u) {
+                sVolumeDiff.addedIndices[sVolumeDiff.addedCount] = i;
+            }
+            ++sVolumeDiff.addedCount;
+        }
+    }
+
+    bool ordered = true;
+    u32 nextLiveIndex = 0u;
+    for (u32 i = 0; i < saved.count; ++i) {
+        const s32 index = findVolume(live, saved.entries[i]);
+        if (index >= 0) {
+            if (static_cast<u32>(index) < nextLiveIndex) {
+                ordered = false;
+                break;
+            }
+            nextLiveIndex = static_cast<u32>(index) + 1u;
+        }
+    }
+    sVolumeDiff.commonOrder = ordered ? 1u : 0u;
+
+    if (sVolumeDiff.addedCount == 0u &&
+        saved.count == live.count + sVolumeDiff.removedCount) {
+        bool suffix = true;
+        for (u32 i = 0; i < live.count; ++i) {
+            if (!sameVolumeDescriptor(
+                    saved.entries[sVolumeDiff.removedCount + i],
+                    live.entries[i])) {
+                suffix = false;
+                break;
+            }
+        }
+        sVolumeDiff.headOnly = suffix ? 1u : 0u;
+    }
+}
+
+void commitSavedVolumeCensus(u32 generation) {
+    sSavedVolumeCensus.generation = 0u;
+    copyBytes(&sSavedVolumeCensus, &sLiveVolumeCensus,
+              sizeof(sSavedVolumeCensus));
+    sSavedVolumeCensus.generation = generation;
+}
+
+void diagnoseVolumeEpoch(const SnapshotHeader *header,
+                         const LiveIdentity &live, u32 mask) {
+    clearVolumeDiff();
+    const u32 volumeMask = SUSAMUNE_LM_EPOCH_VOLUME_COUNT |
+                           SUSAMUNE_LM_EPOCH_VOLUME_HEAD |
+                           SUSAMUNE_LM_EPOCH_VOLUME_TAIL;
+    if ((mask & volumeMask) == 0u ||
+        sSavedVolumeCensus.generation != header->generation) {
+        return;
+    }
+    captureVolumeCensus(&sLiveVolumeCensus, live);
+    diffVolumeCensus(sSavedVolumeCensus, sLiveVolumeCensus);
+}
+
 u32 crcByte(u32 crc, u8 byte) {
     crc ^= byte;
     for (u32 bit = 0; bit < 8u; ++bit) {
@@ -889,7 +1363,9 @@ void collectPreflightEpochMismatch(EpochMismatch *mismatch,
                      header->mainDrawState, live.mainDrawState);
 }
 
-void rejectEpoch(const EpochMismatch &mismatch) {
+void rejectEpoch(const EpochMismatch &mismatch, const SnapshotHeader *header,
+                 const LiveIdentity &live) {
+    diagnoseVolumeEpoch(header, live, mismatch.mask);
     sEpochMismatch = mismatch;
     LMCrash::phase(SUSAMUNE_PHASE_ACTION_LOAD,
                    SUSAMUNE_LM_EPOCH_PHASE_FLAG | mismatch.mask,
@@ -980,6 +1456,9 @@ void initializeSlot() {
     header->magic = 0u;
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(header, 32u);
     asm volatile("sync" ::: "memory");
+    clearWords(&sSavedVolumeCensus, sizeof(sSavedVolumeCensus));
+    clearWords(&sLiveVolumeCensus, sizeof(sLiveVolumeCensus));
+    clearVolumeDiff();
     sSlotInitialized = true;
 }
 
@@ -1048,6 +1527,7 @@ bool savedPointerCompatible(u32 saved, u32 current,
 
 void saveState() {
     clearEpochMismatch();
+    clearVolumeDiff();
     traceSavePhase(0x01u, sStableFrames);
     LiveIdentity preflight;
     if (sStableFrames < kRequiredStableFrames ||
@@ -1089,6 +1569,7 @@ void saveState() {
         setReject(LMState::Status::Busy, live.heap);
         return;
     }
+    captureVolumeCensus(&sLiveVolumeCensus, live);
 
     traceSavePhase(0x60u, live.heap);
     SnapshotHeader *header =
@@ -1177,6 +1658,7 @@ void saveState() {
     header->magic = kSnapshotMagic;
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(header, 32u);
     asm volatile("sync" ::: "memory");
+    commitSavedVolumeCensus(header->generation);
     traceSavePhase(0x70u, live.heap);
     freezeEnd(freeze);
 
@@ -1188,6 +1670,7 @@ void saveState() {
 
 void loadState() {
     clearEpochMismatch();
+    clearVolumeDiff();
     traceLoadPhase(0x01u, sStableFrames);
     SnapshotHeader *header =
         reinterpret_cast<SnapshotHeader *>(kSnapshotBase);
@@ -1222,7 +1705,7 @@ void loadState() {
     EpochMismatch mismatch;
     collectPreflightEpochMismatch(&mismatch, header, preflight);
     if (mismatch.mask != 0u) {
-        rejectEpoch(mismatch);
+        rejectEpoch(mismatch, header, preflight);
         return;
     }
     const u32 liveCurrentScene = readWord(kCurrentSceneGlobal);
@@ -1238,7 +1721,7 @@ void loadState() {
                          header->gameMode, liveGameMode);
     }
     if (mismatch.mask != 0u) {
-        rejectEpoch(mismatch);
+        rejectEpoch(mismatch, header, preflight);
         return;
     }
     if (!heapsHealthy(preflight)) {
@@ -1260,7 +1743,7 @@ void loadState() {
     if (!headerMatchesLive(header, before)) {
         collectPreflightEpochMismatch(&mismatch, header, before);
         if (mismatch.mask != 0u) {
-            rejectEpoch(mismatch);
+            rejectEpoch(mismatch, header, before);
         } else {
             setReject(LMState::Status::Epoch, preflight.heap);
         }
@@ -1368,6 +1851,43 @@ void updateStability() {
         sLastIdentity = live;
         sHaveIdentity = true;
         sStableFrames = 1u;
+    }
+}
+
+const VolumeDescriptor *volumeChangeEntry(u32 displayIndex, bool *added) {
+    *added = false;
+    if (!sVolumeDiff.ready || displayIndex >= 2u) {
+        return nullptr;
+    }
+    const u32 shownRemoved =
+        sVolumeDiff.removedCount < 2u ? sVolumeDiff.removedCount : 2u;
+    if (displayIndex < shownRemoved) {
+        const u32 index = sVolumeDiff.removedIndices[displayIndex];
+        return index < sSavedVolumeCensus.count
+                   ? &sSavedVolumeCensus.entries[index]
+                   : nullptr;
+    }
+    const u32 addedIndex = displayIndex - shownRemoved;
+    if (addedIndex < sVolumeDiff.addedCount && addedIndex < 2u) {
+        const u32 index = sVolumeDiff.addedIndices[addedIndex];
+        if (index < sLiveVolumeCensus.count) {
+            *added = true;
+            return &sLiveVolumeCensus.entries[index];
+        }
+    }
+    return nullptr;
+}
+
+const char *volumeOwnerText(u32 owner) {
+    switch (owner & kVolumeOwnerMask) {
+    case kVolumeOwnerGame:
+        return "G";
+    case kVolumeOwnerSystem:
+        return "S";
+    case kVolumeOwnerRoot:
+        return "R";
+    default:
+        return "?";
     }
 }
 
@@ -1610,6 +2130,102 @@ u32 epochSaved() {
 
 u32 epochLive() {
     return sEpochMismatch.live;
+}
+
+const char *volumeTopologyText() {
+    if (!sVolumeDiff.ready) return "WAIT";
+    if (!sVolumeDiff.savedValid) return "SBAD";
+    if (!sVolumeDiff.liveValid) return "LBAD";
+    if (sVolumeDiff.removedCount == 0u && sVolumeDiff.addedCount == 0u) {
+        return sVolumeDiff.commonOrder ? "SAME" : "MIX";
+    }
+    if (sVolumeDiff.headOnly) {
+        if (sVolumeDiff.removedCount == 1u) return "HEAD1";
+        if (sVolumeDiff.removedCount == 2u) return "HEAD2";
+        return "HEADN";
+    }
+    return sVolumeDiff.commonOrder ? "ORDER" : "MIX";
+}
+
+u32 volumeSavedCount() {
+    return sVolumeDiff.savedCount;
+}
+
+u32 volumeLiveCount() {
+    return sVolumeDiff.liveCount;
+}
+
+u32 volumeRemovedCount() {
+    return sVolumeDiff.removedCount;
+}
+
+u32 volumeAddedCount() {
+    return sVolumeDiff.addedCount;
+}
+
+u32 volumeSavedFault() {
+    return sVolumeDiff.ready ? sSavedVolumeCensus.fault : 0u;
+}
+
+u32 volumeLiveFault() {
+    return sVolumeDiff.ready ? sLiveVolumeCensus.fault : 0u;
+}
+
+u32 volumeSavedCurrent() {
+    return sVolumeDiff.ready ? sSavedVolumeCensus.currentVolume : 0u;
+}
+
+u32 volumeLiveCurrent() {
+    return sVolumeDiff.ready ? sLiveVolumeCensus.currentVolume : 0u;
+}
+
+u32 volumeSavedDir() {
+    return sVolumeDiff.ready ? sSavedVolumeCensus.currentDirId : 0u;
+}
+
+u32 volumeLiveDir() {
+    return sVolumeDiff.ready ? sLiveVolumeCensus.currentDirId : 0u;
+}
+
+const char *volumeChangeKind(u32 index) {
+    bool added;
+    const VolumeDescriptor *entry = volumeChangeEntry(index, &added);
+    return entry ? (added ? "+" : "-") : " ";
+}
+
+const char *volumeChangeName(u32 index) {
+    bool added;
+    const VolumeDescriptor *entry = volumeChangeEntry(index, &added);
+    return entry && (entry->stateFlags & kVolumeNameValid) != 0u
+               ? entry->name
+               : "--";
+}
+
+const char *volumeChangeObjectOwnerText(u32 index) {
+    bool added;
+    const VolumeDescriptor *entry = volumeChangeEntry(index, &added);
+    if (!entry) return "?";
+    u32 owner = entry->ownerFlags >> kVolumeObjectOwnerShift;
+    owner &= kVolumeOwnerMask;
+    if (owner == kVolumeOwnerOther) {
+        owner = entry->ownerFlags >> kVolumeObjectLocationShift;
+    }
+    return volumeOwnerText(owner);
+}
+
+const char *volumeChangeBackingOwnerText(u32 index) {
+    bool added;
+    const VolumeDescriptor *entry = volumeChangeEntry(index, &added);
+    if (!entry) return "?";
+    const u32 owner =
+        (entry->ownerFlags >> kVolumeBackingLocationShift) & kVolumeOwnerMask;
+    return volumeOwnerText(owner);
+}
+
+u32 volumeChangeObject(u32 index) {
+    bool added;
+    const VolumeDescriptor *entry = volumeChangeEntry(index, &added);
+    return entry ? entry->object : 0u;
 }
 
 }  // namespace LMState
