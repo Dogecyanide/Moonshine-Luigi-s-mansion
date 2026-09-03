@@ -44,6 +44,11 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
                 (0x801D5B5C, "getArenaLo", "B", 0x806DFF38),
                 (0x8000776C, "diagnosticCopyDisp", "BL", 0x481E8CF1),
                 (0x80007828, "diagnosticCopyDisp", "BL", 0x481E8C35),
+                (0x8000B534, "diagnosticFrameBegin", "BL", 0x4BFFC1A5),
+                (0x8000B544, "diagnosticMainSceneStep", "BL", 0x4BFFFD05),
+                (0x8000B5EC, "diagnosticPreMainUpdate", "BL", 0x4BFFF6B9),
+                (0x8000B608, "diagnosticPostMainUpdate", "BL", 0x4BFFC9FD),
+                (0x8000B62C, "diagnosticChangeFrameBuffer", "BL", 0x4BFFC1BD),
             ],
         )
 
@@ -52,7 +57,6 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
             lm_diag.checks,
             [
                 {"addr": 0x801D5B60, "expected": 0x4E800020},
-                {"addr": 0x8000B62C, "expected": 0x4BFFC1BD},
                 {"addr": 0x80007870, "expected": 0x481CCFC1},
                 {"addr": 0x801D20B0, "expected": 0x387D0018},
                 {"addr": 0x801D20B4, "expected": 0x48012849},
@@ -174,6 +178,21 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
                                            "vsprintf.c").read_text(encoding="utf-8"))
         self.assertIn("presenterEnter();", DIAG_SOURCE)
         self.assertIn("presenterAfterTick();", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x88u);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x8Au);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x8Cu);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x8Eu);", DIAG_SOURCE)
+
+    def test_state_transaction_runs_after_complete_retail_presenter(self) -> None:
+        wrapper = DIAG_SOURCE.split(
+            'extern "C" void diagnosticChangeFrameBuffer', 1
+        )[1].split('extern "C" void diagnosticFrameBegin', 1)[0]
+        self.assertLess(wrapper.index("kLMChangeFrameBufferAddr"),
+                        wrapper.index("LMState::tick"))
+        copy_wrapper = DIAG_SOURCE.split(
+            'extern "C" void diagnosticCopyDisp', 1
+        )[1]
+        self.assertNotIn("LMState::tick", copy_wrapper)
 
     def test_frozen_transactions_do_not_take_heap_mutexes(self) -> None:
         save_frozen = STATE_SOURCE.split(
@@ -188,11 +207,15 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertNotIn("ioIdle", load_frozen)
 
     def test_overlay_is_painted_before_state_transaction(self) -> None:
-        diag = DIAG_SOURCE.split(
+        copy_wrapper = DIAG_SOURCE.split(
             'extern "C" void diagnosticCopyDisp', 1
         )[1]
-        self.assertLess(diag.index("drawRawHeartbeat"),
-                        diag.index("LMState::tick"))
+        self.assertIn("drawRawHeartbeat", copy_wrapper)
+        presenter_wrapper = DIAG_SOURCE.split(
+            'extern "C" void diagnosticChangeFrameBuffer', 1
+        )[1].split('extern "C" void diagnosticFrameBegin', 1)[0]
+        self.assertLess(presenter_wrapper.index("kLMChangeFrameBufferAddr"),
+                        presenter_wrapper.index("LMState::tick"))
 
     def test_state_gates_uncaptured_allocator_epochs(self) -> None:
         self.assertIn("header->rootFreeHead == live.rootFreeHead", STATE_SOURCE)

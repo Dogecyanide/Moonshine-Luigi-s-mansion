@@ -18,6 +18,11 @@ const u32 kLMGameHeapAddr = 0x804A0B98u;
 const u32 kJKRCurrentHeapAddr = 0x804A1FF4u;
 const u32 kDirectPrintPtrAddr = 0x804A2088u;
 
+const u32 kLMFrameBeginAddr = 0x800076D8u;
+const u32 kLMChangeFrameBufferAddr = 0x800077E8u;
+const u32 kLMPreMainUpdateAddr = 0x8000ACA4u;
+const u32 kLMPostMainUpdateAddr = 0x80008004u;
+const u32 kLMMainSceneStepAddr = 0x8000B248u;
 const u32 kGXCopyDispAddr = 0x801F045Cu;
 const u32 kGXDrawDoneAddr = 0x801EF5F0u;
 const u32 kDCInvalidateRangeAddr = 0x801D5DF4u;
@@ -60,6 +65,7 @@ static_assert(kHeartbeatTop + 16u <= kXfbHeight,
               "diagnostic heartbeat exceeds the framebuffer");
 
 typedef void (*VoidFn)();
+typedef void (*VoidPtrFn)(void *);
 typedef void (*GXCopyDispFn)(void *, bool);
 typedef void (*CacheRangeFn)(void *, u32);
 typedef void (*DirectPrintEraseFn)(void *, u16, u16, u16, u16);
@@ -247,7 +253,7 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM STATE X0.3.5 F:%s C:%s H:%s\n"
+        "LM STATE X0.3.6 F:%s C:%s H:%s\n"
         "S:%s ST%lu SZ%luK G:%s %08lX\n"
         "ROOT %08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
@@ -320,11 +326,49 @@ extern "C" void *getArenaLo() {
     return reinterpret_cast<void *>(arenaLo);
 }
 
+// Services state requests only after the complete retail presenter returns.
+// Moonshine uses the same kind of after-draw boundary: restoring from inside
+// GXCopyDisp left LM's VI/retrace tail observing a mixture of two timelines.
+extern "C" void diagnosticChangeFrameBuffer() {
+    LMState::presenterEnter();
+    reinterpret_cast<VoidFn>(kLMChangeFrameBufferAddr)();
+    LMState::presenterAfterRetail();
+    LMState::presenterBeforeTick();
+    LMState::tick();
+    LMState::presenterAfterTick();
+}
+
+// These main-loop calls are the first useful boundaries after a restore.
+// Persistent entry/exit phases survive a hard lock without requiring an
+// exception, so one hardware run can identify the first stalled game step.
+extern "C" void diagnosticFrameBegin() {
+    LMState::postLoadMilestone(0x88u);
+    reinterpret_cast<VoidFn>(kLMFrameBeginAddr)();
+    LMState::postLoadMilestone(0x89u);
+}
+
+extern "C" void diagnosticMainSceneStep() {
+    LMState::postLoadMilestone(0x8Au);
+    reinterpret_cast<VoidFn>(kLMMainSceneStepAddr)();
+    LMState::postLoadMilestone(0x8Bu);
+}
+
+extern "C" void diagnosticPreMainUpdate() {
+    LMState::postLoadMilestone(0x8Cu);
+    reinterpret_cast<VoidFn>(kLMPreMainUpdateAddr)();
+    LMState::postLoadMilestone(0x8Du);
+}
+
+extern "C" void diagnosticPostMainUpdate(void *state) {
+    LMState::postLoadMilestone(0x8Eu);
+    reinterpret_cast<VoidPtrFn>(kLMPostMainUpdateAddr)(state);
+    LMState::postLoadMilestone(0x8Fu);
+}
+
 // Wraps both GLMJ01 GXCopyDisp call sites.  The original copy is allowed to
 // complete before touching the XFB, so this path cannot depend on the EFB's
 // projection, vertex descriptors, resource fonts, or scene draw order.
 extern "C" void diagnosticCopyDisp(void *xfb, bool clear) {
-    LMState::presenterEnter();
     HeapSample system;
     HeapSample game;
     sampleDiagnostic(&system, &game);
@@ -362,11 +406,9 @@ extern "C" void diagnosticCopyDisp(void *xfb, bool clear) {
         drawRawHeartbeat(cachedXfb, directPrintReady);
     }
 
-    // No game thread can observe a half-copied slot after GXDrawDone. Status
-    // changes appear on the next frame; a stalled operation keeps this frame.
-    LMState::presenterBeforeTick();
-    LMState::tick();
-    LMState::presenterAfterTick();
+    // The transaction runs from diagnosticChangeFrameBuffer only after LM's
+    // entire VI/retrace presenter tail has completed. Status appears here on
+    // the following frame; a stalled operation leaves the prior frame visible.
 }
 
 #endif  // defined(SUSAMUNE_VERSION_LMJ)

@@ -35,6 +35,14 @@ records while saving, loading, and returning through the first restored frame.
 The ARM writes and syncs these independently, so the last record survives a
 PowerPC hard lock that never reaches the exception dumper.
 
+For `0.3.6`, the expected first-restored-frame phase order is `80`, `88/89`,
+`8A/8B`, optionally `8C/8D`, `8E/8F`, then `81` through `86`. `80` means the
+load returned at the true post-presenter boundary. The paired values bracket
+the frame-begin, main-scene, optional pre-update, and post-update calls. `81`
+through `86` bracket the next complete presenter, diagnostic copy, and tick.
+The ARM logger may miss fast intermediate values, but an entry value remains
+the final record when its corresponding retail call hard-locks.
+
 For a useful hardware pass, capture the title screen, an active room after a
 few minutes, a room transition on the same floor, a floor transition, and the
 lowest `S`/`G` values seen during normal play.

@@ -1121,6 +1121,12 @@ void updateStability() {
 
 namespace LMState {
 
+void postLoadMilestone(u32 phase) {
+    if (sPostLoadTraceState != 0u) {
+        tracePostLoadPhase(phase);
+    }
+}
+
 void presenterEnter() {
     if (sPostLoadTraceState == 1u) {
         tracePostLoadPhase(0x81u);
@@ -1140,18 +1146,24 @@ void presenterAfterDrawDone() {
     }
 }
 
-void presenterBeforeTick() {
+void presenterAfterRetail() {
     if (sPostLoadTraceState == 2u) {
         tracePostLoadPhase(0x84u);
     }
 }
 
+void presenterBeforeTick() {
+    if (sPostLoadTraceState == 2u) {
+        tracePostLoadPhase(0x85u);
+    }
+}
+
 void presenterAfterTick() {
     if (sPostLoadTraceState == 1u) {
-        // The load returned to its presenter; the next entry is a new frame.
+        // The load returned at the true post-presenter transaction boundary.
         tracePostLoadPhase(0x80u);
     } else if (sPostLoadTraceState == 2u) {
-        tracePostLoadPhase(0x85u);
+        tracePostLoadPhase(0x86u);
         sPostLoadTraceState = 0u;
     }
 }

@@ -42,6 +42,39 @@ patches = [
         "type": PatchType.BL,
         "expected": 0x481E8C35,
     },
+    # Move the transaction to the main loop's true post-presenter boundary.
+    # The preceding wrappers retain hard-lock milestones around the first
+    # frame-begin and restored-scene consumers reached after the load.
+    {
+        "lmj": 0x8000B534,
+        "sym": "diagnosticFrameBegin",
+        "type": PatchType.BL,
+        "expected": 0x4BFFC1A5,
+    },
+    {
+        "lmj": 0x8000B544,
+        "sym": "diagnosticMainSceneStep",
+        "type": PatchType.BL,
+        "expected": 0x4BFFFD05,
+    },
+    {
+        "lmj": 0x8000B5EC,
+        "sym": "diagnosticPreMainUpdate",
+        "type": PatchType.BL,
+        "expected": 0x4BFFF6B9,
+    },
+    {
+        "lmj": 0x8000B608,
+        "sym": "diagnosticPostMainUpdate",
+        "type": PatchType.BL,
+        "expected": 0x4BFFC9FD,
+    },
+    {
+        "lmj": 0x8000B62C,
+        "sym": "diagnosticChangeFrameBuffer",
+        "type": PatchType.BL,
+        "expected": 0x4BFFC1BD,
+    },
 ]
 
 # Extra clean-DOL signatures that are authenticated but left untouched.  These
@@ -50,7 +83,6 @@ patches = [
 # the complete four-instruction JUTException callback setter.
 checks = [
     {"addr": 0x801D5B60, "expected": 0x4E800020},
-    {"addr": 0x8000B62C, "expected": 0x4BFFC1BD},
     {"addr": 0x80007870, "expected": 0x481CCFC1},
     {"addr": 0x801D20B0, "expected": 0x387D0018},
     {"addr": 0x801D20B4, "expected": 0x48012849},

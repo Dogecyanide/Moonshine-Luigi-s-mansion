@@ -17,15 +17,17 @@ enum class Status : u32 {
 };
 
 // Polls port 1, updates the stability gate, and services one edge-triggered
-// snapshot request. Call only after the retail frame has reached GXDrawDone.
+// snapshot request. Call only after LM's complete retail presenter returns.
 void tick();
 
-// These no-op outside the first presenter after a successful load. Together
-// with the ARM phase journal they distinguish a restore hang from the first
-// heap sample, GX barrier, or game-frame return after it.
+// These no-op outside the first frame after a successful load. Together with
+// the ARM phase journal they distinguish a restore hang in the main-loop game
+// step from the first complete retail presenter after it.
+void postLoadMilestone(u32 phase);
 void presenterEnter();
 void presenterAfterSample();
 void presenterAfterDrawDone();
+void presenterAfterRetail();
 void presenterBeforeTick();
 void presenterAfterTick();
 
