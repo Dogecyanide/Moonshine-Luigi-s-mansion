@@ -14,7 +14,7 @@ unmodified.
 The six overlay rows are:
 
 ```text
-LM STATE X0.3.9 F:<floor> C:<canary> H:<heap check>
+LM STATE X0.3.10 F:<floor> C:<canary> H:<heap check>
 S:<state status> ST<stable frames> SZ<snapshot KiB> G:<gate> <gate value>
 ROOT <root> <start>-<end>
 SYS  <system> L/T/M <largest>/<total>/<minimum total KiB>
@@ -42,7 +42,7 @@ path reads its projection, viewport, scissor, and matrix fields directly. The
 following display object is deliberately excluded because it owns live
 double-buffer pointers.
 
-For `0.3.9`, `80` means the load returned at the true post-presenter boundary.
+For `0.3.10`, `80` means the load returned at the true post-presenter boundary.
 The immediate main-loop tail is bracketed by `90/91`, `92/93`, and `94/95`;
 the next update uses `88/89`, `8A/8B`, optionally `8C/8D`, and `8E/8F`.
 `81` through `86` bracket the following complete presenter, diagnostic copy,
@@ -63,6 +63,10 @@ direct call in the Main Game draw dispatcher, while `C0/C1` bracket every
 direct call in its normal-room renderer. For those records, `arg0` is the
 retail call site and `arg1` is its original callee; a final `B0` or `C0`
 therefore identifies the exact call that did not return.
+
+Version `0.3.10` adds `D0/D1` around every direct call inside the central
+per-view routine at `0x8000BA64`, which `0.3.9` isolated. These records use the
+same `arg0` call-site and `arg1` callee convention.
 
 If the inner game loop exits during that window, `96/97` identify loop
 entry/return, `98/99` bracket outer cleanup, and `9A/9B` bracket its restart.

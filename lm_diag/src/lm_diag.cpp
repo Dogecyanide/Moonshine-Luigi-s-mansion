@@ -267,7 +267,7 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM STATE X0.3.9 F:%s C:%s H:%s\n"
+        "LM STATE X0.3.10 F:%s C:%s H:%s\n"
         "S:%s ST%lu SZ%luK G:%s %08lX\n"
         "ROOT %08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
@@ -505,6 +505,84 @@ DEFINE_DRAW_CALL(diagnosticNormalDrawBCC8, 0xC0u, 0xC1u, 0x8000BCC8u,
                  0x80043B58u)
 DEFINE_DRAW_CALL(diagnosticNormalDrawBCD0, 0xC0u, 0xC1u, 0x8000BCD0u,
                  0x80070FA8u)
+
+// Central per-view draw routine (0x8000BA64), reached from 0x8000BC7C.
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBA78, 0xD0u, 0xD1u, 0x8000BA78u,
+                 0x8005D300u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBA7C, 0xD0u, 0xD1u, 0x8000BA7Cu,
+                 0x80060004u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBA88, 0xD0u, 0xD1u, 0x8000BA88u,
+                 0x801F378Cu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBA94, 0xD0u, 0xD1u, 0x8000BA94u,
+                 0x800114E4u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAA4, 0xD0u, 0xD1u, 0x8000BAA4u,
+                 0x80185274u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAA8, 0xD0u, 0xD1u, 0x8000BAA8u,
+                 0x8005FE18u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAB0, 0xD0u, 0xD1u, 0x8000BAB0u,
+                 0x800601ECu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAB4, 0xD0u, 0xD1u, 0x8000BAB4u,
+                 0x80156BC4u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBABC, 0xD0u, 0xD1u, 0x8000BABCu,
+                 0x80070FA8u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAC0, 0xD0u, 0xD1u, 0x8000BAC0u,
+                 0x80037B64u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAC4, 0xD0u, 0xD1u, 0x8000BAC4u,
+                 0x800B84A8u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAC8, 0xD0u, 0xD1u, 0x8000BAC8u,
+                 0x80160DBCu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAD0, 0xD0u, 0xD1u, 0x8000BAD0u,
+                 0x800114E4u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAD8, 0xD0u, 0xD1u, 0x8000BAD8u,
+                 0x800601ECu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAE0, 0xD0u, 0xD1u, 0x8000BAE0u,
+                 0x8005FFB0u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAE4, 0xD0u, 0xD1u, 0x8000BAE4u,
+                 0x80009A58u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBAE8, 0xD0u, 0xD1u, 0x8000BAE8u,
+                 0x8005D300u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB00, 0xD0u, 0xD1u, 0x8000BB00u,
+                 0x8000852Cu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB04, 0xD0u, 0xD1u, 0x8000BB04u,
+                 0x80160DE4u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB08, 0xD0u, 0xD1u, 0x8000BB08u,
+                 0x80123220u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB0C, 0xD0u, 0xD1u, 0x8000BB0Cu,
+                 0x8012EB0Cu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB10, 0xD0u, 0xD1u, 0x8000BB10u,
+                 0x8012B1D0u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB20, 0xD0u, 0xD1u, 0x8000BB20u,
+                 0x8015E7F8u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB24, 0xD0u, 0xD1u, 0x8000BB24u,
+                 0x80060A0Cu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB2C, 0xD0u, 0xD1u, 0x8000BB2Cu,
+                 0x800601ECu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB34, 0xD0u, 0xD1u, 0x8000BB34u,
+                 0x80070FA8u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB38, 0xD0u, 0xD1u, 0x8000BB38u,
+                 0x8000C19Cu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB3C, 0xD0u, 0xD1u, 0x8000BB3Cu,
+                 0x8005D300u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB44, 0xD0u, 0xD1u, 0x8000BB44u,
+                 0x801F3544u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB54, 0xD0u, 0xD1u, 0x8000BB54u,
+                 0x801F3584u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB58, 0xD0u, 0xD1u, 0x8000BB58u,
+                 0x8005E92Cu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB60, 0xD0u, 0xD1u, 0x8000BB60u,
+                 0x801F3544u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB64, 0xD0u, 0xD1u, 0x8000BB64u,
+                 0x8005E5FCu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB70, 0xD0u, 0xD1u, 0x8000BB70u,
+                 0x8000852Cu)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB74, 0xD0u, 0xD1u, 0x8000BB74u,
+                 0x800115E4u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB84, 0xD0u, 0xD1u, 0x8000BB84u,
+                 0x80185298u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB8C, 0xD0u, 0xD1u, 0x8000BB8Cu,
+                 0x80070FA8u)
+DEFINE_DRAW_CALL(diagnosticPerViewDrawBB9C, 0xD0u, 0xD1u, 0x8000BB9Cu,
+                 0x801EFBFCu)
 
 #undef DEFINE_DRAW_CALL
 
