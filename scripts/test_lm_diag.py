@@ -209,7 +209,7 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kHeapMetadataStart = 0x3Cu", STATE_SOURCE)
         self.assertIn("kHeapMetadataEnd = 0x84u", STATE_SOURCE)
         self.assertIn("kExpHeapAlignment = 16u", STATE_SOURCE)
-        self.assertIn("kSnapshotVersion = 5u", STATE_SOURCE)
+        self.assertIn("kSnapshotVersion = 6u", STATE_SOURCE)
         self.assertIn("kRendererStateStart = 0x80398770u", STATE_SOURCE)
         self.assertIn("kRendererStateEnd = 0x803989E0u", STATE_SOURCE)
         self.assertIn(
@@ -219,6 +219,12 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kInGameFlagsBase = 0x803C7CA0u", STATE_SOURCE)
         self.assertIn("kInGameFlagsOffset = 0x659u", STATE_SOURCE)
         self.assertIn("kInGameFlagsSize = 0x20u", STATE_SOURCE)
+        self.assertIn("kGrainManagerStateStart = 0x803CBAF0u", STATE_SOURCE)
+        self.assertIn("kGrainManagerStateEnd = 0x803CC460u", STATE_SOURCE)
+        self.assertIn(
+            "{kGrainManagerStateStart,\n     kGrainManagerStateEnd - kGrainManagerStateStart}",
+            STATE_SOURCE,
+        )
         self.assertIn("kMainLoopStateBase = 0x80398A40u", STATE_SOURCE)
         self.assertIn("kMainLoopStateSize = 0x08u", STATE_SOURCE)
         self.assertIn("kMainLoopSceneGlobal = 0x804A0C20u", STATE_SOURCE)
@@ -237,8 +243,8 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kGameSbss0End = 0x804A0C90u", STATE_SOURCE)
         self.assertIn("kGameSbss1Start = 0x804A0CB0u", STATE_SOURCE)
         self.assertIn("kGameSbss1End = 0x804A1D10u", STATE_SOURCE)
-        self.assertIn("kStateStaticsSize == 0x8C30u", STATE_SOURCE)
-        self.assertIn("kHeapDataOffset == 0x8D80u", STATE_SOURCE)
+        self.assertIn("kStateStaticsSize == 0x95A0u", STATE_SOURCE)
+        self.assertIn("kHeapDataOffset == 0x9700u", STATE_SOURCE)
         self.assertIn("captureStaticRanges();", STATE_SOURCE)
         self.assertIn("restoreStaticRanges();", STATE_SOURCE)
         self.assertIn("storeStaticRanges();", STATE_SOURCE)

@@ -6,7 +6,7 @@ Mansion (`GLMJ01`).
 
 ## Current status
 
-`Full-State Experimental 0.3.10` is the current hardware-testable state build.
+`Full-State Experimental 0.3.11` is the current hardware-testable state build.
 
 - The custom Nintendont launcher accepts only the verified Japanese `GLMJ01`
   revision-0 executable for injection.
@@ -15,8 +15,8 @@ Mansion (`GLMJ01`).
 - The slot captures the complete secondary gameplay heap, its allocator and
   disposer metadata, audited gameplay-static SDATA/SBSS slices with known
   live-owned blocks excluded, LM's standalone camera/viewport state, the
-  main-loop control pair, the verified room/map flag slice, and libc RNG
-  state.
+  main-loop control pair, both grain-effect managers and their list sentinels,
+  the verified room/map flag slice, and libc RNG state.
 - Save/load is refused while DVD, ARAM, or memory-card work is active, while
   the heap is unstable, when a slot checksum fails, or when the observed live
   allocator/resource markers differ from the saved ones.
@@ -78,7 +78,7 @@ The build emits a version-labelled tester package plus a stable compatibility
 name:
 
 ```text
-build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.10.zip
+build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.11.zip
 build-lm-diag/moonshine_luigis_mansion_launcher.zip
 ```
 
@@ -102,7 +102,7 @@ disc or ISO.
 
 Back up any real memory-card data, install the four packaged files under
 `apps/moonshine_luigis_mansion/`, and launch a clean revision-0 GLMJ01 image.
-The overlay must say `LM STATE X0.3.10`; wait until `F`, `C`, `H`, and `G` are
+The overlay must say `LM STATE X0.3.11`; wait until `F`, `C`, `H`, and `G` are
 `OK` and `ST` is at least 3. If `ST` remains zero, photograph the short gate
 name and eight-digit value shown after `G:`; they identify the rejected live
 condition without weakening it.

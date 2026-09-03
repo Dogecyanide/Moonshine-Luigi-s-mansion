@@ -14,7 +14,7 @@ unmodified.
 The six overlay rows are:
 
 ```text
-LM STATE X0.3.10 F:<floor> C:<canary> H:<heap check>
+LM STATE X0.3.11 F:<floor> C:<canary> H:<heap check>
 S:<state status> ST<stable frames> SZ<snapshot KiB> G:<gate> <gate value>
 ROOT <root> <start>-<end>
 SYS  <system> L/T/M <largest>/<total>/<minimum total KiB>
@@ -67,6 +67,11 @@ therefore identifies the exact call that did not return.
 Version `0.3.10` adds `D0/D1` around every direct call inside the central
 per-view routine at `0x8000BA64`, which `0.3.9` isolated. These records use the
 same `arg0` call-site and `arg1` callee convention.
+
+Version `0.3.11` captures the adjacent grain-effect managers at
+`0x803CBAF0-0x803CC460`. Their circular-list sentinels are static while their
+nodes live in the gameplay heap, so both sides of each list now rewind as one
+timeline.
 
 If the inner game loop exits during that window, `96/97` identify loop
 entry/return, `98/99` bracket outer cleanup, and `9A/9B` bracket its restart.
