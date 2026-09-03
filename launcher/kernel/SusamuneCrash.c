@@ -17,6 +17,7 @@ static char TextPaths[2][64];
 static char Line[256];
 static u32 AttemptedSeq;
 static u32 LastPoll;
+static u32 LastPhaseSequence;
 static bool CrashEnabled;
 static FIL TextFile;
 static int TextStatus;
@@ -86,6 +87,44 @@ static u32 BytesCrc(const void *data, u32 size)
 	return crc ^ 0xFFFFFFFFu;
 }
 
+static bool ValidPhaseTrace(const struct SusamunePhaseTrace *trace)
+{
+	return trace->magic == SUSAMUNE_PHASE_TRACE_MAGIC &&
+		trace->sequenceBegin != 0 &&
+		(trace->sequenceBegin & 1u) == 0 &&
+		trace->sequenceBegin == trace->sequenceEnd &&
+		(trace->phase ^ trace->phaseInverse) == 0xFFFFFFFFu &&
+		trace->action >= SUSAMUNE_PHASE_ACTION_SAVE &&
+		trace->action <= SUSAMUNE_PHASE_ACTION_POST_LOAD;
+}
+
+static const char *PhaseActionName(u32 action)
+{
+	if (action == SUSAMUNE_PHASE_ACTION_SAVE)
+		return "save";
+	if (action == SUSAMUNE_PHASE_ACTION_LOAD)
+		return "load";
+	if (action == SUSAMUNE_PHASE_ACTION_POST_LOAD)
+		return "post-load";
+	return "unknown";
+}
+
+static void PollPhaseTrace(void)
+{
+	struct SusamunePhaseTrace snapshot;
+	struct SusamunePhaseTrace *trace = SUSAMUNE_PHASE_TRACE_PHYS_PTR;
+	sync_before_read(trace, sizeof(*trace));
+	memcpy(&snapshot, trace, sizeof(snapshot));
+	if (!ValidPhaseTrace(&snapshot) ||
+		snapshot.sequenceBegin == LastPhaseSequence)
+		return;
+	LastPhaseSequence = snapshot.sequenceBegin;
+	dbgprintf("Susamune: phase seq=%u action=%s(%u) phase=%02X "
+		"arg0=%08X arg1=%08X\r\n",
+		snapshot.sequenceBegin, PhaseActionName(snapshot.action),
+		snapshot.action, snapshot.phase, snapshot.arg0, snapshot.arg1);
+}
+
 static u32 ModFileCrc(const struct SusamuneModHeader *header)
 {
 	return BytesCrc(header, header->fileSize);
@@ -135,9 +174,10 @@ void SusamuneCrashInit(void)
 	u32 generation = 0;
 	u32 i;
 
-	memset(mailbox, 0, sizeof(*mailbox));
+	memset(mailbox, 0, SUSAMUNE_MEM2_CRASH_SIZE);
 	CrashEnabled = SusamuneCfgStorageAvailable();
 	AttemptedSeq = 0;
+	LastPhaseSequence = 0;
 	LastPoll = read32(HW_TIMER);
 	_sprintf(BinPaths[0], "%s/susamune_crash_a.bin",
 		SusamuneCfgStoragePrefix());
@@ -174,7 +214,7 @@ void SusamuneCrashInit(void)
 		mailbox->modWriteCount = mod->writeCount;
 		mailbox->arenaReserve = mod->arenaReserve;
 	}
-	sync_after_write(mailbox, sizeof(*mailbox));
+	sync_after_write(mailbox, SUSAMUNE_MEM2_CRASH_SIZE);
 }
 
 bool SusamuneCrashPending(void)
@@ -185,6 +225,7 @@ bool SusamuneCrashPending(void)
 	if (TimerDiffTicks(LastPoll) < 15820)
 		return false;
 	LastPoll = read32(HW_TIMER);
+	PollPhaseTrace();
 	sync_before_read(mailbox, 32);
 	return mailbox->magic == SUSAMUNE_CRASH_MAGIC &&
 		mailbox->version == SUSAMUNE_CRASH_VERSION &&

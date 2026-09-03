@@ -6,7 +6,7 @@ Mansion (`GLMJ01`).
 
 ## Current status
 
-`Full-State Experimental 0.3.4` is the current hardware-testable state build.
+`Full-State Experimental 0.3.5` is the current hardware-testable state build.
 
 - The custom Nintendont launcher accepts only the verified Japanese `GLMJ01`
   revision-0 executable for injection.
@@ -24,6 +24,8 @@ Mansion (`GLMJ01`).
 - Moonshine's ARM crash writer now accepts LM exception reports and rotates
   `susamune_crash_a/b.bin` plus readable `.txt` reports on the game-source
   storage device.
+- A cache-coherent phase journal records the last completed save/load step in
+  `/ndebug.log`, even when the PowerPC hard-locks and no exception is raised.
 
 Controls are D-pad Left to save and D-pad Right to load. Start with same-room
 tests. This first build normally rejects a load with `EPOCH` after the room,
@@ -67,7 +69,7 @@ The build emits a version-labelled tester package plus a stable compatibility
 name:
 
 ```text
-build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.4.zip
+build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.5.zip
 build-lm-diag/moonshine_luigis_mansion_launcher.zip
 ```
 
@@ -91,7 +93,7 @@ disc or ISO.
 
 Back up any real memory-card data, install the four packaged files under
 `apps/moonshine_luigis_mansion/`, and launch a clean revision-0 GLMJ01 image.
-The overlay must say `LM STATE X0.3.4`; wait until `F`, `C`, `H`, and `G` are
+The overlay must say `LM STATE X0.3.5`; wait until `F`, `C`, `H`, and `G` are
 `OK` and `ST` is at least 3. If `ST` remains zero, photograph the short gate
 name and eight-digit value shown after `G:`; they identify the rejected live
 condition without weakening it.
@@ -107,6 +109,9 @@ normally report `EPOCH`; a load that gets past that gate is explicitly unsafe
 in this build. Photograph any different result. If the game crashes, save the
 newest `susamune_crash_a.txt` or `susamune_crash_b.txt` from the game-source
 device before the next experiment overwrites the older rotating report.
+If it hard-locks without a new crash report, power it off, return the SD card,
+and preserve `/ndebug.log`; its final `Susamune: phase` line identifies the
+exact restore or first-post-load boundary that was reached.
 
 ## Lineage and credits
 

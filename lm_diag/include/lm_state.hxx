@@ -20,6 +20,15 @@ enum class Status : u32 {
 // snapshot request. Call only after the retail frame has reached GXDrawDone.
 void tick();
 
+// These no-op outside the first presenter after a successful load. Together
+// with the ARM phase journal they distinguish a restore hang from the first
+// heap sample, GX barrier, or game-frame return after it.
+void presenterEnter();
+void presenterAfterSample();
+void presenterAfterDrawDone();
+void presenterBeforeTick();
+void presenterAfterTick();
+
 Status status();
 const char *statusText();
 u32 snapshotKiB();

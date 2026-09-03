@@ -30,7 +30,10 @@ Diagnostic packages also force Nintendont's `/ndebug.log` on the game-source
 device (the SD card for the current `path_jp=sd:` setup). It records payload
 validation, the observed DOL tuple, every preflight word, and successful hook
 installation, giving an independent answer if the capture contains no
-checkerboard.
+checkerboard. Full-state builds also append cache-coherent `Susamune: phase`
+records while saving, loading, and returning through the first restored frame.
+The ARM writes and syncs these independently, so the last record survives a
+PowerPC hard lock that never reaches the exception dumper.
 
 For a useful hardware pass, capture the title screen, an active room after a
 few minutes, a room transition on the same floor, a floor transition, and the

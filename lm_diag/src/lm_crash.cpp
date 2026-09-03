@@ -49,6 +49,7 @@ static_assert(kAramStateSize <= SUSAMUNE_CRASH_MARIO_SIZE,
 UserCallback sPreviousHandler;
 bool sInstalled;
 bool sCapturing;
+u32 sPhaseSequence;
 
 inline u32 readWord(u32 address) {
     return *reinterpret_cast<volatile u32 *>(address);
@@ -292,6 +293,37 @@ void note(u32 event, u32 arg0, u32 arg1) {
     if (report->breadcrumbCount < SUSAMUNE_CRASH_BREADCRUMB_COUNT) {
         ++report->breadcrumbCount;
     }
+}
+
+void phase(u32 action, u32 phaseValue, u32 arg0, u32 arg1) {
+    SusamuneCrashReport *report = SUSAMUNE_CRASH_PPC_PTR;
+    if (report->magic != SUSAMUNE_CRASH_MAGIC ||
+        report->version != SUSAMUNE_CRASH_VERSION ||
+        report->reportSize != sizeof(*report) ||
+        report->state != SUSAMUNE_CRASH_STATE_ARMED) {
+        return;
+    }
+
+    SusamunePhaseTrace *trace = SUSAMUNE_PHASE_TRACE_PPC_PTR;
+    const u32 sequence = (sPhaseSequence += 2u);
+
+    // Publish an invalid odd generation first. The ARM never accepts a cache
+    // line caught between the two stores, even if the PPC locks immediately.
+    trace->magic = SUSAMUNE_PHASE_TRACE_MAGIC;
+    trace->sequenceBegin = sequence - 1u;
+    trace->sequenceEnd = sequence - 1u;
+    storeRange(trace, sizeof(*trace));
+    asm volatile("sync" ::: "memory");
+
+    trace->action = action;
+    trace->phase = phaseValue;
+    trace->phaseInverse = ~phaseValue;
+    trace->arg0 = arg0;
+    trace->arg1 = arg1;
+    trace->sequenceBegin = sequence;
+    trace->sequenceEnd = sequence;
+    storeRange(trace, sizeof(*trace));
+    asm volatile("sync" ::: "memory");
 }
 
 }  // namespace LMCrash

@@ -7,6 +7,15 @@
 #define SUSAMUNE_CRASH_VERSION            1u
 #define SUSAMUNE_CRASH_REPORT_SIZE        0x800u
 
+/* The second half of the crash mailbox survives while the PPC is wedged. */
+#define SUSAMUNE_PHASE_TRACE_MAGIC        0x53504853u  /* 'SPHS' */
+#define SUSAMUNE_PHASE_TRACE_OFFSET       SUSAMUNE_CRASH_REPORT_SIZE
+#define SUSAMUNE_PHASE_TRACE_SIZE         0x20u
+
+#define SUSAMUNE_PHASE_ACTION_SAVE        1u
+#define SUSAMUNE_PHASE_ACTION_LOAD        2u
+#define SUSAMUNE_PHASE_ACTION_POST_LOAD   3u
+
 #define SUSAMUNE_CRASH_STATE_DISABLED     0u
 #define SUSAMUNE_CRASH_STATE_ARMED        1u
 #define SUSAMUNE_CRASH_STATE_WRITING      2u
@@ -42,6 +51,17 @@ struct SusamuneCrashBreadcrumb {
 struct SusamuneCrashFrame {
     unsigned int stackPointer;
     unsigned int returnAddress;
+};
+
+struct SusamunePhaseTrace {
+    unsigned int magic;
+    unsigned int sequenceBegin;
+    unsigned int action;
+    unsigned int phase;
+    unsigned int phaseInverse;
+    unsigned int arg0;
+    unsigned int arg1;
+    unsigned int sequenceEnd;
 };
 
 struct SusamuneCrashReport {
@@ -127,6 +147,12 @@ struct SusamuneCrashReport {
     ((struct SusamuneCrashReport *)SUSAMUNE_MEM2_CRASH_PPC_BASE)
 #define SUSAMUNE_CRASH_PHYS_PTR \
     ((struct SusamuneCrashReport *)SUSAMUNE_MEM2_CRASH_PHYS_BASE)
+#define SUSAMUNE_PHASE_TRACE_PPC_PTR \
+    ((struct SusamunePhaseTrace *)(SUSAMUNE_MEM2_CRASH_PPC_BASE + \
+                                  SUSAMUNE_PHASE_TRACE_OFFSET))
+#define SUSAMUNE_PHASE_TRACE_PHYS_PTR \
+    ((struct SusamunePhaseTrace *)(SUSAMUNE_MEM2_CRASH_PHYS_BASE + \
+                                  SUSAMUNE_PHASE_TRACE_OFFSET))
 
 typedef char susamune_crash_header_line_check[
     (__builtin_offsetof(struct SusamuneCrashReport, modCodeSize) == 32) ? 1 : -1];
@@ -134,7 +160,10 @@ typedef char susamune_crash_gpr_check[
     (__builtin_offsetof(struct SusamuneCrashReport, gpr) == 64) ? 1 : -1];
 typedef char susamune_crash_size_check[
     (sizeof(struct SusamuneCrashReport) == SUSAMUNE_CRASH_REPORT_SIZE) ? 1 : -1];
+typedef char susamune_phase_trace_size_check[
+    (sizeof(struct SusamunePhaseTrace) == SUSAMUNE_PHASE_TRACE_SIZE) ? 1 : -1];
 typedef char susamune_crash_mailbox_check[
-    (sizeof(struct SusamuneCrashReport) <= SUSAMUNE_MEM2_CRASH_SIZE) ? 1 : -1];
+    (SUSAMUNE_PHASE_TRACE_OFFSET + sizeof(struct SusamunePhaseTrace) <=
+     SUSAMUNE_MEM2_CRASH_SIZE) ? 1 : -1];
 
 #endif /* SUSAMUNE_CRASH_REPORT_H */

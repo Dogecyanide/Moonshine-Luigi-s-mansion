@@ -3,6 +3,7 @@
 #include "lm_state.hxx"
 
 #include "lm_crash.hxx"
+#include "susamune/crash_report.h"
 #include "susamune/mem2_map.h"
 #include "susamune/mod_bin.h"
 
@@ -259,6 +260,22 @@ u32 sSnapshotSize;
 u32 sGeneration;
 u16 sPreviousButtons;
 u32 sGateValue;
+u32 sPostLoadTraceState;
+
+void traceSavePhase(u32 phase, u32 detail) {
+    LMCrash::note(kEventStateSavePhase, phase, detail);
+    LMCrash::phase(SUSAMUNE_PHASE_ACTION_SAVE, phase, detail, sStableFrames);
+}
+
+void traceLoadPhase(u32 phase, u32 detail) {
+    LMCrash::note(kEventStateLoadPhase, phase, detail);
+    LMCrash::phase(SUSAMUNE_PHASE_ACTION_LOAD, phase, detail, sStableFrames);
+}
+
+void tracePostLoadPhase(u32 phase, u32 detail = 0u) {
+    LMCrash::phase(SUSAMUNE_PHASE_ACTION_POST_LOAD, phase, detail,
+                   sStableFrames);
+}
 
 bool gateFailure(Gate gate, u32 value, bool report) {
     if (report) {
@@ -571,7 +588,7 @@ FreezeState freezeBegin() {
     return state;
 }
 
-void freezeEnd(const FreezeState &state) {
+void freezeEnd(const FreezeState &state, bool journalLoad = false) {
     asm volatile("sync" ::: "memory");
     volatile u16 *dmaControl = reinterpret_cast<volatile u16 *>(0xCC005036u);
     const u16 liveControl = *dmaControl;
@@ -579,9 +596,18 @@ void freezeEnd(const FreezeState &state) {
                       ? static_cast<u16>(liveControl | 0x8000u)
                       : static_cast<u16>(liveControl & ~0x8000u);
     asm volatile("sync" ::: "memory");
+    if (journalLoad) {
+        traceLoadPhase(0x71u, liveControl);
+    }
     reinterpret_cast<SchedulerFn>(kOSEnableSchedulerAddr)();
+    if (journalLoad) {
+        traceLoadPhase(0x72u, state.interruptsWereEnabled ? 1u : 0u);
+    }
     reinterpret_cast<RestoreInterruptsFn>(kOSRestoreInterruptsAddr)(
         state.interruptsWereEnabled);
+    if (journalLoad) {
+        traceLoadPhase(0x73u, state.interruptsWereEnabled ? 1u : 0u);
+    }
 }
 
 bool quiesceAudio(const LiveIdentity &identity) {
@@ -751,7 +777,7 @@ bool savedPointerCompatible(u32 saved, u32 current,
 }
 
 void saveState() {
-    LMCrash::note(kEventStateSavePhase, 0x01u, sStableFrames);
+    traceSavePhase(0x01u, sStableFrames);
     LiveIdentity preflight;
     if (sStableFrames < kRequiredStableFrames ||
         !buildIdentity(&preflight) ||
@@ -766,12 +792,12 @@ void saveState() {
 
     // Drain prior live handles through LM's own scene-change path. Its new
     // bootstrap handle remains in uncaptured system audio state.
-    LMCrash::note(kEventStateSavePhase, 0x20u, preflight.audioBasic);
+    traceSavePhase(0x20u, preflight.audioBasic);
     if (!quiesceAudio(preflight)) {
         setReject(LMState::Status::Busy, preflight.audioBasic);
         return;
     }
-    LMCrash::note(kEventStateSavePhase, 0x21u, preflight.audioBasic);
+    traceSavePhase(0x21u, preflight.audioBasic);
     LiveIdentity before;
     if (!buildIdentity(&before) || !ioIdle() || !heapsHealthy(before)) {
         setReject(LMState::Status::Busy, preflight.heap);
@@ -783,9 +809,9 @@ void saveState() {
         return;
     }
 
-    LMCrash::note(kEventStateSavePhase, 0x40u, before.heap);
+    traceSavePhase(0x40u, before.heap);
     const FreezeState freeze = freezeBegin();
-    LMCrash::note(kEventStateSavePhase, 0x43u, before.heap);
+    traceSavePhase(0x43u, before.heap);
     LiveIdentity live;
     if (!buildIdentity(&live) || !sameIdentity(before, live)) {
         freezeEnd(freeze);
@@ -793,7 +819,7 @@ void saveState() {
         return;
     }
 
-    LMCrash::note(kEventStateSavePhase, 0x60u, live.heap);
+    traceSavePhase(0x60u, live.heap);
     SnapshotHeader *header =
         reinterpret_cast<SnapshotHeader *>(kSnapshotBase);
     header->magic = 0u;
@@ -868,31 +894,32 @@ void saveState() {
               reinterpret_cast<void *>(kInGameFlagsBase +
                                        kInGameFlagsOffset),
               kStateStaticsSize);
-    LMCrash::note(kEventStateSavePhase, 0x63u, live.heapSize);
+    traceSavePhase(0x63u, live.heapSize);
     copyWords(reinterpret_cast<void *>(kSnapshotBase + kHeapDataOffset),
               reinterpret_cast<void *>(live.heapStart), live.heapSize);
-    LMCrash::note(kEventStateSavePhase, 0x64u, totalSize);
+    traceSavePhase(0x64u, totalSize);
     header->checksum = snapshotChecksum(header);
 
-    LMCrash::note(kEventStateSavePhase, 0x65u, totalSize);
+    traceSavePhase(0x65u, totalSize);
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(header, totalSize);
     asm volatile("sync" ::: "memory");
     header->magic = kSnapshotMagic;
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(header, 32u);
     asm volatile("sync" ::: "memory");
-    LMCrash::note(kEventStateSavePhase, 0x70u, live.heap);
+    traceSavePhase(0x70u, live.heap);
     freezeEnd(freeze);
 
     sSnapshotSize = totalSize;
     sStatus = LMState::Status::Saved;
-    LMCrash::note(kEventStateSavePhase, 0x7Fu, totalSize);
+    traceSavePhase(0x7Fu, totalSize);
     LMCrash::note(kEventStateSave, live.heap, live.heapSize);
 }
 
 void loadState() {
-    LMCrash::note(kEventStateLoadPhase, 0x01u, sStableFrames);
+    traceLoadPhase(0x01u, sStableFrames);
     SnapshotHeader *header =
         reinterpret_cast<SnapshotHeader *>(kSnapshotBase);
+    traceLoadPhase(0x02u, kHeaderSize);
     reinterpret_cast<CacheRangeFn>(kDCInvalidateRangeAddr)(header,
                                                             kHeaderSize);
     if (header->magic != kSnapshotMagic) {
@@ -903,6 +930,7 @@ void loadState() {
         setReject(LMState::Status::BadCrc, header->version);
         return;
     }
+    traceLoadPhase(0x03u, header->totalSize);
     reinterpret_cast<CacheRangeFn>(kDCInvalidateRangeAddr)(header,
                                                             header->totalSize);
     if (!basicHeaderValid(header) ||
@@ -910,6 +938,7 @@ void loadState() {
         setReject(LMState::Status::BadCrc, header->checksum);
         return;
     }
+    traceLoadPhase(0x05u, header->checksum);
 
     LiveIdentity preflight;
     if (sStableFrames < kRequiredStableFrames ||
@@ -949,12 +978,12 @@ void loadState() {
         return;
     }
 
-    LMCrash::note(kEventStateLoadPhase, 0x20u, preflight.audioBasic);
+    traceLoadPhase(0x20u, preflight.audioBasic);
     if (!quiesceAudio(preflight)) {
         setReject(LMState::Status::Busy, preflight.audioBasic);
         return;
     }
-    LMCrash::note(kEventStateLoadPhase, 0x21u, preflight.audioBasic);
+    traceLoadPhase(0x21u, preflight.audioBasic);
     LiveIdentity before;
     if (!buildIdentity(&before) || !ioIdle() ||
         !headerMatchesLive(header, before) || !heapsHealthy(before)) {
@@ -962,9 +991,9 @@ void loadState() {
         return;
     }
 
-    LMCrash::note(kEventStateLoadPhase, 0x40u, before.heap);
+    traceLoadPhase(0x40u, before.heap);
     const FreezeState freeze = freezeBegin();
-    LMCrash::note(kEventStateLoadPhase, 0x43u, before.heap);
+    traceLoadPhase(0x43u, before.heap);
     LiveIdentity live;
     if (!buildIdentity(&live) || !sameIdentity(before, live) ||
         !headerMatchesLive(header, live)) {
@@ -973,13 +1002,15 @@ void loadState() {
         return;
     }
 
-    LMCrash::note(kEventStateLoadPhase, 0x60u, live.heapSize);
+    traceLoadPhase(0x60u, live.heapSize);
     copyWords(reinterpret_cast<void *>(live.heap + kHeapMetadataStart),
               reinterpret_cast<void *>(kSnapshotBase + kHeapMetadataOffset),
               kHeapMetadataSize);
+    traceLoadPhase(0x61u, kHeapMetadataSize);
     copyWords(reinterpret_cast<void *>(live.heapStart),
               reinterpret_cast<void *>(kSnapshotBase + kHeapDataOffset),
               live.heapSize);
+    traceLoadPhase(0x62u, live.heapSize);
 
     // This is the first deliberately small static manifest: the verified
     // room/map flag bytes and libc RNG. Root/system allocator state stays live
@@ -989,6 +1020,7 @@ void loadState() {
               reinterpret_cast<void *>(kSnapshotBase + kStateStaticsOffset),
               kStateStaticsSize);
     writeWord(kRandomStateGlobal, header->randomState);
+    traceLoadPhase(0x63u, kStateStaticsSize);
 
     // These verified roots select the live scene inside the restored heap.
     // MissionMode and the mounted-volume list are intentionally not rewound;
@@ -1005,12 +1037,15 @@ void loadState() {
         writeWord(kGameModeGlobal, header->gameMode);
         writeWord(kGameModeCountGlobal, header->gameModeCount);
     }
+    traceLoadPhase(0x64u, header->currentScene);
 
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
         reinterpret_cast<void *>(live.heap + kHeapMetadataStart),
         kHeapMetadataSize);
+    traceLoadPhase(0x65u, kHeapMetadataSize);
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
         reinterpret_cast<void *>(live.heapStart), live.heapSize);
+    traceLoadPhase(0x66u, live.heapSize);
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
         reinterpret_cast<void *>(kInGameFlagsBase + kInGameFlagsOffset),
         kStateStaticsSize);
@@ -1024,12 +1059,33 @@ void loadState() {
         reinterpret_cast<void *>(kCurrentSceneGlobal), sizeof(u32));
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
         reinterpret_cast<void *>(kGameModeGlobal), sizeof(u32) * 2u);
+    traceLoadPhase(0x67u, kStateStaticsSize);
+    traceLoadPhase(0x68u, live.heap);
     reinterpret_cast<VoidFn>(kGXInvalidateTexAllAddr)();
     asm volatile("sync" ::: "memory");
+    traceLoadPhase(0x69u, live.heap);
 
-    LMCrash::note(kEventStateLoadPhase, 0x70u, live.heap);
-    freezeEnd(freeze);
-    const bool healthyAfter = heapsHealthy(live);
+    traceLoadPhase(0x70u, live.heap);
+    freezeEnd(freeze, true);
+    traceLoadPhase(0x74u, live.heap);
+
+    HeapCheckFn check = reinterpret_cast<HeapCheckFn>(kExpHeapCheckAddr);
+    traceLoadPhase(0x75u, live.rootHeap);
+    bool healthyAfter = isExpHeap(live.rootHeap) &&
+                        check(reinterpret_cast<void *>(live.rootHeap));
+    traceLoadPhase(0x76u, healthyAfter ? 1u : 0u);
+    if (healthyAfter) {
+        traceLoadPhase(0x77u, live.systemHeap);
+        healthyAfter = isExpHeap(live.systemHeap) &&
+                       check(reinterpret_cast<void *>(live.systemHeap));
+        traceLoadPhase(0x78u, healthyAfter ? 1u : 0u);
+    }
+    if (healthyAfter) {
+        traceLoadPhase(0x79u, live.heap);
+        healthyAfter = isExpHeap(live.heap) &&
+                       check(reinterpret_cast<void *>(live.heap));
+        traceLoadPhase(0x7Au, healthyAfter ? 1u : 0u);
+    }
 
     sSnapshotSize = header->totalSize;
     sStableFrames = 0u;
@@ -1038,7 +1094,8 @@ void loadState() {
         return;
     }
     sStatus = LMState::Status::Loaded;
-    LMCrash::note(kEventStateLoadPhase, 0x7Fu, header->totalSize);
+    sPostLoadTraceState = 1u;
+    traceLoadPhase(0x7Fu, header->totalSize);
     LMCrash::note(kEventStateLoad, live.heap, live.heapSize);
 }
 
@@ -1063,6 +1120,41 @@ void updateStability() {
 }  // namespace
 
 namespace LMState {
+
+void presenterEnter() {
+    if (sPostLoadTraceState == 1u) {
+        tracePostLoadPhase(0x81u);
+        sPostLoadTraceState = 2u;
+    }
+}
+
+void presenterAfterSample() {
+    if (sPostLoadTraceState == 2u) {
+        tracePostLoadPhase(0x82u);
+    }
+}
+
+void presenterAfterDrawDone() {
+    if (sPostLoadTraceState == 2u) {
+        tracePostLoadPhase(0x83u);
+    }
+}
+
+void presenterBeforeTick() {
+    if (sPostLoadTraceState == 2u) {
+        tracePostLoadPhase(0x84u);
+    }
+}
+
+void presenterAfterTick() {
+    if (sPostLoadTraceState == 1u) {
+        // The load returned to its presenter; the next entry is a new frame.
+        tracePostLoadPhase(0x80u);
+    } else if (sPostLoadTraceState == 2u) {
+        tracePostLoadPhase(0x85u);
+        sPostLoadTraceState = 0u;
+    }
+}
 
 void tick() {
     initializeSlot();

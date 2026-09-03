@@ -247,7 +247,7 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM STATE X0.3.4 F:%s C:%s H:%s\n"
+        "LM STATE X0.3.5 F:%s C:%s H:%s\n"
         "S:%s ST%lu SZ%luK G:%s %08lX\n"
         "ROOT %08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
@@ -324,12 +324,15 @@ extern "C" void *getArenaLo() {
 // complete before touching the XFB, so this path cannot depend on the EFB's
 // projection, vertex descriptors, resource fonts, or scene draw order.
 extern "C" void diagnosticCopyDisp(void *xfb, bool clear) {
+    LMState::presenterEnter();
     HeapSample system;
     HeapSample game;
     sampleDiagnostic(&system, &game);
+    LMState::presenterAfterSample();
 
     reinterpret_cast<GXCopyDispFn>(kGXCopyDispAddr)(xfb, clear);
     reinterpret_cast<VoidFn>(kGXDrawDoneAddr)();
+    LMState::presenterAfterDrawDone();
 
     // Crash registration is lazy because LM's JUTException constructor clears
     // the callback during early boot. Paint before tick so the diagnostic
@@ -361,7 +364,9 @@ extern "C" void diagnosticCopyDisp(void *xfb, bool clear) {
 
     // No game thread can observe a half-copied slot after GXDrawDone. Status
     // changes appear on the next frame; a stalled operation keeps this frame.
+    LMState::presenterBeforeTick();
     LMState::tick();
+    LMState::presenterAfterTick();
 }
 
 #endif  // defined(SUSAMUNE_VERSION_LMJ)

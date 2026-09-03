@@ -22,6 +22,9 @@ CRASH_SOURCE = (ROOT / "lm_diag" / "src" / "lm_crash.cpp").read_text(
 KERNEL_CRASH_SOURCE = (ROOT / "launcher" / "kernel" / "SusamuneCrash.c").read_text(
     encoding="utf-8"
 )
+CRASH_HEADER = (ROOT / "include" / "susamune" / "crash_report.h").read_text(
+    encoding="utf-8"
+)
 
 spec = importlib.util.spec_from_file_location("lm_diag_patches_test", PATCHES_PATH)
 assert spec and spec.loader
@@ -150,21 +153,35 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kEventStateSavePhase = 0x110u", STATE_SOURCE)
         self.assertIn("kEventStateLoadPhase = 0x111u", STATE_SOURCE)
         self.assertGreaterEqual(
-            STATE_SOURCE.count("LMCrash::note(kEventStateSavePhase"), 8
+            STATE_SOURCE.count("traceSavePhase("), 8
         )
         self.assertGreaterEqual(
-            STATE_SOURCE.count("LMCrash::note(kEventStateLoadPhase"), 6
+            STATE_SOURCE.count("traceLoadPhase("), 16
         )
+        self.assertIn("LMCrash::note(kEventStateSavePhase", STATE_SOURCE)
+        self.assertIn("LMCrash::note(kEventStateLoadPhase", STATE_SOURCE)
         self.assertIn("272=save-phase", KERNEL_CRASH_SOURCE)
         self.assertIn("273=load-phase", KERNEL_CRASH_SOURCE)
 
+    def test_hard_hang_phase_journal_contract(self) -> None:
+        self.assertIn("SUSAMUNE_PHASE_TRACE_OFFSET", CRASH_HEADER)
+        self.assertIn("sizeof(struct SusamunePhaseTrace) ==", CRASH_HEADER)
+        self.assertIn("SUSAMUNE_PHASE_TRACE_PPC_PTR", CRASH_SOURCE)
+        self.assertIn("sequence - 1u", CRASH_SOURCE)
+        self.assertIn("SUSAMUNE_PHASE_TRACE_PHYS_PTR", KERNEL_CRASH_SOURCE)
+        self.assertIn("PollPhaseTrace();", KERNEL_CRASH_SOURCE)
+        self.assertIn("f_sync(&dbgfile)", (ROOT / "launcher" / "kernel" /
+                                           "vsprintf.c").read_text(encoding="utf-8"))
+        self.assertIn("presenterEnter();", DIAG_SOURCE)
+        self.assertIn("presenterAfterTick();", DIAG_SOURCE)
+
     def test_frozen_transactions_do_not_take_heap_mutexes(self) -> None:
         save_frozen = STATE_SOURCE.split(
-            "const FreezeState freeze = freezeBegin();", 1
+            "traceSavePhase(0x60u", 1
         )[1].split("freezeEnd(freeze);", 1)[0]
-        load_frozen = STATE_SOURCE.rsplit(
-            "const FreezeState freeze = freezeBegin();", 1
-        )[1].split("freezeEnd(freeze);", 1)[0]
+        load_frozen = STATE_SOURCE.split(
+            "traceLoadPhase(0x60u", 1
+        )[1].split("freezeEnd(freeze, true);", 1)[0]
         self.assertNotIn("heapsHealthy", save_frozen)
         self.assertNotIn("heapsHealthy", load_frozen)
         self.assertNotIn("ioIdle", save_frozen)
