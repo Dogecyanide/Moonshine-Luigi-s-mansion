@@ -29,6 +29,7 @@ const u32 kLMOuterRestartAddr = 0x80006070u;
 const u32 kLMPreMainUpdateAddr = 0x8000ACA4u;
 const u32 kLMPostMainUpdateAddr = 0x80008004u;
 const u32 kLMMainSceneStepAddr = 0x8000B248u;
+const u32 kLMMainDrawStateAddr = 0x804A0C44u;
 const u32 kLMDefaultOrthoViewAddr = 0x800078FCu;
 const u32 kGXCopyDispAddr = 0x801F045Cu;
 const u32 kGXDrawDoneAddr = 0x801EF5F0u;
@@ -85,6 +86,7 @@ typedef void (*DirectPrintChangeFrameBufferFn)(void *, void *, u16, u16);
 typedef void (*DirectPrintDrawStringFn)(void *, u16, u16, const char *, ...);
 typedef u32 (*ExpHeapSizeFn)(void *);
 typedef bool (*ExpHeapCheckFn)(void *);
+typedef u32 (*RetailCall8Fn)(u32, u32, u32, u32, u32, u32, u32, u32);
 
 struct HeapSample {
     u32 pointer;
@@ -265,7 +267,7 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM STATE X0.3.8 F:%s C:%s H:%s\n"
+        "LM STATE X0.3.9 F:%s C:%s H:%s\n"
         "S:%s ST%lu SZ%luK G:%s %08lX\n"
         "ROOT %08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
@@ -380,12 +382,131 @@ extern "C" void diagnosticLastNrmMatrix(MatrixPtr matrix, u32 index) {
 }
 
 extern "C" void diagnosticSceneDraw(void *scene) {
-    LMState::postLoadMilestone(0xA4u);
     const u32 callback = readWord(reinterpret_cast<u32>(scene) + 0x1Cu);
+    LMState::postLoadDetail(0xA4u, readWord(kLMMainDrawStateAddr), callback);
     // Retail deliberately leaves sCurScene in r3 for this dynamic call.
     reinterpret_cast<VoidPtrFn>(callback)(scene);
-    LMState::postLoadMilestone(0xA5u);
+    LMState::postLoadDetail(0xA5u, readWord(kLMMainDrawStateAddr), callback);
 }
+
+// The draw routines use ordinary EABI calls. Forwarding all eight volatile
+// argument registers keeps each diagnostic wrapper transparent even where the
+// exact retail prototype is unknown. The u32 result preserves r3 for the four
+// calls whose return values are consumed.
+#define DEFINE_DRAW_CALL(name, enter, leave, site, target)                  \
+    extern "C" u32 name(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, \
+                         u32 a6, u32 a7) {                                  \
+        LMState::postLoadDetail(enter, site, target);                       \
+        const u32 result = reinterpret_cast<RetailCall8Fn>(target)(         \
+            a0, a1, a2, a3, a4, a5, a6, a7);                              \
+        LMState::postLoadDetail(leave, site, target);                       \
+        return result;                                                      \
+    }
+
+// Main Game draw dispatcher (0x8000BCEC).
+DEFINE_DRAW_CALL(diagnosticMainDrawBD1C, 0xB0u, 0xB1u, 0x8000BD1Cu,
+                 0x8000C700u)
+DEFINE_DRAW_CALL(diagnosticMainDrawBD24, 0xB0u, 0xB1u, 0x8000BD24u,
+                 0x8000C464u)
+DEFINE_DRAW_CALL(diagnosticMainDrawBD2C, 0xB0u, 0xB1u, 0x8000BD2Cu,
+                 0x8000C96Cu)
+DEFINE_DRAW_CALL(diagnosticMainDrawBD34, 0xB0u, 0xB1u, 0x8000BD34u,
+                 0x8000CBA8u)
+DEFINE_DRAW_CALL(diagnosticMainDrawBD3C, 0xB0u, 0xB1u, 0x8000BD3Cu,
+                 0x801853ACu)
+DEFINE_DRAW_CALL(diagnosticMainDrawBD44, 0xB0u, 0xB1u, 0x8000BD44u,
+                 0x80050C6Cu)
+DEFINE_DRAW_CALL(diagnosticMainDrawBD58, 0xB0u, 0xB1u, 0x8000BD58u,
+                 0x8000EEE8u)
+DEFINE_DRAW_CALL(diagnosticMainDrawBD6C, 0xB0u, 0xB1u, 0x8000BD6Cu,
+                 0x8000BBB4u)
+DEFINE_DRAW_CALL(diagnosticMainDrawBDA4, 0xB0u, 0xB1u, 0x8000BDA4u,
+                 0x8011325Cu)
+DEFINE_DRAW_CALL(diagnosticMainDrawBDC4, 0xB0u, 0xB1u, 0x8000BDC4u,
+                 0x80007D38u)
+DEFINE_DRAW_CALL(diagnosticMainDrawBDC8, 0xB0u, 0xB1u, 0x8000BDC8u,
+                 0x801132CCu)
+DEFINE_DRAW_CALL(diagnosticMainDrawBDDC, 0xB0u, 0xB1u, 0x8000BDDCu,
+                 0x8000B200u)
+DEFINE_DRAW_CALL(diagnosticMainDrawBDE4, 0xB0u, 0xB1u, 0x8000BDE4u,
+                 0x80007D38u)
+DEFINE_DRAW_CALL(diagnosticMainDrawBDE8, 0xB0u, 0xB1u, 0x8000BDE8u,
+                 0x80113838u)
+DEFINE_DRAW_CALL(diagnosticMainDrawBDF0, 0xB0u, 0xB1u, 0x8000BDF0u,
+                 0x80113474u)
+
+// Normal-room renderer (0x8000BBB4). A final C0 record identifies the exact
+// retail call which did not return; C1 proves that call completed.
+DEFINE_DRAW_CALL(diagnosticNormalDrawBBC8, 0xC0u, 0xC1u, 0x8000BBC8u,
+                 0x80009A58u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBBCC, 0xC0u, 0xC1u, 0x8000BBCCu,
+                 0x80156B0Cu)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBBD4, 0xC0u, 0xC1u, 0x8000BBD4u,
+                 0x80070FA8u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBBE4, 0xC0u, 0xC1u, 0x8000BBE4u,
+                 0x8005F6B8u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBBF4, 0xC0u, 0xC1u, 0x8000BBF4u,
+                 0x8005F6B8u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBBF8, 0xC0u, 0xC1u, 0x8000BBF8u,
+                 0x8005CE78u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBBFC, 0xC0u, 0xC1u, 0x8000BBFCu,
+                 0x8005E300u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC00, 0xC0u, 0xC1u, 0x8000BC00u,
+                 0x8001138Cu)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC10, 0xC0u, 0xC1u, 0x8000BC10u,
+                 0x80011468u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC14, 0xC0u, 0xC1u, 0x8000BC14u,
+                 0x800114E4u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC18, 0xC0u, 0xC1u, 0x8000BC18u,
+                 0x80060004u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC20, 0xC0u, 0xC1u, 0x8000BC20u,
+                 0x800601ECu)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC2C, 0xC0u, 0xC1u, 0x8000BC2Cu,
+                 0x800601ECu)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC30, 0xC0u, 0xC1u, 0x8000BC30u,
+                 0x80060A0Cu)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC34, 0xC0u, 0xC1u, 0x8000BC34u,
+                 0x80156BC4u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC3C, 0xC0u, 0xC1u, 0x8000BC3Cu,
+                 0x80070FA8u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC44, 0xC0u, 0xC1u, 0x8000BC44u,
+                 0x80070FA8u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC48, 0xC0u, 0xC1u, 0x8000BC48u,
+                 0x80011410u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC64, 0xC0u, 0xC1u, 0x8000BC64u,
+                 0x800112B8u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC6C, 0xC0u, 0xC1u, 0x8000BC6Cu,
+                 0x80011468u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC74, 0xC0u, 0xC1u, 0x8000BC74u,
+                 0x8005CF0Cu)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC7C, 0xC0u, 0xC1u, 0x8000BC7Cu,
+                 0x8000BA64u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC88, 0xC0u, 0xC1u, 0x8000BC88u,
+                 0x8005EC34u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC8C, 0xC0u, 0xC1u, 0x8000BC8Cu,
+                 0x80009A58u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC90, 0xC0u, 0xC1u, 0x8000BC90u,
+                 0x800078FCu)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC94, 0xC0u, 0xC1u, 0x8000BC94u,
+                 0x8005D300u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBC9C, 0xC0u, 0xC1u, 0x8000BC9Cu,
+                 0x8003E378u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBCA4, 0xC0u, 0xC1u, 0x8000BCA4u,
+                 0x8000ACD4u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBCB4, 0xC0u, 0xC1u, 0x8000BCB4u,
+                 0x800112B8u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBCB8, 0xC0u, 0xC1u, 0x8000BCB8u,
+                 0x8005DD68u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBCBC, 0xC0u, 0xC1u, 0x8000BCBCu,
+                 0x800461CCu)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBCC4, 0xC0u, 0xC1u, 0x8000BCC4u,
+                 0x80070FA8u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBCC8, 0xC0u, 0xC1u, 0x8000BCC8u,
+                 0x80043B58u)
+DEFINE_DRAW_CALL(diagnosticNormalDrawBCD0, 0xC0u, 0xC1u, 0x8000BCD0u,
+                 0x80070FA8u)
+
+#undef DEFINE_DRAW_CALL
 
 extern "C" void diagnosticOrthoReset() {
     LMState::postLoadMilestone(0xA6u);

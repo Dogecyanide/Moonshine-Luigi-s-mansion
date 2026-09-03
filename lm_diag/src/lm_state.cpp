@@ -87,7 +87,7 @@ constexpr u32 kMem1End = 0x81800000u;
 constexpr u32 kSnapshotBase = SUSAMUNE_MEM2_SNAPSHOT_PPC_BASE;
 constexpr u32 kSnapshotCapacity = SUSAMUNE_MEM2_SNAPSHOT_SIZE;
 constexpr u32 kSnapshotMagic = 0x4C4D5354u;  // 'LMST'
-constexpr u32 kSnapshotVersion = 4u;
+constexpr u32 kSnapshotVersion = 5u;
 constexpr u32 kHeaderSize = 0x100u;
 constexpr u32 kHeapMetadataStart = 0x3Cu;
 constexpr u32 kHeapMetadataEnd = 0x84u;
@@ -96,6 +96,11 @@ constexpr u32 kHeapModeOffset = 0x68u;
 constexpr u32 kHeapGroupOffset = 0x69u;
 constexpr u32 kHeapMetadataSize = kHeapMetadataEnd - kHeapMetadataStart;
 constexpr u32 kHeapMetadataOffset = kHeaderSize;
+// LM's camera/viewport object and its four scalar draw-state words live in
+// BSS below the game-static window. Stop before the following live display
+// object, which owns boot-allocated double-buffer pointers.
+constexpr u32 kRendererStateStart = 0x80398770u;
+constexpr u32 kRendererStateEnd = 0x803989E0u;
 constexpr u32 kInGameFlagsBase = 0x803C7CA0u;
 constexpr u32 kInGameFlagsOffset = 0x659u;
 constexpr u32 kInGameFlagsSize = 0x20u;
@@ -123,6 +128,7 @@ struct StaticRange {
 // and audio state. Only the first two words of lbl_80398A40 are scalars;
 // +0x08 begins an OSMessageQueue.
 constexpr StaticRange kStateStaticRanges[] = {
+    {kRendererStateStart, kRendererStateEnd - kRendererStateStart},
     {kInGameFlagsBase + kInGameFlagsOffset, kInGameFlagsSize},
     {kMainLoopStateBase, kMainLoopStateSize},
     {kGameSdata0Start, kGameSdata0End - kGameSdata0Start},
@@ -135,7 +141,8 @@ constexpr u32 kStateStaticRangeCount =
 constexpr u32 kStateStaticsOffset =
     kHeapMetadataOffset + kHeapMetadataSize;
 constexpr u32 kStateStaticsSize =
-    kInGameFlagsSize + kMainLoopStateSize +
+    (kRendererStateEnd - kRendererStateStart) + kInGameFlagsSize +
+    kMainLoopStateSize +
     (kGameSdata0End - kGameSdata0Start) +
     (kGameSdata1End - kGameSdata1Start) +
     (kGameSbss0End - kGameSbss0Start) +
@@ -286,10 +293,12 @@ static_assert(kSnapshotBase + kSnapshotCapacity ==
               "LM state must end before the config/crash mailboxes");
 static_assert((kHeapDataOffset & 31u) == 0,
               "LM heap payload must be cache-line aligned");
-static_assert(kStateStaticsSize == 0x89C0u,
+static_assert(kStateStaticsSize == 0x8C30u,
               "LM static manifest size drifted");
-static_assert(kHeapDataOffset == 0x8B20u,
+static_assert(kHeapDataOffset == 0x8D80u,
               "LM static manifest packing drifted");
+static_assert(kRendererStateEnd - kRendererStateStart == 0x270u,
+              "LM renderer snapshot boundary drifted");
 static_assert(kGameSdata0End == kCurrentSceneGlobal &&
                   kGameSdata1Start == kCurrentSceneGlobal + 8u,
               "LM sCurScene must remain an uncaptured epoch gate");
@@ -1265,6 +1274,12 @@ namespace LMState {
 void postLoadMilestone(u32 phase) {
     if (sPostLoadTraceState != 0u) {
         tracePostLoadPhase(phase, sPostLoadTraceFrame);
+    }
+}
+
+void postLoadDetail(u32 phase, u32 arg0, u32 arg1) {
+    if (sPostLoadTraceState != 0u) {
+        LMCrash::phase(SUSAMUNE_PHASE_ACTION_POST_LOAD, phase, arg0, arg1);
     }
 }
 

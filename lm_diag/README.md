@@ -14,7 +14,7 @@ unmodified.
 The six overlay rows are:
 
 ```text
-LM STATE X0.3.8 F:<floor> C:<canary> H:<heap check>
+LM STATE X0.3.9 F:<floor> C:<canary> H:<heap check>
 S:<state status> ST<stable frames> SZ<snapshot KiB> G:<gate> <gate value>
 ROOT <root> <start>-<end>
 SYS  <system> L/T/M <largest>/<total>/<minimum total KiB>
@@ -36,7 +36,13 @@ records while saving, loading, and traversing the restored-frame trace window.
 The ARM writes and syncs these independently, so the last record survives a
 PowerPC hard lock that never reaches the exception dumper.
 
-For `0.3.8`, `80` means the load returned at the true post-presenter boundary.
+Version `0.3.9` additionally captures GLMJ01's standalone `0x270`-byte
+camera/viewport state block at `0x80398770-0x803989E0`. The normal-room draw
+path reads its projection, viewport, scissor, and matrix fields directly. The
+following display object is deliberately excluded because it owns live
+double-buffer pointers.
+
+For `0.3.9`, `80` means the load returned at the true post-presenter boundary.
 The immediate main-loop tail is bracketed by `90/91`, `92/93`, and `94/95`;
 the next update uses `88/89`, `8A/8B`, optionally `8C/8D`, and `8E/8F`.
 `81` through `86` bracket the following complete presenter, diagnostic copy,
@@ -51,7 +57,12 @@ Inside `8A/8B`, `A0/A1` bracket the first position-matrix upload, `A2/A3`
 bracket the final normal-matrix upload, `A4/A5` bracket the active scene's
 draw callback, and `A6/A7` bracket the final orthographic-view reset. A last
 `A1` therefore means one of the intervening matrix uploads stalled; a last
-`A4` identifies the scene draw callback itself.
+`A4` identifies the scene draw callback itself. In `0.3.9`, `A4/A5` record the
+main draw state in `arg0` and callback address in `arg1`. `B0/B1` bracket each
+direct call in the Main Game draw dispatcher, while `C0/C1` bracket every
+direct call in its normal-room renderer. For those records, `arg0` is the
+retail call site and `arg1` is its original callee; a final `B0` or `C0`
+therefore identifies the exact call that did not return.
 
 If the inner game loop exits during that window, `96/97` identify loop
 entry/return, `98/99` bracket outer cleanup, and `9A/9B` bracket its restart.

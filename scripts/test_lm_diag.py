@@ -49,6 +49,55 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
                 (0x8000B268, "diagnosticFirstPosMatrix", "BL", 0x481E99C9),
                 (0x8000B34C, "diagnosticLastNrmMatrix", "BL", 0x481E9921),
                 (0x8000B35C, "diagnosticSceneDraw", "BL", 0x4E800021),
+                (0x8000BD1C, "diagnosticMainDrawBD1C", "BL", 0x480009E5),
+                (0x8000BD24, "diagnosticMainDrawBD24", "BL", 0x48000741),
+                (0x8000BD2C, "diagnosticMainDrawBD2C", "BL", 0x48000C41),
+                (0x8000BD34, "diagnosticMainDrawBD34", "BL", 0x48000E75),
+                (0x8000BD3C, "diagnosticMainDrawBD3C", "BL", 0x48179671),
+                (0x8000BD44, "diagnosticMainDrawBD44", "BL", 0x48044F29),
+                (0x8000BD58, "diagnosticMainDrawBD58", "BL", 0x48003191),
+                (0x8000BD6C, "diagnosticMainDrawBD6C", "BL", 0x4BFFFE49),
+                (0x8000BDA4, "diagnosticMainDrawBDA4", "BL", 0x481074B9),
+                (0x8000BDC4, "diagnosticMainDrawBDC4", "BL", 0x4BFFBF75),
+                (0x8000BDC8, "diagnosticMainDrawBDC8", "BL", 0x48107505),
+                (0x8000BDDC, "diagnosticMainDrawBDDC", "BL", 0x4BFFF425),
+                (0x8000BDE4, "diagnosticMainDrawBDE4", "BL", 0x4BFFBF55),
+                (0x8000BDE8, "diagnosticMainDrawBDE8", "BL", 0x48107A51),
+                (0x8000BDF0, "diagnosticMainDrawBDF0", "BL", 0x48107685),
+                (0x8000BBC8, "diagnosticNormalDrawBBC8", "BL", 0x4BFFDE91),
+                (0x8000BBCC, "diagnosticNormalDrawBBCC", "BL", 0x4814AF41),
+                (0x8000BBD4, "diagnosticNormalDrawBBD4", "BL", 0x480653D5),
+                (0x8000BBE4, "diagnosticNormalDrawBBE4", "BL", 0x48053AD5),
+                (0x8000BBF4, "diagnosticNormalDrawBBF4", "BL", 0x48053AC5),
+                (0x8000BBF8, "diagnosticNormalDrawBBF8", "BL", 0x48051281),
+                (0x8000BBFC, "diagnosticNormalDrawBBFC", "BL", 0x48052705),
+                (0x8000BC00, "diagnosticNormalDrawBC00", "BL", 0x4800578D),
+                (0x8000BC10, "diagnosticNormalDrawBC10", "BL", 0x48005859),
+                (0x8000BC14, "diagnosticNormalDrawBC14", "BL", 0x480058D1),
+                (0x8000BC18, "diagnosticNormalDrawBC18", "BL", 0x480543ED),
+                (0x8000BC20, "diagnosticNormalDrawBC20", "BL", 0x480545CD),
+                (0x8000BC2C, "diagnosticNormalDrawBC2C", "BL", 0x480545C1),
+                (0x8000BC30, "diagnosticNormalDrawBC30", "BL", 0x48054DDD),
+                (0x8000BC34, "diagnosticNormalDrawBC34", "BL", 0x4814AF91),
+                (0x8000BC3C, "diagnosticNormalDrawBC3C", "BL", 0x4806536D),
+                (0x8000BC44, "diagnosticNormalDrawBC44", "BL", 0x48065365),
+                (0x8000BC48, "diagnosticNormalDrawBC48", "BL", 0x480057C9),
+                (0x8000BC64, "diagnosticNormalDrawBC64", "BL", 0x48005655),
+                (0x8000BC6C, "diagnosticNormalDrawBC6C", "BL", 0x480057FD),
+                (0x8000BC74, "diagnosticNormalDrawBC74", "BL", 0x48051299),
+                (0x8000BC7C, "diagnosticNormalDrawBC7C", "BL", 0x4BFFFDE9),
+                (0x8000BC88, "diagnosticNormalDrawBC88", "BL", 0x48052FAD),
+                (0x8000BC8C, "diagnosticNormalDrawBC8C", "BL", 0x4BFFDDCD),
+                (0x8000BC90, "diagnosticNormalDrawBC90", "BL", 0x4BFFBC6D),
+                (0x8000BC94, "diagnosticNormalDrawBC94", "BL", 0x4805166D),
+                (0x8000BC9C, "diagnosticNormalDrawBC9C", "BL", 0x480326DD),
+                (0x8000BCA4, "diagnosticNormalDrawBCA4", "BL", 0x4BFFF031),
+                (0x8000BCB4, "diagnosticNormalDrawBCB4", "BL", 0x48005605),
+                (0x8000BCB8, "diagnosticNormalDrawBCB8", "BL", 0x480520B1),
+                (0x8000BCBC, "diagnosticNormalDrawBCBC", "BL", 0x4803A511),
+                (0x8000BCC4, "diagnosticNormalDrawBCC4", "BL", 0x480652E5),
+                (0x8000BCC8, "diagnosticNormalDrawBCC8", "BL", 0x48037E91),
+                (0x8000BCD0, "diagnosticNormalDrawBCD0", "BL", 0x480652D9),
                 (0x8000B360, "diagnosticOrthoReset", "BL", 0x4BFFC59D),
                 (0x8000B5EC, "diagnosticPreMainUpdate", "BL", 0x4BFFF6B9),
                 (0x8000B608, "diagnosticPostMainUpdate", "BL", 0x4BFFC9FD),
@@ -122,7 +171,13 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kHeapMetadataStart = 0x3Cu", STATE_SOURCE)
         self.assertIn("kHeapMetadataEnd = 0x84u", STATE_SOURCE)
         self.assertIn("kExpHeapAlignment = 16u", STATE_SOURCE)
-        self.assertIn("kSnapshotVersion = 4u", STATE_SOURCE)
+        self.assertIn("kSnapshotVersion = 5u", STATE_SOURCE)
+        self.assertIn("kRendererStateStart = 0x80398770u", STATE_SOURCE)
+        self.assertIn("kRendererStateEnd = 0x803989E0u", STATE_SOURCE)
+        self.assertIn(
+            "{kRendererStateStart, kRendererStateEnd - kRendererStateStart}",
+            STATE_SOURCE,
+        )
         self.assertIn("kInGameFlagsBase = 0x803C7CA0u", STATE_SOURCE)
         self.assertIn("kInGameFlagsOffset = 0x659u", STATE_SOURCE)
         self.assertIn("kInGameFlagsSize = 0x20u", STATE_SOURCE)
@@ -144,8 +199,8 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kGameSbss0End = 0x804A0C90u", STATE_SOURCE)
         self.assertIn("kGameSbss1Start = 0x804A0CB0u", STATE_SOURCE)
         self.assertIn("kGameSbss1End = 0x804A1D10u", STATE_SOURCE)
-        self.assertIn("kStateStaticsSize == 0x89C0u", STATE_SOURCE)
-        self.assertIn("kHeapDataOffset == 0x8B20u", STATE_SOURCE)
+        self.assertIn("kStateStaticsSize == 0x8C30u", STATE_SOURCE)
+        self.assertIn("kHeapDataOffset == 0x8D80u", STATE_SOURCE)
         self.assertIn("captureStaticRanges();", STATE_SOURCE)
         self.assertIn("restoreStaticRanges();", STATE_SOURCE)
         self.assertIn("storeStaticRanges();", STATE_SOURCE)
@@ -245,8 +300,10 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("postLoadMilestone(0x9Au);", DIAG_SOURCE)
         self.assertIn("postLoadMilestone(0xA0u);", DIAG_SOURCE)
         self.assertIn("postLoadMilestone(0xA2u);", DIAG_SOURCE)
-        self.assertIn("postLoadMilestone(0xA4u);", DIAG_SOURCE)
+        self.assertIn("postLoadDetail(0xA4u", DIAG_SOURCE)
         self.assertIn("postLoadMilestone(0xA6u);", DIAG_SOURCE)
+        self.assertIn("0xB0u, 0xB1u", DIAG_SOURCE)
+        self.assertIn("0xC0u, 0xC1u", DIAG_SOURCE)
 
     def test_post_load_trace_spans_multiple_restored_frames(self) -> None:
         self.assertIn("kPostLoadTraceFrameLimit = 8u", STATE_SOURCE)

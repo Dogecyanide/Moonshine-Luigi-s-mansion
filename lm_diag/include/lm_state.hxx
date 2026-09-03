@@ -24,6 +24,7 @@ void tick();
 // Together with the ARM phase journal they distinguish a restore hang in the
 // main-loop game step from any of the next eight retail presentations.
 void postLoadMilestone(u32 phase);
+void postLoadDetail(u32 phase, u32 arg0, u32 arg1);
 void presenterEnter();
 void presenterAfterSample();
 void presenterAfterDrawDone();
