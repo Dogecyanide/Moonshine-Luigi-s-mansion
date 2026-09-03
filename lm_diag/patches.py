@@ -75,6 +75,42 @@ patches = [
         "type": PatchType.BL,
         "expected": 0x4BFFC1BD,
     },
+    {
+        "lmj": 0x8000B640,
+        "sym": "diagnosticConditionalTail",
+        "type": PatchType.BL,
+        "expected": 0x4BFFC975,
+    },
+    {
+        "lmj": 0x8000B65C,
+        "sym": "diagnosticLoopTailSync",
+        "type": PatchType.BL,
+        "expected": 0x4BFFFD1D,
+    },
+    {
+        "lmj": 0x8000B660,
+        "sym": "diagnosticLoopTailClock",
+        "type": PatchType.BL,
+        "expected": 0x4BFFA7A5,
+    },
+    {
+        "lmj": 0x8000B714,
+        "sym": "diagnosticGameLoop",
+        "type": PatchType.BL,
+        "expected": 0x4BFFFDD5,
+    },
+    {
+        "lmj": 0x8000B728,
+        "sym": "diagnosticOuterCleanup",
+        "type": PatchType.BL,
+        "expected": 0x4BFFF551,
+    },
+    {
+        "lmj": 0x8000B744,
+        "sym": "diagnosticOuterRestart",
+        "type": PatchType.BL,
+        "expected": 0x4BFFA92D,
+    },
 ]
 
 # Extra clean-DOL signatures that are authenticated but left untouched.  These

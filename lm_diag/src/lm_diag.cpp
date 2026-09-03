@@ -20,6 +20,12 @@ const u32 kDirectPrintPtrAddr = 0x804A2088u;
 
 const u32 kLMFrameBeginAddr = 0x800076D8u;
 const u32 kLMChangeFrameBufferAddr = 0x800077E8u;
+const u32 kLMConditionalTailAddr = 0x80007FB4u;
+const u32 kLMGameLoopAddr = 0x8000B4E8u;
+const u32 kLMLoopTailClockAddr = 0x80005E04u;
+const u32 kLMLoopTailSyncAddr = 0x8000B378u;
+const u32 kLMOuterCleanupAddr = 0x8000AC78u;
+const u32 kLMOuterRestartAddr = 0x80006070u;
 const u32 kLMPreMainUpdateAddr = 0x8000ACA4u;
 const u32 kLMPostMainUpdateAddr = 0x80008004u;
 const u32 kLMMainSceneStepAddr = 0x8000B248u;
@@ -66,6 +72,7 @@ static_assert(kHeartbeatTop + 16u <= kXfbHeight,
 
 typedef void (*VoidFn)();
 typedef void (*VoidPtrFn)(void *);
+typedef void (*VoidU32Fn)(u32);
 typedef void (*GXCopyDispFn)(void *, bool);
 typedef void (*CacheRangeFn)(void *, u32);
 typedef void (*DirectPrintEraseFn)(void *, u16, u16, u16, u16);
@@ -253,7 +260,7 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM STATE X0.3.6 F:%s C:%s H:%s\n"
+        "LM STATE X0.3.7 F:%s C:%s H:%s\n"
         "S:%s ST%lu SZ%luK G:%s %08lX\n"
         "ROOT %08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
@@ -363,6 +370,47 @@ extern "C" void diagnosticPostMainUpdate(void *state) {
     LMState::postLoadMilestone(0x8Eu);
     reinterpret_cast<VoidPtrFn>(kLMPostMainUpdateAddr)(state);
     LMState::postLoadMilestone(0x8Fu);
+}
+
+// These execute immediately after the post-presenter transaction wrapper and
+// close the remaining blind spot before the next frame-begin milestone.
+extern "C" void diagnosticConditionalTail(void *state) {
+    LMState::postLoadMilestone(0x90u);
+    reinterpret_cast<VoidPtrFn>(kLMConditionalTailAddr)(state);
+    LMState::postLoadMilestone(0x91u);
+}
+
+extern "C" void diagnosticLoopTailSync() {
+    LMState::postLoadMilestone(0x92u);
+    reinterpret_cast<VoidFn>(kLMLoopTailSyncAddr)();
+    LMState::postLoadMilestone(0x93u);
+}
+
+extern "C" void diagnosticLoopTailClock() {
+    LMState::postLoadMilestone(0x94u);
+    reinterpret_cast<VoidFn>(kLMLoopTailClockAddr)();
+    LMState::postLoadMilestone(0x95u);
+}
+
+// If restored state makes LM leave its inner game loop, these markers follow
+// the return through the outer scene-transition path. The vtable call between
+// 0x97 and 0x98 remains deliberately unwrapped, so a final 0x97 isolates it.
+extern "C" void diagnosticGameLoop() {
+    LMState::postLoadMilestone(0x96u);
+    reinterpret_cast<VoidFn>(kLMGameLoopAddr)();
+    LMState::postLoadMilestone(0x97u);
+}
+
+extern "C" void diagnosticOuterCleanup() {
+    LMState::postLoadMilestone(0x98u);
+    reinterpret_cast<VoidFn>(kLMOuterCleanupAddr)();
+    LMState::postLoadMilestone(0x99u);
+}
+
+extern "C" void diagnosticOuterRestart(u32 heapCount) {
+    LMState::postLoadMilestone(0x9Au);
+    reinterpret_cast<VoidU32Fn>(kLMOuterRestartAddr)(heapCount);
+    LMState::postLoadMilestone(0x9Bu);
 }
 
 // Wraps both GLMJ01 GXCopyDisp call sites.  The original copy is allowed to

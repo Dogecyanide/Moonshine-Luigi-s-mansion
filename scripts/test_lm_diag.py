@@ -49,6 +49,12 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
                 (0x8000B5EC, "diagnosticPreMainUpdate", "BL", 0x4BFFF6B9),
                 (0x8000B608, "diagnosticPostMainUpdate", "BL", 0x4BFFC9FD),
                 (0x8000B62C, "diagnosticChangeFrameBuffer", "BL", 0x4BFFC1BD),
+                (0x8000B640, "diagnosticConditionalTail", "BL", 0x4BFFC975),
+                (0x8000B65C, "diagnosticLoopTailSync", "BL", 0x4BFFFD1D),
+                (0x8000B660, "diagnosticLoopTailClock", "BL", 0x4BFFA7A5),
+                (0x8000B714, "diagnosticGameLoop", "BL", 0x4BFFFDD5),
+                (0x8000B728, "diagnosticOuterCleanup", "BL", 0x4BFFF551),
+                (0x8000B744, "diagnosticOuterRestart", "BL", 0x4BFFA92D),
             ],
         )
 
@@ -182,6 +188,27 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("postLoadMilestone(0x8Au);", DIAG_SOURCE)
         self.assertIn("postLoadMilestone(0x8Cu);", DIAG_SOURCE)
         self.assertIn("postLoadMilestone(0x8Eu);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x90u);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x92u);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x94u);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x96u);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x98u);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0x9Au);", DIAG_SOURCE)
+
+    def test_post_load_trace_spans_multiple_restored_frames(self) -> None:
+        self.assertIn("kPostLoadTraceFrameLimit = 8u", STATE_SOURCE)
+        self.assertIn("u32 sPostLoadTraceFrame", STATE_SOURCE)
+        load_success = STATE_SOURCE.split(
+            "sStatus = LMState::Status::Loaded", 1
+        )[1].split("traceLoadPhase(0x7Fu", 1)[0]
+        self.assertLess(load_success.index("sPostLoadTraceFrame = 0u"),
+                        load_success.index("sPostLoadTraceState = 1u"))
+        presenter_enter = STATE_SOURCE.split("void presenterEnter()", 1)[1]
+        self.assertLess(presenter_enter.index("sPostLoadTraceFrame >="),
+                        presenter_enter.index("++sPostLoadTraceFrame"))
+        after_tick = STATE_SOURCE.split("void presenterAfterTick()", 1)[1]
+        self.assertLess(after_tick.index("tracePostLoadPhase(0x86u"),
+                        after_tick.index("sPostLoadTraceState = 1u"))
 
     def test_state_transaction_runs_after_complete_retail_presenter(self) -> None:
         wrapper = DIAG_SOURCE.split(

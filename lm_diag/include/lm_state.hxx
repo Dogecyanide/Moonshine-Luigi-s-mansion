@@ -20,9 +20,9 @@ enum class Status : u32 {
 // snapshot request. Call only after LM's complete retail presenter returns.
 void tick();
 
-// These no-op outside the first frame after a successful load. Together with
-// the ARM phase journal they distinguish a restore hang in the main-loop game
-// step from the first complete retail presenter after it.
+// These no-op outside the bounded trace window after a successful load.
+// Together with the ARM phase journal they distinguish a restore hang in the
+// main-loop game step from any of the next eight retail presentations.
 void postLoadMilestone(u32 phase);
 void presenterEnter();
 void presenterAfterSample();

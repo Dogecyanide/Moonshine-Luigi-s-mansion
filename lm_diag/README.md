@@ -11,11 +11,12 @@ unavailable. The launcher authenticates the clean DOL layout and
 every hook word before it copies or patches anything; another revision runs
 unmodified.
 
-The five overlay rows are:
+The six overlay rows are:
 
 ```text
-LM MEM DIAG 0.2.2 INJECTED F:<floor> C:<canary> H:<heap check>
-ROOT <root> <start>-<end> <size KiB>
+LM STATE X0.3.7 F:<floor> C:<canary> H:<heap check>
+S:<state status> ST<stable frames> SZ<snapshot KiB> G:<gate> <gate value>
+ROOT <root> <start>-<end>
 SYS  <system> L/T/M <largest>/<total>/<minimum total KiB>
 GAME <game>   L/T/M <largest>/<total>/<minimum total KiB>
 CUR <current> G<group> A <raw low>><raised low> H<initial high>
@@ -31,17 +32,26 @@ device (the SD card for the current `path_jp=sd:` setup). It records payload
 validation, the observed DOL tuple, every preflight word, and successful hook
 installation, giving an independent answer if the capture contains no
 checkerboard. Full-state builds also append cache-coherent `Susamune: phase`
-records while saving, loading, and returning through the first restored frame.
+records while saving, loading, and traversing the restored-frame trace window.
 The ARM writes and syncs these independently, so the last record survives a
 PowerPC hard lock that never reaches the exception dumper.
 
-For `0.3.6`, the expected first-restored-frame phase order is `80`, `88/89`,
-`8A/8B`, optionally `8C/8D`, `8E/8F`, then `81` through `86`. `80` means the
-load returned at the true post-presenter boundary. The paired values bracket
-the frame-begin, main-scene, optional pre-update, and post-update calls. `81`
-through `86` bracket the next complete presenter, diagnostic copy, and tick.
-The ARM logger may miss fast intermediate values, but an entry value remains
-the final record when its corresponding retail call hard-locks.
+For `0.3.7`, `80` means the load returned at the true post-presenter boundary.
+The immediate main-loop tail is bracketed by `90/91`, `92/93`, and `94/95`;
+the next update uses `88/89`, `8A/8B`, optionally `8C/8D`, and `8E/8F`.
+`81` through `86` bracket the following complete presenter, diagnostic copy,
+and tick. This repeats for eight restored presentations and retains the loop
+tail/update that follows the eighth. For loop markers, `arg0` is the number of
+restored presentations already completed; for `81` through `86`, it is the
+one-based presentation ordinal (`80` uses zero). The ARM logger may miss fast
+intermediate values, but an entry value remains the final record when its
+corresponding retail call hard-locks.
+
+If the inner game loop exits during that window, `96/97` identify loop
+entry/return, `98/99` bracket outer cleanup, and `9A/9B` bracket its restart.
+The invocation containing the load can only emit `97` because tracing was not
+armed at its entry. A final `97` isolates the following scene-table virtual
+call.
 
 For a useful hardware pass, capture the title screen, an active room after a
 few minutes, a room transition on the same floor, a floor transition, and the

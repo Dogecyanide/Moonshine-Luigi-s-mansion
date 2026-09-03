@@ -88,6 +88,7 @@ constexpr u32 kHeapDataOffset =
 constexpr u16 kDPadLeft = 0x0001u;
 constexpr u16 kDPadRight = 0x0002u;
 constexpr u32 kRequiredStableFrames = 3u;
+constexpr u32 kPostLoadTraceFrameLimit = 8u;
 constexpr u32 kEventStateSave = 0x100u;
 constexpr u32 kEventStateLoad = 0x101u;
 constexpr u32 kEventStateReject = 0x10Fu;
@@ -261,6 +262,7 @@ u32 sGeneration;
 u16 sPreviousButtons;
 u32 sGateValue;
 u32 sPostLoadTraceState;
+u32 sPostLoadTraceFrame;
 
 void traceSavePhase(u32 phase, u32 detail) {
     LMCrash::note(kEventStateSavePhase, phase, detail);
@@ -1094,6 +1096,7 @@ void loadState() {
         return;
     }
     sStatus = LMState::Status::Loaded;
+    sPostLoadTraceFrame = 0u;
     sPostLoadTraceState = 1u;
     traceLoadPhase(0x7Fu, header->totalSize);
     LMCrash::note(kEventStateLoad, live.heap, live.heapSize);
@@ -1123,48 +1126,55 @@ namespace LMState {
 
 void postLoadMilestone(u32 phase) {
     if (sPostLoadTraceState != 0u) {
-        tracePostLoadPhase(phase);
+        tracePostLoadPhase(phase, sPostLoadTraceFrame);
     }
 }
 
 void presenterEnter() {
     if (sPostLoadTraceState == 1u) {
-        tracePostLoadPhase(0x81u);
+        if (sPostLoadTraceFrame >= kPostLoadTraceFrameLimit) {
+            sPostLoadTraceState = 0u;
+            return;
+        }
+        ++sPostLoadTraceFrame;
+        tracePostLoadPhase(0x81u, sPostLoadTraceFrame);
         sPostLoadTraceState = 2u;
     }
 }
 
 void presenterAfterSample() {
     if (sPostLoadTraceState == 2u) {
-        tracePostLoadPhase(0x82u);
+        tracePostLoadPhase(0x82u, sPostLoadTraceFrame);
     }
 }
 
 void presenterAfterDrawDone() {
     if (sPostLoadTraceState == 2u) {
-        tracePostLoadPhase(0x83u);
+        tracePostLoadPhase(0x83u, sPostLoadTraceFrame);
     }
 }
 
 void presenterAfterRetail() {
     if (sPostLoadTraceState == 2u) {
-        tracePostLoadPhase(0x84u);
+        tracePostLoadPhase(0x84u, sPostLoadTraceFrame);
     }
 }
 
 void presenterBeforeTick() {
     if (sPostLoadTraceState == 2u) {
-        tracePostLoadPhase(0x85u);
+        tracePostLoadPhase(0x85u, sPostLoadTraceFrame);
     }
 }
 
 void presenterAfterTick() {
     if (sPostLoadTraceState == 1u) {
         // The load returned at the true post-presenter transaction boundary.
-        tracePostLoadPhase(0x80u);
+        tracePostLoadPhase(0x80u, sPostLoadTraceFrame);
     } else if (sPostLoadTraceState == 2u) {
-        tracePostLoadPhase(0x86u);
-        sPostLoadTraceState = 0u;
+        tracePostLoadPhase(0x86u, sPostLoadTraceFrame);
+        // Keep the final frame's following loop tail visible. The next
+        // presenter entry retires tracing before a ninth frame is recorded.
+        sPostLoadTraceState = 1u;
     }
 }
 
