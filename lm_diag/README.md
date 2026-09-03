@@ -11,11 +11,12 @@ unavailable. The launcher authenticates the clean DOL layout and
 every hook word before it copies or patches anything; another revision runs
 unmodified.
 
-The six overlay rows are:
+The seven overlay rows are:
 
 ```text
-LM STATE X0.3.11 F:<floor> C:<canary> H:<heap check>
+LM STATE X0.3.12 F:<floor> C:<canary> H:<heap check>
 S:<state status> ST<stable frames> SZ<snapshot KiB> G:<gate> <gate value>
+E:<first epoch field> M<mismatch mask> <saved value>><live value>
 ROOT <root> <start>-<end>
 SYS  <system> L/T/M <largest>/<total>/<minimum total KiB>
 GAME <game>   L/T/M <largest>/<total>/<minimum total KiB>
@@ -72,6 +73,25 @@ Version `0.3.11` captures the adjacent grain-effect managers at
 `0x803CBAF0-0x803CC460`. Their circular-list sentinels are static while their
 nodes live in the gameplay heap, so both sides of each list now rewind as one
 timeline.
+
+Version `0.3.12` leaves all restore gates intact and diagnoses a preflight
+`EPOCH` refusal precisely. The `E:` tag is the highest-priority differing
+field; `M` is a complete 22-bit mismatch mask; and the last two words are that
+field's saved and live values. The same record is written to `/ndebug.log` as
+`Susamune: epoch ...`, so it survives even when the overlay cannot be read.
+Mask bits from low to high are:
+
+```text
+00 MAPV  01 SCNV  02 SCNP  03 PEND  04 LOOP  05 AUDS  06 MARC
+07 VOLN  08 VOLH  09 VOLT  10 MISS  11 GMOD  12 SIMP  13 MCOL
+14 ENTY  15 HEAP  16 HBEG  17 HEND  18 ROOT  19 SYSP  20 AUDO
+21 DRAW
+```
+
+`VOLH`, `VOLT`, and `VOLN` are the mounted-volume list head, tail, and count.
+Matching list endpoints are only coarse sentinels: they do not prove that
+interior resource or allocator nodes are unchanged. A future relaxation needs
+a full member census rather than relying on this row alone.
 
 If the inner game loop exits during that window, `96/97` identify loop
 entry/return, `98/99` bracket outer cleanup, and `9A/9B` bracket its restart.

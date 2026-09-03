@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 
 
@@ -292,6 +293,50 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("header->simpleModeler == live.simpleModeler", STATE_SOURCE)
         self.assertIn("header->mapCol == live.mapCol", STATE_SOURCE)
         self.assertIn("header->enTypesManager == live.enTypesManager", STATE_SOURCE)
+
+    def test_cross_room_epoch_diagnostic_contract(self) -> None:
+        self.assertIn(
+            "#define SUSAMUNE_LM_EPOCH_PHASE_FLAG      0x80000000u",
+            CRASH_HEADER,
+        )
+        self.assertIn(
+            "#define SUSAMUNE_LM_EPOCH_MASK            0x003FFFFFu",
+            CRASH_HEADER,
+        )
+        fields = (
+            "MAP_VALUE", "SCENE_VALUE", "CURRENT_SCENE", "PENDING_SCENE",
+            "LOOP_MODE", "AUDIO_SCENE", "MAP_ARCHIVE", "VOLUME_COUNT",
+            "VOLUME_HEAD", "VOLUME_TAIL", "MISSION_MODE", "GAME_MODE",
+            "SIMPLE_MODELER", "MAP_COL", "EN_TYPES", "GAME_HEAP",
+            "GAME_HEAP_START", "GAME_HEAP_END", "ROOT_HEAP", "SYSTEM_HEAP",
+            "AUDIO_BASIC", "DRAW_STATE",
+        )
+        for field in fields:
+            self.assertIn(f"SUSAMUNE_LM_EPOCH_{field}", CRASH_HEADER)
+        definitions = re.findall(
+            r"#define\s+SUSAMUNE_LM_EPOCH_([A-Z_]+)\s+\(1u << (\d+)\)",
+            CRASH_HEADER,
+        )
+        self.assertEqual(definitions, list(zip(fields, map(str, range(22)))))
+        self.assertIn("struct EpochMismatch", STATE_SOURCE)
+        self.assertIn("collectPreflightEpochMismatch", STATE_SOURCE)
+        self.assertIn("mismatch->mask |= field;", STATE_SOURCE)
+        self.assertIn("sEpochMismatch = mismatch;", STATE_SOURCE)
+        self.assertIn(
+            "SUSAMUNE_LM_EPOCH_PHASE_FLAG | mismatch.mask", STATE_SOURCE
+        )
+        self.assertEqual(STATE_SOURCE.count("clearEpochMismatch();"), 2)
+        self.assertIn('return "VOLN";', STATE_SOURCE)
+        self.assertIn('return "SCNP";', STATE_SOURCE)
+        self.assertIn("u32 epochMask()", STATE_SOURCE)
+        self.assertIn("u32 epochSaved()", STATE_SOURCE)
+        self.assertIn("u32 epochLive()", STATE_SOURCE)
+        self.assertIn("Susamune: epoch mask=%08X first=%s", KERNEL_CRASH_SOURCE)
+        self.assertIn("LMEpochFieldName(mask)", KERNEL_CRASH_SOURCE)
+        self.assertIn("LM STATE X0.3.12", DIAG_SOURCE)
+        self.assertIn(
+            '"E:%s M%08lX %08lX>%08lX"', DIAG_SOURCE
+        )
 
     def test_state_quiesces_audio_and_scheduler(self) -> None:
         self.assertIn("kAudioBasicGlobal = 0x804A1DD0u", STATE_SOURCE)

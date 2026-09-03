@@ -109,6 +109,33 @@ static const char *PhaseActionName(u32 action)
 	return "unknown";
 }
 
+static const char *LMEpochFieldName(u32 mask)
+{
+	if (mask & SUSAMUNE_LM_EPOCH_MAP_VALUE) return "MAPV";
+	if (mask & SUSAMUNE_LM_EPOCH_SCENE_VALUE) return "SCNV";
+	if (mask & SUSAMUNE_LM_EPOCH_CURRENT_SCENE) return "SCNP";
+	if (mask & SUSAMUNE_LM_EPOCH_PENDING_SCENE) return "PEND";
+	if (mask & SUSAMUNE_LM_EPOCH_LOOP_MODE) return "LOOP";
+	if (mask & SUSAMUNE_LM_EPOCH_AUDIO_SCENE) return "AUDS";
+	if (mask & SUSAMUNE_LM_EPOCH_MAP_ARCHIVE) return "MARC";
+	if (mask & SUSAMUNE_LM_EPOCH_VOLUME_COUNT) return "VOLN";
+	if (mask & SUSAMUNE_LM_EPOCH_VOLUME_HEAD) return "VOLH";
+	if (mask & SUSAMUNE_LM_EPOCH_VOLUME_TAIL) return "VOLT";
+	if (mask & SUSAMUNE_LM_EPOCH_MISSION_MODE) return "MISS";
+	if (mask & SUSAMUNE_LM_EPOCH_GAME_MODE) return "GMOD";
+	if (mask & SUSAMUNE_LM_EPOCH_SIMPLE_MODELER) return "SIMP";
+	if (mask & SUSAMUNE_LM_EPOCH_MAP_COL) return "MCOL";
+	if (mask & SUSAMUNE_LM_EPOCH_EN_TYPES) return "ENTY";
+	if (mask & SUSAMUNE_LM_EPOCH_GAME_HEAP) return "HEAP";
+	if (mask & SUSAMUNE_LM_EPOCH_GAME_HEAP_START) return "HBEG";
+	if (mask & SUSAMUNE_LM_EPOCH_GAME_HEAP_END) return "HEND";
+	if (mask & SUSAMUNE_LM_EPOCH_ROOT_HEAP) return "ROOT";
+	if (mask & SUSAMUNE_LM_EPOCH_SYSTEM_HEAP) return "SYSP";
+	if (mask & SUSAMUNE_LM_EPOCH_AUDIO_BASIC) return "AUDO";
+	if (mask & SUSAMUNE_LM_EPOCH_DRAW_STATE) return "DRAW";
+	return "NONE";
+}
+
 static void PollPhaseTrace(void)
 {
 	struct SusamunePhaseTrace snapshot;
@@ -119,6 +146,14 @@ static void PollPhaseTrace(void)
 		snapshot.sequenceBegin == LastPhaseSequence)
 		return;
 	LastPhaseSequence = snapshot.sequenceBegin;
+	if (snapshot.action == SUSAMUNE_PHASE_ACTION_LOAD &&
+		(snapshot.phase & SUSAMUNE_LM_EPOCH_PHASE_FLAG)) {
+		u32 mask = snapshot.phase & SUSAMUNE_LM_EPOCH_MASK;
+		dbgprintf("Susamune: epoch mask=%08X first=%s "
+			"saved=%08X live=%08X\r\n",
+			mask, LMEpochFieldName(mask), snapshot.arg0, snapshot.arg1);
+		return;
+	}
 	dbgprintf("Susamune: phase seq=%u action=%s(%u) phase=%02X "
 		"arg0=%08X arg1=%08X\r\n",
 		snapshot.sequenceBegin, PhaseActionName(snapshot.action),

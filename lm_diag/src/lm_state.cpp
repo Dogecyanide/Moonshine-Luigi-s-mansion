@@ -356,9 +356,16 @@ enum class Gate : u32 {
     Audio,
 };
 
+struct EpochMismatch {
+    u32 mask;
+    u32 saved;
+    u32 live;
+};
+
 LMState::Status sStatus = LMState::Status::Empty;
 LiveIdentity sLastIdentity = {};
 Gate sGate = Gate::Boot;
+EpochMismatch sEpochMismatch = {};
 bool sHaveIdentity;
 bool sSlotInitialized;
 u32 sStableFrames;
@@ -805,6 +812,91 @@ void setReject(LMState::Status status, u32 detail) {
     LMCrash::note(kEventStateReject, static_cast<u32>(status), detail);
 }
 
+void clearEpochMismatch(EpochMismatch *mismatch) {
+    mismatch->mask = 0u;
+    mismatch->saved = 0u;
+    mismatch->live = 0u;
+}
+
+void clearEpochMismatch() {
+    clearEpochMismatch(&sEpochMismatch);
+}
+
+void addEpochMismatch(EpochMismatch *mismatch, u32 field, u32 saved,
+                      u32 live) {
+    if (saved == live) {
+        return;
+    }
+    if (mismatch->mask == 0u) {
+        mismatch->saved = saved;
+        mismatch->live = live;
+    }
+    mismatch->mask |= field;
+}
+
+void collectPreflightEpochMismatch(EpochMismatch *mismatch,
+                                   const SnapshotHeader *header,
+                                   const LiveIdentity &live) {
+    clearEpochMismatch(mismatch);
+    // The order is intentional: the first saved/live pair should describe the
+    // most useful high-level cause while the mask still reports every change.
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_MAP_VALUE,
+                     header->mapValue, live.mapValue);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_SCENE_VALUE,
+                     header->sceneValue, live.sceneValue);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_CURRENT_SCENE,
+                     header->currentScene, live.currentScene);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_PENDING_SCENE,
+                     header->mainLoopPendingScene,
+                     live.mainLoopPendingScene);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_LOOP_MODE,
+                     header->mainLoopMode, live.mainLoopMode);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_AUDIO_SCENE,
+                     header->audioScene, live.audioScene);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_MAP_ARCHIVE,
+                     header->mapArchive, live.mapArchive);
+    // JKRFileLoader::sVolumeList is {head, tail, count}. Cardinality is the
+    // clearest first clue, followed by endpoint replacement or reordering.
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_VOLUME_COUNT,
+                     header->volume[2], live.volume[2]);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_VOLUME_HEAD,
+                     header->volume[0], live.volume[0]);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_VOLUME_TAIL,
+                     header->volume[1], live.volume[1]);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_MISSION_MODE,
+                     header->missionMode, live.missionMode);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_GAME_MODE,
+                     header->gameMode, live.gameMode);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_SIMPLE_MODELER,
+                     header->simpleModeler, live.simpleModeler);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_MAP_COL,
+                     header->mapCol, live.mapCol);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_EN_TYPES,
+                     header->enTypesManager, live.enTypesManager);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_GAME_HEAP,
+                     header->heap, live.heap);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_GAME_HEAP_START,
+                     header->heapStart, live.heapStart);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_GAME_HEAP_END,
+                     header->heapEnd, live.heapEnd);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_ROOT_HEAP,
+                     header->rootHeap, live.rootHeap);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_SYSTEM_HEAP,
+                     header->systemHeap, live.systemHeap);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_AUDIO_BASIC,
+                     header->audioBasic, live.audioBasic);
+    addEpochMismatch(mismatch, SUSAMUNE_LM_EPOCH_DRAW_STATE,
+                     header->mainDrawState, live.mainDrawState);
+}
+
+void rejectEpoch(const EpochMismatch &mismatch) {
+    sEpochMismatch = mismatch;
+    LMCrash::phase(SUSAMUNE_PHASE_ACTION_LOAD,
+                   SUSAMUNE_LM_EPOCH_PHASE_FLAG | mismatch.mask,
+                   mismatch.saved, mismatch.live);
+    setReject(LMState::Status::Epoch, mismatch.mask);
+}
+
 bool basicHeaderValid(const SnapshotHeader *header) {
     if (header->magic != kSnapshotMagic ||
         header->version != kSnapshotVersion ||
@@ -955,6 +1047,7 @@ bool savedPointerCompatible(u32 saved, u32 current,
 }
 
 void saveState() {
+    clearEpochMismatch();
     traceSavePhase(0x01u, sStableFrames);
     LiveIdentity preflight;
     if (sStableFrames < kRequiredStableFrames ||
@@ -1094,6 +1187,7 @@ void saveState() {
 }
 
 void loadState() {
+    clearEpochMismatch();
     traceLoadPhase(0x01u, sStableFrames);
     SnapshotHeader *header =
         reinterpret_cast<SnapshotHeader *>(kSnapshotBase);
@@ -1125,36 +1219,26 @@ void loadState() {
         setReject(LMState::Status::Busy, sStableFrames);
         return;
     }
-    if (header->heap != preflight.heap ||
-        header->heapStart != preflight.heapStart ||
-        header->heapEnd != preflight.heapEnd ||
-        header->rootHeap != preflight.rootHeap ||
-        header->systemHeap != preflight.systemHeap ||
-        header->missionMode != preflight.missionMode ||
-        header->mapArchive != preflight.mapArchive ||
-        header->mapValue != preflight.mapValue ||
-        header->sceneValue != preflight.sceneValue ||
-        header->currentScene != preflight.currentScene ||
-        header->gameMode != preflight.gameMode ||
-        header->audioBasic != preflight.audioBasic ||
-        header->audioScene != preflight.audioScene ||
-        header->mainLoopMode != preflight.mainLoopMode ||
-        header->mainLoopPendingScene != preflight.mainLoopPendingScene ||
-        header->mainDrawState != preflight.mainDrawState ||
-        header->simpleModeler != preflight.simpleModeler ||
-        header->mapCol != preflight.mapCol ||
-        header->enTypesManager != preflight.enTypesManager ||
-        header->volume[0] != preflight.volume[0] ||
-        header->volume[1] != preflight.volume[1] ||
-        header->volume[2] != preflight.volume[2]) {
-        setReject(LMState::Status::Epoch, preflight.heap);
+    EpochMismatch mismatch;
+    collectPreflightEpochMismatch(&mismatch, header, preflight);
+    if (mismatch.mask != 0u) {
+        rejectEpoch(mismatch);
         return;
     }
-    if (!savedPointerCompatible(header->currentScene,
-                                readWord(kCurrentSceneGlobal), header) ||
-        !savedPointerCompatible(header->gameMode, readWord(kGameModeGlobal),
+    const u32 liveCurrentScene = readWord(kCurrentSceneGlobal);
+    const u32 liveGameMode = readWord(kGameModeGlobal);
+    clearEpochMismatch(&mismatch);
+    if (!savedPointerCompatible(header->currentScene, liveCurrentScene,
                                 header)) {
-        setReject(LMState::Status::Epoch, header->currentScene);
+        addEpochMismatch(&mismatch, SUSAMUNE_LM_EPOCH_CURRENT_SCENE,
+                         header->currentScene, liveCurrentScene);
+    }
+    if (!savedPointerCompatible(header->gameMode, liveGameMode, header)) {
+        addEpochMismatch(&mismatch, SUSAMUNE_LM_EPOCH_GAME_MODE,
+                         header->gameMode, liveGameMode);
+    }
+    if (mismatch.mask != 0u) {
+        rejectEpoch(mismatch);
         return;
     }
     if (!heapsHealthy(preflight)) {
@@ -1169,8 +1253,20 @@ void loadState() {
     }
     traceLoadPhase(0x21u, preflight.audioBasic);
     LiveIdentity before;
-    if (!buildIdentity(&before) || !ioIdle() ||
-        !headerMatchesLive(header, before) || !heapsHealthy(before)) {
+    if (!buildIdentity(&before) || !ioIdle()) {
+        setReject(LMState::Status::Epoch, preflight.heap);
+        return;
+    }
+    if (!headerMatchesLive(header, before)) {
+        collectPreflightEpochMismatch(&mismatch, header, before);
+        if (mismatch.mask != 0u) {
+            rejectEpoch(mismatch);
+        } else {
+            setReject(LMState::Status::Epoch, preflight.heap);
+        }
+        return;
+    }
+    if (!heapsHealthy(before)) {
         setReject(LMState::Status::Epoch, preflight.heap);
         return;
     }
@@ -1453,6 +1549,67 @@ const char *gateText() {
 
 u32 gateValue() {
     return sGateValue;
+}
+
+const char *epochText() {
+    const u32 mask = sEpochMismatch.mask;
+    if (mask & SUSAMUNE_LM_EPOCH_MAP_VALUE)
+        return "MAPV";
+    if (mask & SUSAMUNE_LM_EPOCH_SCENE_VALUE)
+        return "SCNV";
+    if (mask & SUSAMUNE_LM_EPOCH_CURRENT_SCENE)
+        return "SCNP";
+    if (mask & SUSAMUNE_LM_EPOCH_PENDING_SCENE)
+        return "PEND";
+    if (mask & SUSAMUNE_LM_EPOCH_LOOP_MODE)
+        return "LOOP";
+    if (mask & SUSAMUNE_LM_EPOCH_AUDIO_SCENE)
+        return "AUDS";
+    if (mask & SUSAMUNE_LM_EPOCH_MAP_ARCHIVE)
+        return "MARC";
+    if (mask & SUSAMUNE_LM_EPOCH_VOLUME_COUNT)
+        return "VOLN";
+    if (mask & SUSAMUNE_LM_EPOCH_VOLUME_HEAD)
+        return "VOLH";
+    if (mask & SUSAMUNE_LM_EPOCH_VOLUME_TAIL)
+        return "VOLT";
+    if (mask & SUSAMUNE_LM_EPOCH_MISSION_MODE)
+        return "MISS";
+    if (mask & SUSAMUNE_LM_EPOCH_GAME_MODE)
+        return "GMOD";
+    if (mask & SUSAMUNE_LM_EPOCH_SIMPLE_MODELER)
+        return "SIMP";
+    if (mask & SUSAMUNE_LM_EPOCH_MAP_COL)
+        return "MCOL";
+    if (mask & SUSAMUNE_LM_EPOCH_EN_TYPES)
+        return "ENTY";
+    if (mask & SUSAMUNE_LM_EPOCH_GAME_HEAP)
+        return "HEAP";
+    if (mask & SUSAMUNE_LM_EPOCH_GAME_HEAP_START)
+        return "HBEG";
+    if (mask & SUSAMUNE_LM_EPOCH_GAME_HEAP_END)
+        return "HEND";
+    if (mask & SUSAMUNE_LM_EPOCH_ROOT_HEAP)
+        return "ROOT";
+    if (mask & SUSAMUNE_LM_EPOCH_SYSTEM_HEAP)
+        return "SYSP";
+    if (mask & SUSAMUNE_LM_EPOCH_AUDIO_BASIC)
+        return "AUDO";
+    if (mask & SUSAMUNE_LM_EPOCH_DRAW_STATE)
+        return "DRAW";
+    return "NONE";
+}
+
+u32 epochMask() {
+    return sEpochMismatch.mask;
+}
+
+u32 epochSaved() {
+    return sEpochMismatch.saved;
+}
+
+u32 epochLive() {
+    return sEpochMismatch.live;
 }
 
 }  // namespace LMState

@@ -38,6 +38,10 @@ u32 snapshotKiB();
 u32 stableFrames();
 const char *gateText();
 u32 gateValue();
+const char *epochText();
+u32 epochMask();
+u32 epochSaved();
+u32 epochLive();
 
 }  // namespace LMState
 

@@ -267,17 +267,25 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM STATE X0.3.11 F:%s C:%s H:%s\n"
-        "S:%s ST%lu SZ%luK G:%s %08lX\n"
+        "LM STATE X0.3.12 F:%s C:%s H:%s",
+        status(sFloorObserved, sFloorOk), status(sCanaryReady, sCanaryOk),
+        status(sHeapCheckReady, sHeapCheckOk));
+    reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
+        directPrint, 2, kPanelTop + 9u,
+        "S:%s ST%lu SZ%luK G:%s %08lX", LMState::statusText(),
+        LMState::stableFrames(), displayKiB(LMState::snapshotKiB() << 10),
+        LMState::gateText(), LMState::gateValue());
+    reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
+        directPrint, 2, kPanelTop + 16u,
+        "E:%s M%08lX %08lX>%08lX", LMState::epochText(),
+        LMState::epochMask(), LMState::epochSaved(), LMState::epochLive());
+    reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
+        directPrint, 2, kPanelTop + 23u,
         "ROOT %08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
         "GAME %08lX L/T/M %lu/%lu/%luK\n"
         "CUR %08lX G%lu A %08lX>%08lX H%08lX",
-        status(sFloorObserved, sFloorOk), status(sCanaryReady, sCanaryOk),
-        status(sHeapCheckReady, sHeapCheckOk), LMState::statusText(),
-        LMState::stableFrames(), displayKiB(LMState::snapshotKiB() << 10),
-        LMState::gateText(), LMState::gateValue(), root, rootStart, rootEnd,
-        system.pointer,
+        root, rootStart, rootEnd, system.pointer,
         displayKiB(system.largestFree), displayKiB(system.totalFree),
         displayKiB(sSystemMinimum), game.pointer,
         displayKiB(game.largestFree), displayKiB(game.totalFree),
