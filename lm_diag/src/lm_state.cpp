@@ -31,9 +31,28 @@ constexpr u32 kRandomStateGlobal = 0x804A0B30u;
 constexpr u32 kSceneValueGlobal = 0x804A0C20u;
 constexpr u32 kMapValueGlobal = 0x804A0C48u;
 constexpr u32 kCurrentSceneGlobal = 0x80498B18u;
+constexpr u32 kMainLoopStateBase = 0x80398A40u;
+constexpr u32 kMainLoopModeGlobal = kMainLoopStateBase;
+constexpr u32 kMainLoopPendingSceneGlobal = kMainLoopStateBase + 4u;
+constexpr u32 kMainLoopSceneGlobal = 0x804A0C20u;
+constexpr u32 kMainDrawStateGlobal = 0x804A0C44u;
+constexpr u32 kMainLoopExitGlobal = 0x804A0C28u;
 constexpr u32 kGameModeGlobal = 0x804A17B0u;
 constexpr u32 kGameModeCountGlobal = 0x804A17B4u;
+constexpr u32 kMatrixArrayGlobal = 0x804A17B8u;
+constexpr u32 kBooleanArrayGlobal = 0x804A17BCu;
 constexpr u32 kMissionModeGlobal = 0x804A17C8u;
+constexpr u32 kSimpleModelerGlobal = 0x804A17D0u;
+constexpr u32 kMapColGlobal = 0x804A17D8u;
+constexpr u32 kEnTypesManagerGlobal = 0x804A17E8u;
+constexpr u32 kGameStaticRootGlobals[] = {
+    kMatrixArrayGlobal,
+    kBooleanArrayGlobal,
+    kMissionModeGlobal,
+    kSimpleModelerGlobal,
+    kMapColGlobal,
+    kEnTypesManagerGlobal,
+};
 constexpr u32 kVolumeListGlobal = 0x80494754u;
 constexpr u32 kPadStatusGlobal = 0x80494778u;
 constexpr u32 kDvdOutstandingGlobal = 0x80391D98u;
@@ -68,7 +87,7 @@ constexpr u32 kMem1End = 0x81800000u;
 constexpr u32 kSnapshotBase = SUSAMUNE_MEM2_SNAPSHOT_PPC_BASE;
 constexpr u32 kSnapshotCapacity = SUSAMUNE_MEM2_SNAPSHOT_SIZE;
 constexpr u32 kSnapshotMagic = 0x4C4D5354u;  // 'LMST'
-constexpr u32 kSnapshotVersion = 3u;
+constexpr u32 kSnapshotVersion = 4u;
 constexpr u32 kHeaderSize = 0x100u;
 constexpr u32 kHeapMetadataStart = 0x3Cu;
 constexpr u32 kHeapMetadataEnd = 0x84u;
@@ -80,9 +99,47 @@ constexpr u32 kHeapMetadataOffset = kHeaderSize;
 constexpr u32 kInGameFlagsBase = 0x803C7CA0u;
 constexpr u32 kInGameFlagsOffset = 0x659u;
 constexpr u32 kInGameFlagsSize = 0x20u;
+constexpr u32 kMainLoopStateSize = 0x08u;
+// Leave the live heap-group byte, fixed render-mode pointers, and sCurScene
+// outside the copy. They are exact epoch gates, not state to rewind.
+constexpr u32 kGameSdata0Start = 0x80498AF8u;
+constexpr u32 kGameSdata0End = 0x80498B18u;
+constexpr u32 kGameSdata1Start = 0x80498B20u;
+constexpr u32 kGameSdata1End = 0x804A03A8u;
+// 0x804A0BF8 is a live JUTGamePad pointer; 0x804A1D10 begins an audio list.
+constexpr u32 kGameSbss0Start = 0x804A0C00u;
+constexpr u32 kGameSbss0End = 0x804A0C90u;
+// BootScene owns 0x804A0C90-0x804A0CB0, including live picture/archive
+// pointers. MissionMode snapshots never need any part of that block.
+constexpr u32 kGameSbss1Start = 0x804A0CB0u;
+constexpr u32 kGameSbss1End = 0x804A1D10u;
+
+struct StaticRange {
+    u32 address;
+    u32 size;
+};
+
+// These audited GLMJ01 ranges exclude identified live OS, JSystem, BootScene,
+// and audio state. Only the first two words of lbl_80398A40 are scalars;
+// +0x08 begins an OSMessageQueue.
+constexpr StaticRange kStateStaticRanges[] = {
+    {kInGameFlagsBase + kInGameFlagsOffset, kInGameFlagsSize},
+    {kMainLoopStateBase, kMainLoopStateSize},
+    {kGameSdata0Start, kGameSdata0End - kGameSdata0Start},
+    {kGameSdata1Start, kGameSdata1End - kGameSdata1Start},
+    {kGameSbss0Start, kGameSbss0End - kGameSbss0Start},
+    {kGameSbss1Start, kGameSbss1End - kGameSbss1Start},
+};
+constexpr u32 kStateStaticRangeCount =
+    sizeof(kStateStaticRanges) / sizeof(kStateStaticRanges[0]);
 constexpr u32 kStateStaticsOffset =
     kHeapMetadataOffset + kHeapMetadataSize;
-constexpr u32 kStateStaticsSize = kInGameFlagsSize;
+constexpr u32 kStateStaticsSize =
+    kInGameFlagsSize + kMainLoopStateSize +
+    (kGameSdata0End - kGameSdata0Start) +
+    (kGameSdata1End - kGameSdata1Start) +
+    (kGameSbss0End - kGameSbss0Start) +
+    (kGameSbss1End - kGameSbss1Start);
 constexpr u32 kHeapDataOffset =
     (kStateStaticsOffset + kStateStaticsSize + 31u) & ~31u;
 constexpr u16 kDPadLeft = 0x0001u;
@@ -144,9 +201,17 @@ struct LiveIdentity {
     u32 currentScene;
     u32 gameMode;
     u32 gameModeCount;
+    u32 simpleModeler;
+    u32 mapCol;
+    u32 enTypesManager;
     u32 currentHeapGroup;
     u32 audioBasic;
     u32 audioScene;
+    u32 mainLoopMode;
+    u32 mainLoopPendingScene;
+    u32 mainLoopScene;
+    u32 mainDrawState;
+    u32 mainLoopExit;
 };
 
 struct SnapshotHeader {
@@ -204,12 +269,14 @@ struct SnapshotHeader {
     u32 freeTail;
     u32 usedHead;
     u32 usedTail;
-    u32 aramCount0;
-    u32 aramCount1;
-    u32 dvdOutstanding;
+    u32 mainLoopMode;
+    u32 mainLoopPendingScene;
+    u32 mainDrawState;
+    u32 simpleModeler;
+    u32 mapCol;
+    u32 enTypesManager;
     u32 audioBasic;
     u32 audioScene;
-    u32 reserved[3];
 };
 
 static_assert(sizeof(SnapshotHeader) == kHeaderSize,
@@ -219,6 +286,22 @@ static_assert(kSnapshotBase + kSnapshotCapacity ==
               "LM state must end before the config/crash mailboxes");
 static_assert((kHeapDataOffset & 31u) == 0,
               "LM heap payload must be cache-line aligned");
+static_assert(kStateStaticsSize == 0x89C0u,
+              "LM static manifest size drifted");
+static_assert(kHeapDataOffset == 0x8B20u,
+              "LM static manifest packing drifted");
+static_assert(kGameSdata0End == kCurrentSceneGlobal &&
+                  kGameSdata1Start == kCurrentSceneGlobal + 8u,
+              "LM sCurScene must remain an uncaptured epoch gate");
+static_assert(kGameSdata1End == kAudioObjectGlobal,
+              "LM game sdata must stop before live audio state");
+static_assert(kGameSbss1End < kAudioBasicGlobal,
+              "LM game sbss must stop before live audio state");
+static_assert(kMainLoopSceneGlobal == kSceneValueGlobal,
+              "LM loop scene must match the captured scene identity");
+static_assert(kMainDrawStateGlobal >= kGameSbss0Start &&
+                  kMainDrawStateGlobal + sizeof(u32) <= kGameSbss0End,
+              "LM draw state must remain inside the captured game sbss");
 
 struct FreezeState {
     bool interruptsWereEnabled;
@@ -241,7 +324,12 @@ enum class Gate : u32 {
     MissionRange,
     ModeMismatch,
     ModeCount,
+    GameRoot,
     Scene,
+    LoopMode,
+    LoopExit,
+    LoopScene,
+    DrawState,
     DvdPredicate,
     DvdCount,
     Aram0,
@@ -430,9 +518,18 @@ bool buildIdentity(LiveIdentity *identity, bool report = false) {
     identity->currentScene = readWord(kCurrentSceneGlobal);
     identity->gameMode = readWord(kGameModeGlobal);
     identity->gameModeCount = readWord(kGameModeCountGlobal);
+    identity->simpleModeler = readWord(kSimpleModelerGlobal);
+    identity->mapCol = readWord(kMapColGlobal);
+    identity->enTypesManager = readWord(kEnTypesManagerGlobal);
     identity->currentHeapGroup = readByte(kCurrentHeapGroupGlobal);
     identity->audioBasic = readWord(kAudioObjectGlobal);
     identity->audioScene = 0u;
+    identity->mainLoopMode = readWord(kMainLoopModeGlobal);
+    identity->mainLoopPendingScene =
+        readWord(kMainLoopPendingSceneGlobal);
+    identity->mainLoopScene = readWord(kMainLoopSceneGlobal);
+    identity->mainDrawState = readWord(kMainDrawStateGlobal);
+    identity->mainLoopExit = readWord(kMainLoopExitGlobal);
 
     const bool distinctHeaps = identity->rootHeap != identity->systemHeap &&
         identity->rootHeap != identity->heap &&
@@ -472,8 +569,32 @@ bool buildIdentity(LiveIdentity *identity, bool report = false) {
     if (identity->gameModeCount != 1u) {
         return gateFailure(Gate::ModeCount, identity->gameModeCount, report);
     }
+    for (u32 i = 0;
+         i < sizeof(kGameStaticRootGlobals) /
+                 sizeof(kGameStaticRootGlobals[0]);
+         ++i) {
+        const u32 root = readWord(kGameStaticRootGlobals[i]);
+        if (root != 0u &&
+            (root < identity->heapStart || root >= identity->heapEnd ||
+             (root & 3u) != 0u)) {
+            return gateFailure(Gate::GameRoot, root, report);
+        }
+    }
     if (!isMem1Range(identity->currentScene, sizeof(u32))) {
         return gateFailure(Gate::Scene, identity->currentScene, report);
+    }
+    if (identity->mainLoopMode != 2u) {
+        return gateFailure(Gate::LoopMode, identity->mainLoopMode, report);
+    }
+    if (identity->mainLoopExit != 0u) {
+        return gateFailure(Gate::LoopExit, identity->mainLoopExit, report);
+    }
+    if (identity->mainLoopPendingScene != identity->mainLoopScene) {
+        return gateFailure(Gate::LoopScene,
+                           identity->mainLoopPendingScene, report);
+    }
+    if (identity->mainDrawState > 7u) {
+        return gateFailure(Gate::DrawState, identity->mainDrawState, report);
     }
     if (identity->audioBasic != kAudioStaticObject ||
         readWord(kAudioBasicGlobal) != identity->audioBasic ||
@@ -547,6 +668,35 @@ void copyBytes(void *destination, const void *source, u32 size) {
     const volatile u8 *in = reinterpret_cast<const volatile u8 *>(source);
     for (u32 i = 0; i < size; ++i) {
         out[i] = in[i];
+    }
+}
+
+void captureStaticRanges() {
+    u32 offset = kStateStaticsOffset;
+    for (u32 i = 0; i < kStateStaticRangeCount; ++i) {
+        const StaticRange &range = kStateStaticRanges[i];
+        copyBytes(reinterpret_cast<void *>(kSnapshotBase + offset),
+                  reinterpret_cast<void *>(range.address), range.size);
+        offset += range.size;
+    }
+}
+
+void restoreStaticRanges() {
+    u32 offset = kStateStaticsOffset;
+    for (u32 i = 0; i < kStateStaticRangeCount; ++i) {
+        const StaticRange &range = kStateStaticRanges[i];
+        copyBytes(reinterpret_cast<void *>(range.address),
+                  reinterpret_cast<void *>(kSnapshotBase + offset),
+                  range.size);
+        offset += range.size;
+    }
+}
+
+void storeStaticRanges() {
+    for (u32 i = 0; i < kStateStaticRangeCount; ++i) {
+        const StaticRange &range = kStateStaticRanges[i];
+        reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
+            reinterpret_cast<void *>(range.address), range.size);
     }
 }
 
@@ -696,6 +846,9 @@ bool basicHeaderValid(const SnapshotHeader *header) {
            header->missionMode <= header->heapEnd - 0x1Cu &&
            header->gameMode == header->missionMode &&
            header->gameModeCount == 1u &&
+           header->mainLoopMode == 2u &&
+           header->mainLoopPendingScene == header->sceneValue &&
+           header->mainDrawState <= 7u &&
            isMem1Range(header->currentScene, sizeof(u32)) &&
            header->audioBasic == kAudioStaticObject &&
            header->heapMode <= 0xFFu && header->heapGroup <= 0xFFu &&
@@ -760,6 +913,12 @@ bool headerMatchesLive(const SnapshotHeader *header,
            header->currentHeapGroup == live.currentHeapGroup &&
            header->audioBasic == live.audioBasic &&
            header->audioScene == live.audioScene &&
+           header->mainLoopMode == live.mainLoopMode &&
+           header->mainLoopPendingScene == live.mainLoopPendingScene &&
+           header->mainDrawState == live.mainDrawState &&
+           header->simpleModeler == live.simpleModeler &&
+           header->mapCol == live.mapCol &&
+           header->enTypesManager == live.enTypesManager &&
            header->volume[0] == live.volume[0] &&
            header->volume[1] == live.volume[1] &&
            header->volume[2] == live.volume[2];
@@ -883,20 +1042,20 @@ void saveState() {
     header->freeTail = live.heapFreeTail;
     header->usedHead = live.heapUsedHead;
     header->usedTail = live.heapUsedTail;
-    header->aramCount0 = readWord(kAramList0Global + 8u);
-    header->aramCount1 = readWord(kAramList1Global + 8u);
-    header->dvdOutstanding = readWord(kDvdOutstandingGlobal);
+    header->mainLoopMode = live.mainLoopMode;
+    header->mainLoopPendingScene = live.mainLoopPendingScene;
+    header->mainDrawState = live.mainDrawState;
+    header->simpleModeler = live.simpleModeler;
+    header->mapCol = live.mapCol;
+    header->enTypesManager = live.enTypesManager;
     header->audioBasic = live.audioBasic;
     header->audioScene = live.audioScene;
 
     copyWords(reinterpret_cast<void *>(kSnapshotBase + kHeapMetadataOffset),
               reinterpret_cast<void *>(live.heap + kHeapMetadataStart),
               kHeapMetadataSize);
-    copyBytes(reinterpret_cast<void *>(kSnapshotBase + kStateStaticsOffset),
-              reinterpret_cast<void *>(kInGameFlagsBase +
-                                       kInGameFlagsOffset),
-              kStateStaticsSize);
-    traceSavePhase(0x63u, live.heapSize);
+    captureStaticRanges();
+    traceSavePhase(0x63u, kStateStaticsSize);
     copyWords(reinterpret_cast<void *>(kSnapshotBase + kHeapDataOffset),
               reinterpret_cast<void *>(live.heapStart), live.heapSize);
     traceSavePhase(0x64u, totalSize);
@@ -962,6 +1121,12 @@ void loadState() {
         header->gameMode != preflight.gameMode ||
         header->audioBasic != preflight.audioBasic ||
         header->audioScene != preflight.audioScene ||
+        header->mainLoopMode != preflight.mainLoopMode ||
+        header->mainLoopPendingScene != preflight.mainLoopPendingScene ||
+        header->mainDrawState != preflight.mainDrawState ||
+        header->simpleModeler != preflight.simpleModeler ||
+        header->mapCol != preflight.mapCol ||
+        header->enTypesManager != preflight.enTypesManager ||
         header->volume[0] != preflight.volume[0] ||
         header->volume[1] != preflight.volume[1] ||
         header->volume[2] != preflight.volume[2]) {
@@ -1014,31 +1179,14 @@ void loadState() {
               live.heapSize);
     traceLoadPhase(0x62u, live.heapSize);
 
-    // This is the first deliberately small static manifest: the verified
-    // room/map flag bytes and libc RNG. Root/system allocator state stays live
-    // and is an exact epoch gate above because those heaps are not rewound.
-    copyBytes(reinterpret_cast<void *>(kInGameFlagsBase +
-                                      kInGameFlagsOffset),
-              reinterpret_cast<void *>(kSnapshotBase + kStateStaticsOffset),
-              kStateStaticsSize);
+    // Restore game-owned statics but leave JAudio, JSystem, SDK, and allocator
+    // globals live. Their queues and hardware-facing state cannot be rewound.
+    restoreStaticRanges();
     writeWord(kRandomStateGlobal, header->randomState);
     traceLoadPhase(0x63u, kStateStaticsSize);
 
-    // These verified roots select the live scene inside the restored heap.
-    // MissionMode and the mounted-volume list are intentionally not rewound;
-    // they are the resource-epoch gate that makes cross-room attempts fail
-    // closed when the old room's archives are no longer mounted.
-    writeWord(kMapValueGlobal, header->mapValue);
-    writeWord(kSceneValueGlobal, header->sceneValue);
-    if (pointerInSavedHeap(header->currentScene, header) ||
-        header->currentScene == 0u) {
-        writeWord(kCurrentSceneGlobal, header->currentScene);
-    }
-    if (pointerInSavedHeap(header->gameMode, header) ||
-        header->gameMode == 0u) {
-        writeWord(kGameModeGlobal, header->gameMode);
-        writeWord(kGameModeCountGlobal, header->gameModeCount);
-    }
+    // MissionMode is captured with the game heap and mounted volumes remain an
+    // exact epoch gate because their resource backing is not rewound.
     traceLoadPhase(0x64u, header->currentScene);
 
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
@@ -1048,19 +1196,9 @@ void loadState() {
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
         reinterpret_cast<void *>(live.heapStart), live.heapSize);
     traceLoadPhase(0x66u, live.heapSize);
-    reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
-        reinterpret_cast<void *>(kInGameFlagsBase + kInGameFlagsOffset),
-        kStateStaticsSize);
+    storeStaticRanges();
     reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
         reinterpret_cast<void *>(kRandomStateGlobal), sizeof(u32));
-    reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
-        reinterpret_cast<void *>(kSceneValueGlobal), sizeof(u32));
-    reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
-        reinterpret_cast<void *>(kMapValueGlobal), sizeof(u32));
-    reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
-        reinterpret_cast<void *>(kCurrentSceneGlobal), sizeof(u32));
-    reinterpret_cast<CacheRangeFn>(kDCStoreRangeAddr)(
-        reinterpret_cast<void *>(kGameModeGlobal), sizeof(u32) * 2u);
     traceLoadPhase(0x67u, kStateStaticsSize);
     traceLoadPhase(0x68u, live.heap);
     reinterpret_cast<VoidFn>(kGXInvalidateTexAllAddr)();
@@ -1260,8 +1398,18 @@ const char *gateText() {
         return "MODE";
     case Gate::ModeCount:
         return "MCNT";
+    case Gate::GameRoot:
+        return "GROOT";
     case Gate::Scene:
         return "SCENE";
+    case Gate::LoopMode:
+        return "LOOP";
+    case Gate::LoopExit:
+        return "EXIT";
+    case Gate::LoopScene:
+        return "PEND";
+    case Gate::DrawState:
+        return "DRAW";
     case Gate::DvdPredicate:
         return "DVDP";
     case Gate::DvdCount:

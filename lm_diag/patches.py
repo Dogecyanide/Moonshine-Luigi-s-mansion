@@ -57,6 +57,33 @@ patches = [
         "type": PatchType.BL,
         "expected": 0x4BFFFD05,
     },
+    # The outer scene-step marker isolated a hard lock inside fn_8000B248.
+    # Bracket its first/last matrix upload, scene draw callback, and final
+    # orthographic reset so a no-exception FIFO stall still leaves a boundary.
+    {
+        "lmj": 0x8000B268,
+        "sym": "diagnosticFirstPosMatrix",
+        "type": PatchType.BL,
+        "expected": 0x481E99C9,
+    },
+    {
+        "lmj": 0x8000B34C,
+        "sym": "diagnosticLastNrmMatrix",
+        "type": PatchType.BL,
+        "expected": 0x481E9921,
+    },
+    {
+        "lmj": 0x8000B35C,
+        "sym": "diagnosticSceneDraw",
+        "type": PatchType.BL,
+        "expected": 0x4E800021,
+    },
+    {
+        "lmj": 0x8000B360,
+        "sym": "diagnosticOrthoReset",
+        "type": PatchType.BL,
+        "expected": 0x4BFFC59D,
+    },
     {
         "lmj": 0x8000B5EC,
         "sym": "diagnosticPreMainUpdate",
@@ -120,6 +147,10 @@ patches = [
 checks = [
     {"addr": 0x801D5B60, "expected": 0x4E800020},
     {"addr": 0x80007870, "expected": 0x481CCFC1},
+    # Bind the dynamic draw wrapper to sCurScene and Scene::mDrawFn at +0x1C.
+    {"addr": 0x8000B350, "expected": 0x806D8038},
+    {"addr": 0x8000B354, "expected": 0x8183001C},
+    {"addr": 0x8000B358, "expected": 0x7D8803A6},
     {"addr": 0x801D20B0, "expected": 0x387D0018},
     {"addr": 0x801D20B4, "expected": 0x48012849},
     {"addr": 0x801D4124, "expected": 0x800D1594},

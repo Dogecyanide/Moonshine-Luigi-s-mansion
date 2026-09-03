@@ -29,8 +29,11 @@ const u32 kLMOuterRestartAddr = 0x80006070u;
 const u32 kLMPreMainUpdateAddr = 0x8000ACA4u;
 const u32 kLMPostMainUpdateAddr = 0x80008004u;
 const u32 kLMMainSceneStepAddr = 0x8000B248u;
+const u32 kLMDefaultOrthoViewAddr = 0x800078FCu;
 const u32 kGXCopyDispAddr = 0x801F045Cu;
 const u32 kGXDrawDoneAddr = 0x801EF5F0u;
+const u32 kGXLoadPosMtxImmAddr = 0x801F4C30u;
+const u32 kGXLoadNrmMtxImmAddr = 0x801F4C6Cu;
 const u32 kDCInvalidateRangeAddr = 0x801D5DF4u;
 const u32 kDCFlushRangeAddr = 0x801D5E24u;
 const u32 kDirectPrintEraseAddr = 0x801D4294u;
@@ -73,6 +76,8 @@ static_assert(kHeartbeatTop + 16u <= kXfbHeight,
 typedef void (*VoidFn)();
 typedef void (*VoidPtrFn)(void *);
 typedef void (*VoidU32Fn)(u32);
+typedef f32 (*MatrixPtr)[4];
+typedef void (*GXLoadMtxFn)(MatrixPtr, u32);
 typedef void (*GXCopyDispFn)(void *, bool);
 typedef void (*CacheRangeFn)(void *, u32);
 typedef void (*DirectPrintEraseFn)(void *, u16, u16, u16, u16);
@@ -260,7 +265,7 @@ void drawPanel(void *directPrint, void *xfb, const HeapSample &system,
         directPrint, 0, kPanelTop, 320, 58);
     reinterpret_cast<DirectPrintDrawStringFn>(kDirectPrintDrawStringAddr)(
         directPrint, 2, kPanelTop + 2u,
-        "LM STATE X0.3.7 F:%s C:%s H:%s\n"
+        "LM STATE X0.3.8 F:%s C:%s H:%s\n"
         "S:%s ST%lu SZ%luK G:%s %08lX\n"
         "ROOT %08lX %08lX-%08lX\n"
         "SYS  %08lX L/T/M %lu/%lu/%luK\n"
@@ -358,6 +363,34 @@ extern "C" void diagnosticMainSceneStep() {
     LMState::postLoadMilestone(0x8Au);
     reinterpret_cast<VoidFn>(kLMMainSceneStepAddr)();
     LMState::postLoadMilestone(0x8Bu);
+}
+
+// Split LM's first restored draw into GX matrix setup, scene callback, and
+// projection reset. These wrappers are always transparent outside tracing.
+extern "C" void diagnosticFirstPosMatrix(MatrixPtr matrix, u32 index) {
+    LMState::postLoadMilestone(0xA0u);
+    reinterpret_cast<GXLoadMtxFn>(kGXLoadPosMtxImmAddr)(matrix, index);
+    LMState::postLoadMilestone(0xA1u);
+}
+
+extern "C" void diagnosticLastNrmMatrix(MatrixPtr matrix, u32 index) {
+    LMState::postLoadMilestone(0xA2u);
+    reinterpret_cast<GXLoadMtxFn>(kGXLoadNrmMtxImmAddr)(matrix, index);
+    LMState::postLoadMilestone(0xA3u);
+}
+
+extern "C" void diagnosticSceneDraw(void *scene) {
+    LMState::postLoadMilestone(0xA4u);
+    const u32 callback = readWord(reinterpret_cast<u32>(scene) + 0x1Cu);
+    // Retail deliberately leaves sCurScene in r3 for this dynamic call.
+    reinterpret_cast<VoidPtrFn>(callback)(scene);
+    LMState::postLoadMilestone(0xA5u);
+}
+
+extern "C" void diagnosticOrthoReset() {
+    LMState::postLoadMilestone(0xA6u);
+    reinterpret_cast<VoidFn>(kLMDefaultOrthoViewAddr)();
+    LMState::postLoadMilestone(0xA7u);
 }
 
 extern "C" void diagnosticPreMainUpdate() {

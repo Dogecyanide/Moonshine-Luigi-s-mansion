@@ -6,15 +6,16 @@ Mansion (`GLMJ01`).
 
 ## Current status
 
-`Full-State Experimental 0.3.7` is the current hardware-testable state build.
+`Full-State Experimental 0.3.8` is the current hardware-testable state build.
 
 - The custom Nintendont launcher accepts only the verified Japanese `GLMJ01`
   revision-0 executable for injection.
 - A measured 512 KiB MEM1 window holds the LM payload without patching the ISO.
 - One transactional slot uses Moonshine's protected 15.94 MiB MEM2 bank.
 - The slot captures the complete secondary gameplay heap, its allocator and
-  disposer metadata, the verified room/map flag slice, libc RNG state, and a
-  small set of verified scene roots.
+  disposer metadata, audited gameplay-static SDATA/SBSS slices with known
+  live-owned blocks excluded, the main-loop control pair, the verified
+  room/map flag slice, and libc RNG state.
 - Save/load is refused while DVD, ARAM, or memory-card work is active, while
   the heap is unstable, when a slot checksum fails, or when the observed live
   allocator/resource markers differ from the saved ones.
@@ -27,8 +28,8 @@ Mansion (`GLMJ01`).
 - A cache-coherent phase journal records the last completed save/load step in
   `/ndebug.log`, even when the PowerPC hard-locks and no exception is raised.
 - State requests run after LM's complete framebuffer/retrace routine, matching
-  Moonshine's proven post-draw timing. Additional journal markers bracket the
-  first frame and scene-update calls that consume a restored heap.
+  Moonshine's proven post-draw timing. Additional journal markers split the
+  first restored draw into matrix, scene-callback, and projection stages.
 - Post-load tracing remains armed for eight complete restored frames and also
   brackets the main-loop tail, so a delayed hard lock retains its exact frame
   number and last entered retail call.
@@ -75,7 +76,7 @@ The build emits a version-labelled tester package plus a stable compatibility
 name:
 
 ```text
-build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.7.zip
+build-lm-diag/Moonshine-Luigis-Mansion-Full-State-Experimental-0.3.8.zip
 build-lm-diag/moonshine_luigis_mansion_launcher.zip
 ```
 
@@ -99,7 +100,7 @@ disc or ISO.
 
 Back up any real memory-card data, install the four packaged files under
 `apps/moonshine_luigis_mansion/`, and launch a clean revision-0 GLMJ01 image.
-The overlay must say `LM STATE X0.3.7`; wait until `F`, `C`, `H`, and `G` are
+The overlay must say `LM STATE X0.3.8`; wait until `F`, `C`, `H`, and `G` are
 `OK` and `ST` is at least 3. If `ST` remains zero, photograph the short gate
 name and eight-digit value shown after `G:`; they identify the rejected live
 condition without weakening it.

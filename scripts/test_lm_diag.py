@@ -46,6 +46,10 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
                 (0x80007828, "diagnosticCopyDisp", "BL", 0x481E8C35),
                 (0x8000B534, "diagnosticFrameBegin", "BL", 0x4BFFC1A5),
                 (0x8000B544, "diagnosticMainSceneStep", "BL", 0x4BFFFD05),
+                (0x8000B268, "diagnosticFirstPosMatrix", "BL", 0x481E99C9),
+                (0x8000B34C, "diagnosticLastNrmMatrix", "BL", 0x481E9921),
+                (0x8000B35C, "diagnosticSceneDraw", "BL", 0x4E800021),
+                (0x8000B360, "diagnosticOrthoReset", "BL", 0x4BFFC59D),
                 (0x8000B5EC, "diagnosticPreMainUpdate", "BL", 0x4BFFF6B9),
                 (0x8000B608, "diagnosticPostMainUpdate", "BL", 0x4BFFC9FD),
                 (0x8000B62C, "diagnosticChangeFrameBuffer", "BL", 0x4BFFC1BD),
@@ -64,6 +68,9 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
             [
                 {"addr": 0x801D5B60, "expected": 0x4E800020},
                 {"addr": 0x80007870, "expected": 0x481CCFC1},
+                {"addr": 0x8000B350, "expected": 0x806D8038},
+                {"addr": 0x8000B354, "expected": 0x8183001C},
+                {"addr": 0x8000B358, "expected": 0x7D8803A6},
                 {"addr": 0x801D20B0, "expected": 0x387D0018},
                 {"addr": 0x801D20B4, "expected": 0x48012849},
                 {"addr": 0x801D4124, "expected": 0x800D1594},
@@ -115,10 +122,33 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("kHeapMetadataStart = 0x3Cu", STATE_SOURCE)
         self.assertIn("kHeapMetadataEnd = 0x84u", STATE_SOURCE)
         self.assertIn("kExpHeapAlignment = 16u", STATE_SOURCE)
-        self.assertIn("kSnapshotVersion = 3u", STATE_SOURCE)
+        self.assertIn("kSnapshotVersion = 4u", STATE_SOURCE)
         self.assertIn("kInGameFlagsBase = 0x803C7CA0u", STATE_SOURCE)
         self.assertIn("kInGameFlagsOffset = 0x659u", STATE_SOURCE)
         self.assertIn("kInGameFlagsSize = 0x20u", STATE_SOURCE)
+        self.assertIn("kMainLoopStateBase = 0x80398A40u", STATE_SOURCE)
+        self.assertIn("kMainLoopStateSize = 0x08u", STATE_SOURCE)
+        self.assertIn("kMainLoopSceneGlobal = 0x804A0C20u", STATE_SOURCE)
+        self.assertIn("kMainLoopExitGlobal = 0x804A0C28u", STATE_SOURCE)
+        self.assertIn("kMainDrawStateGlobal = 0x804A0C44u", STATE_SOURCE)
+        self.assertIn("kMatrixArrayGlobal = 0x804A17B8u", STATE_SOURCE)
+        self.assertIn("kBooleanArrayGlobal = 0x804A17BCu", STATE_SOURCE)
+        self.assertIn("kSimpleModelerGlobal = 0x804A17D0u", STATE_SOURCE)
+        self.assertIn("kMapColGlobal = 0x804A17D8u", STATE_SOURCE)
+        self.assertIn("kEnTypesManagerGlobal = 0x804A17E8u", STATE_SOURCE)
+        self.assertIn("kGameSdata0Start = 0x80498AF8u", STATE_SOURCE)
+        self.assertIn("kGameSdata0End = 0x80498B18u", STATE_SOURCE)
+        self.assertIn("kGameSdata1Start = 0x80498B20u", STATE_SOURCE)
+        self.assertIn("kGameSdata1End = 0x804A03A8u", STATE_SOURCE)
+        self.assertIn("kGameSbss0Start = 0x804A0C00u", STATE_SOURCE)
+        self.assertIn("kGameSbss0End = 0x804A0C90u", STATE_SOURCE)
+        self.assertIn("kGameSbss1Start = 0x804A0CB0u", STATE_SOURCE)
+        self.assertIn("kGameSbss1End = 0x804A1D10u", STATE_SOURCE)
+        self.assertIn("kStateStaticsSize == 0x89C0u", STATE_SOURCE)
+        self.assertIn("kHeapDataOffset == 0x8B20u", STATE_SOURCE)
+        self.assertIn("captureStaticRanges();", STATE_SOURCE)
+        self.assertIn("restoreStaticRanges();", STATE_SOURCE)
+        self.assertIn("storeStaticRanges();", STATE_SOURCE)
         self.assertIn("header->magic = 0u", STATE_SOURCE)
         self.assertIn("void initializeSlot()", STATE_SOURCE)
         self.assertIn("initializeSlot();", STATE_SOURCE)
@@ -144,6 +174,25 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn('return "CARD0";', STATE_SOURCE)
         self.assertIn('return "MODE";', STATE_SOURCE)
         self.assertIn('return "AUDIO";', STATE_SOURCE)
+        self.assertIn('return "LOOP";', STATE_SOURCE)
+        self.assertIn('return "EXIT";', STATE_SOURCE)
+        self.assertIn('return "PEND";', STATE_SOURCE)
+        self.assertIn('return "DRAW";', STATE_SOURCE)
+        self.assertIn('return "GROOT";', STATE_SOURCE)
+        self.assertIn("identity->mainLoopMode != 2u", STATE_SOURCE)
+        self.assertIn(
+            "identity->mainLoopPendingScene != identity->mainLoopScene",
+            STATE_SOURCE,
+        )
+        self.assertIn(
+            "header->mainDrawState == live.mainDrawState", STATE_SOURCE
+        )
+        self.assertIn("identity->mainDrawState > 7u", STATE_SOURCE)
+        self.assertIn("header->mainDrawState <= 7u", STATE_SOURCE)
+        self.assertIn("kGameStaticRootGlobals[i]", STATE_SOURCE)
+        self.assertIn("header->simpleModeler == live.simpleModeler", STATE_SOURCE)
+        self.assertIn("header->mapCol == live.mapCol", STATE_SOURCE)
+        self.assertIn("header->enTypesManager == live.enTypesManager", STATE_SOURCE)
 
     def test_state_quiesces_audio_and_scheduler(self) -> None:
         self.assertIn("kAudioBasicGlobal = 0x804A1DD0u", STATE_SOURCE)
@@ -194,6 +243,10 @@ class LuigiMansionDiagnosticContracts(unittest.TestCase):
         self.assertIn("postLoadMilestone(0x96u);", DIAG_SOURCE)
         self.assertIn("postLoadMilestone(0x98u);", DIAG_SOURCE)
         self.assertIn("postLoadMilestone(0x9Au);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0xA0u);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0xA2u);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0xA4u);", DIAG_SOURCE)
+        self.assertIn("postLoadMilestone(0xA6u);", DIAG_SOURCE)
 
     def test_post_load_trace_spans_multiple_restored_frames(self) -> None:
         self.assertIn("kPostLoadTraceFrameLimit = 8u", STATE_SOURCE)
